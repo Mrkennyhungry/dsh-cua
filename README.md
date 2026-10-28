@@ -2,6 +2,14 @@
 
 Windows desktop and browser automation for DSH. The Python kernel source ships inside this plugin under `kernel/dsh_desktop`; runtime setup installs only Python dependencies — the OCR and vision model weights are bundled in `vendor/weights`.
 
+**Install in one line** — paste this into **Plugins → Add plugin** in DSH, restart, then run `scripts\bootstrap.ps1` once:
+
+```
+dsh-doraemon@git+https://github.com/Mrkennyhungry/dsh-cua.git#v0.4.5
+```
+
+Or add the market index `https://raw.githubusercontent.com/Mrkennyhungry/dsh-cua/main/market/index.json` on **Plugins → Discover** and install from there. Both paths are described below.
+
 ## Install the plugin
 
 Two ways, same spec.
