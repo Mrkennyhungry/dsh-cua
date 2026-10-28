@@ -64,7 +64,10 @@ too, if you prefer environment variables), then:
    [`docs/release-v<version>.md`](release-v0.4.5.md) as the body;
 3. prints what succeeded and what to do next.
 
-Pass `-SkipNpm` or `-SkipRelease` to run only one half.
+Pass `-SkipNpm` or `-SkipRelease` to run only one half. To rewrite the body of a release
+that already exists — for instance after editing `docs/release-v0.4.5.md` — add
+`-SyncExisting`; without it an existing release is left untouched and the script only
+reports that the two differ.
 
 The repo is a git checkout with a `v0.4.5` tag; `pnpm publish` reads the working tree,
 so commit first — the script refuses to run on a dirty tree for that reason.

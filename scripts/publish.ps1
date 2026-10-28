@@ -19,6 +19,10 @@
 .PARAMETER DryRun
     Print what would happen, ask for nothing, change nothing.
 
+.PARAMETER SyncExisting
+    When the Release for this tag already exists, replace its body with
+    docs/release-v<version>.md. Without this switch an existing release is left alone.
+
 .PARAMETER Force
     Run even if the working tree is dirty (not recommended: npm publishes the worktree).
 
@@ -33,7 +37,8 @@ param(
     [switch]$SkipNpm,
     [switch]$SkipRelease,
     [switch]$DryRun,
-    [switch]$Force
+    [switch]$Force,
+    [switch]$SyncExisting
 )
 
 $ErrorActionPreference = 'Stop'
@@ -143,6 +148,33 @@ if (-not $SkipRelease) {
 
     if ($Existing) {
         Write-Ok "Release already exists: $($Existing.html_url)"
+        $Want = (Get-Content $BodyFile -Raw).Trim()
+        if (($Existing.body ?? '').Trim() -eq $Want) {
+            Write-Ok "Body matches $BodyFile."
+        }
+        elseif ($DryRun) {
+            Write-Ok "body differs from $BodyFile; -SyncExisting would PATCH it"
+        }
+        elseif (-not $SyncExisting) {
+            Write-Warn "Body differs from $BodyFile. Re-run with -SyncExisting to update it,"
+            Write-Warn "or edit the release in the web UI and paste that file."
+        }
+        else {
+            $Token = $env:GITHUB_TOKEN
+            if (-not $Token) {
+                Write-Warn "Create one at https://github.com/settings/tokens/new?scopes=repo&description=dsh-cua-release"
+                $Token = Read-Secret "GitHub token (ghp_... or github_pat_...)"
+            }
+            $Headers['Authorization'] = "Bearer $Token"
+            $Patch = @{ body = $Want } | ConvertTo-Json -Depth 3
+            try {
+                $Updated = Invoke-RestMethod -Method Patch `
+                    -Uri "https://api.github.com/repos/$RepoSlug/releases/$($Existing.id)" `
+                    -Headers $Headers -Body $Patch -ContentType 'application/json' -TimeoutSec 60
+                Write-Ok "Updated: $($Updated.html_url)"
+            }
+            catch { throw "GitHub Release update failed: $($_.Exception.Message) $($_.ErrorDetails.Message)" }
+        }
     }
     elseif ($DryRun) {
         Write-Ok "would POST /repos/$RepoSlug/releases (tag $Tag, body $BodyFile)"
