@@ -15,6 +15,22 @@ Add that line to the profile's `package.json` dependencies (or paste the same sp
 
 Requirements: Node.js >= 22, DSH >= 0.2.1-rc.2 < 0.3.0, Windows.
 
+## Install from Discover (optional)
+
+DSH ships custom plugin markets switched off. To have this plugin listed in **Plugins → Discover**:
+
+1. Open **Plugins** in the Web sidebar, choose **More** next to **Experimental plugins**, and switch on **Custom plugin markets**. The page then shows the **Installed** and **Discover** tabs.
+2. On **Discover**, add this index source:
+
+   ```
+   https://raw.githubusercontent.com/Mrkennyhungry/dsh-cua/main/market/index.json
+   ```
+
+   Mirror, if `raw.githubusercontent.com` is unreachable: `https://cdn.jsdelivr.net/gh/Mrkennyhungry/dsh-cua@main/market/index.json`.
+3. Pick **dsh-doraemon** and install version 0.4.5, then restart DSH.
+
+There is no official DSH market: Discover lists only the index sources a user adds, so the URL above is how this plugin reaches that list. The document is DSH's own `format: 1` market index, validated with `@deepseek-ai/dsh-plugin-market-index` before it was committed, and it pins an immutable commit rather than a branch.
+
 The 92 MB of ONNX weights are committed to this repository, so a fresh clone runs offline with no download step. GitHub warns above 50 MB per file; the largest file is 76.7 MB, under the 100 MB hard limit. Git LFS is deliberately not used so that installing never requires a second tool.
 
 ## Data boundary and what "success" means

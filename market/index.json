@@ -1,0 +1,76 @@
+{
+  "format": 1,
+  "title": {
+    "en": "dsh-doraemon",
+    "zh": "dsh-doraemon 桌面自动化"
+  },
+  "description": {
+    "en": "Windows desktop and browser automation for DSH, with an in-plugin Python kernel.",
+    "zh": "面向 DSH 的 Windows 桌面与浏览器自动化插件，内核随包自带。"
+  },
+  "metadata": {
+    "categories": {
+      "desktop": {
+        "title": {
+          "en": "Desktop automation",
+          "zh": "桌面自动化"
+        }
+      }
+    },
+    "labels": {
+      "windows": {
+        "title": {
+          "en": "Windows",
+          "zh": "Windows"
+        }
+      }
+    }
+  },
+  "plugins": [
+    {
+      "name": "dsh-doraemon",
+      "title": {
+        "en": "Doraemon",
+        "zh": "Doraemon 桌面自动化"
+      },
+      "description": {
+        "en": "Drive Windows apps and the browser from DSH: window binding, UIA trees, local OCR and YOLO element parsing, clicks, typing, clipboard and file drops. The bridge runs as a Python kernel owned by the plugin, with its model weights bundled, so no GPU service or external bridge is needed.",
+        "zh": "在 DSH 里操作 Windows 应用与浏览器：窗口绑定、UIA 元素树、本地 OCR/YOLO 元素解析、点击、输入、剪贴板与文件拖放。桥接内核是插件自带的 Python 进程，模型权重随包分发，不需要 GPU 服务或外部桥接程序。"
+      },
+      "icon": "./icon.png",
+      "author": "Mrkennyhungry",
+      "homepage": "https://github.com/Mrkennyhungry/dsh-cua#readme",
+      "repository": {
+        "url": "https://github.com/Mrkennyhungry/dsh-cua"
+      },
+      "metadata": {
+        "category": "desktop",
+        "keywords": [
+          "windows",
+          "desktop automation",
+          "uia",
+          "ocr",
+          "gui agent",
+          "python"
+        ],
+        "labels": [
+          "windows"
+        ]
+      },
+      "versions": [
+        {
+          "version": "0.4.5",
+          "publishTimestamp": 1793162262,
+          "source": {
+            "type": "git",
+            "url": "https://github.com/Mrkennyhungry/dsh-cua",
+            "commit": "1e234ec1fdda70d9a70ed1191d7ac327d28976f2"
+          },
+          "engines": {
+            "dsh": ">=0.2.1-rc.2 <0.3.0"
+          }
+        }
+      ]
+    }
+  ]
+}
