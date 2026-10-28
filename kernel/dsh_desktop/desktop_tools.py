@@ -1341,6 +1341,98 @@ def _desktop_crop_rect(hwnd: int, region: str) -> tuple[int, int, int, int]:
     return (clipped[0], clipped[1], clipped[2] - clipped[0], clipped[3] - clipped[1])
 
 
+def _coordinate_contract(scope: str, w: int, h: int,
+                         obs_w: Any = None, obs_h: Any = None) -> dict[str, Any]:
+    """Say once, in the payload, what an element's x/y is measured in.
+
+    Three sizes exist at the same moment: the window (frame_size), the annotated
+    observation the model may look at, and the screenshot on disk. Measured on a
+    1626px-tall window, reading the observation as if it were the window produced a
+    systematic y offset of 360px and two clicks that landed above their target. The
+    fix is not a better prompt, it is one field that makes the relationship explicit.
+    """
+
+    contract: dict[str, Any] = {
+        # The unit differs by scope and mixing them up is the misclick itself: a
+        # window-scope x/y is normalized 0-1000 for desktop_click, a desktop-scope
+        # one is an absolute screen pixel for desktop_click_screen.
+        "click_unit": "screen_pixels" if scope == "desktop" else "normalized_0_1000",
+        "click_space": "screen" if scope == "desktop" else "window",
+        "space": "screen" if scope == "desktop" else "window",
+        "window_px": {"width": int(w), "height": int(h)},
+        "rule": ("每个元素的 x/y 已是最终点击坐标，直接传给 desktop_click_screen，不要看图估算。"
+                 if scope == "desktop" else
+                 "每个元素的 x/y 已是最终点击坐标，直接传给 desktop_click，不要看图估算。"),
+    }
+    if isinstance(obs_w, (int, float)) and isinstance(obs_h, (int, float)) and obs_w and obs_h:
+        contract["observation_px"] = {"width": int(obs_w), "height": int(obs_h)}
+        contract["from_observation_px"] = {
+            "x": f"x_px / {int(obs_w)} * 1000",
+            "y": f"y_px / {int(obs_h)} * 1000",
+        }
+    return contract
+
+
+# Last observation per window, used only to judge where a click landed. Never used
+# to move the click: coordinates come from the caller or the element table.
+_LAST_OBS: dict[str, dict[str, Any]] = {}
+_OBS_TTL_SECONDS = 120
+_OBS_MAX_WINDOWS = 32
+
+
+def _remember_observation(window_id: str, elements: list[dict], scope: str = "window") -> None:
+    if scope != "window":
+        _LAST_OBS.pop(window_id, None)
+        return
+    boxes: list[tuple[float, float, float, float, str]] = []
+    for element in elements:
+        box = element.get("bbox") or []
+        if len(box) != 4:
+            continue
+        label = str(element.get("text") or element.get("caption") or "")[:24]
+        boxes.append((float(box[0]), float(box[1]), float(box[2]), float(box[3]), label))
+    _LAST_OBS[window_id] = {"boxes": boxes, "ts": time.time()}
+    if len(_LAST_OBS) > _OBS_MAX_WINDOWS:
+        for key in sorted(_LAST_OBS, key=lambda item: _LAST_OBS[item]["ts"])[:8]:
+            _LAST_OBS.pop(key, None)
+
+
+def _click_hit_note(window_id: str, x: float, y: float) -> dict[str, Any] | None:
+    """Say where a click landed, in the same terms the caller thinks in.
+
+    Before this, a click that landed 360px above its target still returned success,
+    so the only feedback was "the screen did not change" — indistinguishable from a
+    slow app, and it invited the caller to nudge the number and try again. Naming the
+    nearest element (and its coordinates) makes the correction obvious.
+    """
+
+    observation = _LAST_OBS.get(window_id)
+    if not observation or not observation["boxes"]:
+        return None
+    if time.time() - observation["ts"] > _OBS_TTL_SECONDS:
+        return None
+    nearest = None
+    for x1, y1, x2, y2, label in observation["boxes"]:
+        if x1 <= x <= x2 and y1 <= y <= y2:
+            return {"hit": label or "(无文本元素)"}
+        cx, cy = (x1 + x2) / 2, (y1 + y2) / 2
+        distance = ((x - cx) ** 2 + (y - cy) ** 2) ** 0.5
+        # Tuple slot 3 is the distance. Comparing slot 2 flattened every miss to
+        # "the element nearest the top of the screen".
+        if nearest is None or distance < nearest[3]:
+            nearest = (label, round(cx), round(cy), distance)
+    note: dict[str, Any] = {
+        "hit": None,
+        "warning": "CLICK_HIT_EMPTY",
+        "message": "这个点没落在上次 analyze 的任何元素上，多半是坐标算错了。"
+                   "不要微调数字重试：重新 analyze，直接用元素自带的 x/y。",
+    }
+    if nearest:
+        note["nearest"] = {"text": nearest[0], "x": nearest[1], "y": nearest[2],
+                           "distance": round(nearest[3])}
+    return note
+
+
 def desktop_analyze(
     window_id: str, engine: str = "", caption: bool = True,
     caption_icons: bool = False, annotate: bool = True,
@@ -1461,7 +1553,18 @@ def desktop_analyze(
         "frame_size": {"width": int(w), "height": int(h)},
         "region": {"mode": region if scope == "desktop" else "window",
                    "screen_rect": list(crop_rect) if crop_rect else None},
+        # Three sizes coexist in this result — the window, the annotated
+        # observation, and the screenshot on disk — and a caller measuring pixels
+        # off the image used to have no way to tell them apart. Measured on a
+        # 1626px-tall window, mixing them up produced a 360px y offset and two
+        # clicks that landed above their target.
+        "coordinate_contract": _coordinate_contract(scope, w, h),
     }
+    # Which tool the element x/y belongs to, said once at the top level: `space` is
+    # the scope ("desktop"/"window") and its vocabulary did not match the old
+    # per-element click.space ("screen"/"window"), which is how a screen-pixel click
+    # ended up sent to desktop_click.
+    result["click_space"] = "screen" if scope == "desktop" else "window"
     # Every element carries a ready-to-use click point, tagged with the space it
     # belongs to. Callers must not re-derive it: mixing normalized window coords
     # with screen pixels is the single most common source of misclicks.
@@ -1563,6 +1666,11 @@ def desktop_analyze(
         # ui_elements bbox values remain normalized 0-1000 over the client area.
         result["width"], result["height"] = small.shape[1], small.shape[0]
         result["source_width"], result["source_height"] = w, h
+        # The observation size only exists here; complete the contract so a caller
+        # reading pixels off `image_path` divides by the image, not the window.
+        if isinstance(result.get("coordinate_contract"), dict):
+            result["coordinate_contract"].update(
+                _coordinate_contract(scope, w, h, result["width"], result["height"]))
         ok, buf = cv2.imencode(".jpeg", small)
         if not ok:
             raise RuntimeError("jpeg_encode_failed")
@@ -1595,6 +1703,12 @@ def desktop_analyze(
             timing_ms["annotate"] = round((time.perf_counter() - stage_started) * 1000)
     timing_ms["total"] = round((time.perf_counter() - total_started) * 1000)
     result["timing_ms"] = timing_ms
+    # Remember where the elements were, so a click can say whether it landed on
+    # one of them instead of reporting success for a point in empty space.
+    try:
+        _remember_observation(window_id, elements, scope)
+    except Exception:  # noqa: BLE001
+        logger.debug("observation cache skipped", exc_info=True)
     return result
 
 
@@ -1709,6 +1823,14 @@ def desktop_click(window_id: str, x: int = -1, y: int = -1, clicks: int = 1,
     result["window_id"] = window_id
     if decided:
         result["decided"] = decided
+    # A click in empty space used to come back as plain success; name what was
+    # under the point, or what the nearest element was.
+    try:
+        note = _click_hit_note(window_id, int(x), int(y))
+    except Exception:  # noqa: BLE001
+        note = None
+    if note:
+        result["hit_check"] = note
     return result
 
 
@@ -4109,6 +4231,102 @@ def _uia_target_matches(target_hint: str, controls: list[dict[str, Any]]) -> boo
     return False
 
 
+# Control types that accept an action: click, type, toggle, select or expand.
+# Deliberately excludes containers (Pane/Group/Custom/Window/TitleBar) and
+# decoration (Image/Separator/ScrollBar), so `only_actionable=true` cuts a
+# 236-control Explorer tree down to the ~60 things that take an action.
+_UIA_ACTIONABLE_TYPES = frozenset({
+    "button", "splitbutton", "edit", "document", "menuitem", "tabitem",
+    "checkbox", "radiobutton", "combobox", "listitem", "treeitem", "hyperlink",
+    "slider", "spinner", "calendar", "dataitem", "headeritem", "thumb",
+})
+
+
+def _uia_compact_control(node: dict[str, Any]) -> dict[str, Any]:
+    """One control reduced to what an action needs: identity, type, click point.
+
+    Measured on a 236-control Explorer window: 132 B/control before, ~45 after.
+    The dropped fields are derivable (`index` is array order, `name_length` follows
+    from `name`, `bbox` center is what click uses) or almost always empty
+    (`auto_id` was blank on 220 of 236 nodes, `*_truncated` is false on nearly all).
+    """
+
+    out: dict[str, Any] = {}
+    name = str(node.get("name") or "")
+    if name:
+        out["name"] = name
+    out["type"] = str(node.get("control_type") or "")
+    box = node.get("bbox")
+    if isinstance(box, (list, tuple)) and len(box) == 4:
+        out["x"] = (int(box[0]) + int(box[2])) // 2
+        out["y"] = (int(box[1]) + int(box[3])) // 2
+    elif "x" in node and "y" in node:
+        out["x"], out["y"] = node["x"], node["y"]
+    if node.get("auto_id"):
+        out["auto_id"] = node["auto_id"]
+    value = node.get("value")
+    if value:
+        out["value"] = value
+    # Flags only when true: `false` repeated on every control is pure overhead.
+    if node.get("name_truncated"):
+        out["name_truncated"] = True
+    if node.get("value_truncated"):
+        out["value_truncated"] = True
+    return out
+
+
+def _uia_parse_types(control_types: str) -> list[str]:
+    return [part.strip().casefold() for part in re.split(r"[,;\s]+", str(control_types or "")) if part.strip()]
+
+
+def _uia_filter_controls(
+    controls: list[dict[str, Any]],
+    *,
+    control_types: str = "",
+    text_contains: str = "",
+    only_actionable: bool = False,
+    limit: int = 0,
+) -> dict[str, Any]:
+    """Narrow a walked tree before it reaches the model.
+
+    Filtering is a payload decision, not a collection one: the tree is still walked
+    whole, so a filter cannot hide a control that a deeper `max_depth` would find.
+    `scanned` reports what the walk saw; `matched` what survived the filter before
+    `limit` paged it.
+    """
+
+    wanted_types = _uia_parse_types(control_types)
+    needle = str(text_contains or "").casefold()
+    kept: list[dict[str, Any]] = []
+    for node in controls:
+        control_type = str(node.get("control_type") or "").casefold()
+        if wanted_types and control_type not in wanted_types:
+            continue
+        if only_actionable and control_type not in _UIA_ACTIONABLE_TYPES:
+            continue
+        if needle:
+            haystack = f"{node.get('name') or ''}\n{node.get('value') or ''}".casefold()
+            if needle not in haystack:
+                continue
+        kept.append(node)
+    matched = len(kept)
+    if limit and limit > 0:
+        kept = kept[:limit]
+    return {
+        "controls": kept,
+        "matched": matched,
+        "scanned": len(controls),
+        "filter": {
+            "control_types": wanted_types,
+            "text_contains": text_contains or "",
+            "only_actionable": bool(only_actionable),
+            "limit": int(limit or 0),
+            "matched": matched,
+            "scanned": len(controls),
+        },
+    }
+
+
 def _uia_walk(
 
     element, window_rect: tuple[int, int, int, int], depth: int, max_depth: int,
@@ -4279,6 +4497,8 @@ def _desktop_uia_tree_once(window_id: str, max_depth: int = 7, max_nodes: int = 
     "读取已绑定窗口的 UIA 控件树；报告截断原因和内容覆盖摘要。可提供 target_hint 启用目标匹配，"
     "最多三次渐进扩深（每次+5）/扩节点；完整树未找到目标、消息区域 UIA 覆盖稀疏或仍被截断时，"
     "在同一次工具调用内回退到 OmniParser。target_kind 可选 control、message、visual。"
+    "compact=true 时每个控件只留 name/type/x/y（有值才带 value/auto_id），体积约为完整字段的三分之一；"
+    "control_types（如 Button,Edit）、text_contains、only_actionable 用于在返回前过滤。"
 )
 def desktop_uia_tree(
     window_id: str,
@@ -4288,6 +4508,10 @@ def desktop_uia_tree(
     target_hint: str = "",
     target_kind: str = "control",
     max_attempts: int = 3,
+    compact: bool = False,
+    control_types: str = "",
+    text_contains: str = "",
+    only_actionable: bool = False,
 ) -> dict:
 
     target_kind = str(target_kind or "control").strip().lower()
@@ -4334,8 +4558,14 @@ def desktop_uia_tree(
     attempts: list[dict[str, Any]] = []
     last_tree: dict[str, Any] | None = None
     target_found = False
+    filtering = bool(_uia_parse_types(control_types) or text_contains or only_actionable)
     for _attempt in range(attempt_limit):
-        tree = _desktop_uia_tree_once(window_id, max_depth=depth, max_nodes=node_limit)
+        # A filter is applied after the walk, so the walk needs headroom: with
+        # only_actionable on a 236-control window the first 120 nodes are mostly
+        # panes, and a budget of 120 would return a handful of buttons and pretend
+        # the rest do not exist.
+        scan_limit = min(max(node_limit * 8, 600), 4000) if filtering else node_limit
+        tree = _desktop_uia_tree_once(window_id, max_depth=depth, max_nodes=scan_limit)
         last_tree = tree
         if not tree.get("success"):
             attempts.append({"error": tree.get("error", "UIA_FAILED")})
@@ -4374,14 +4604,41 @@ def desktop_uia_tree(
         needs_visual_fallback = True
 
     if target_found or not needs_visual_fallback:
-        return {
-            **last_tree,
+        tree = last_tree or {}
+        selection = _uia_filter_controls(
+            tree.get("controls") or [],
+            control_types=control_types,
+            text_contains=text_contains,
+            only_actionable=only_actionable,
+            limit=node_limit,
+        )
+        public = selection["controls"]
+        out = {
+            **tree,
             "method": "uia",
             "target_found": target_found,
             "uia_attempts": attempts,
 
             "uia_coverage": coverage,
+            "control_count": len(public),
+            "uia_filter": selection["filter"],
         }
+        if compact:
+            # The model only ever reads the compact form; `bbox` is kept on the
+            # internal tree because desktop_element_table and goal= positioning
+            # index it. Compacting in place instead of here silently emptied the
+            # element table once already.
+            compacted = [_uia_compact_control(node) for node in public]
+            out["controls"] = compacted
+            out["fields"] = "name/type/x/y, plus value or auto_id when present"
+            out["payload_bytes"] = len(json.dumps(compacted, ensure_ascii=False, separators=(",", ":")))
+            out["payload_bytes_full"] = len(json.dumps(public, ensure_ascii=False, separators=(",", ":")))
+            out["hint"] = ("每个控件只有 name/type/x/y（有值时才带 value/auto_id）："
+                           "x/y 已是可直接传给 desktop_click 的窗口归一化点击点，不要再按 bbox 自己算中心。"
+                           "控件多时用 control_types / text_contains / only_actionable 收窄。")
+        else:
+            out["controls"] = public
+        return out
 
     analysis = desktop_analyze(window_id, caption=False, annotate=False)
     return {

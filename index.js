@@ -474,14 +474,17 @@ export function apply(ctx, config) {
 
   register(defineTool({
     name: 'doraemon_uia',
-    description: 'First-line observation for native desktop controls: read UIA names, values and rectangles without a screenshot. Set target_hint to the control/message you need; the kernel progressively checks UIA and, only when the target is missing or the message surface is sparse, falls back to local OCR/OmniParser in the same call. target_kind=visual requests OCR directly. This returns parsed text/boxes, not an image.',
+    description: 'First-line observation for native desktop controls: read UIA names, values and click points without a screenshot. Set target_hint to the control/message you need; the kernel progressively checks UIA and, only when the target is missing or the message surface is sparse, falls back to local OCR/OmniParser in the same call. target_kind=visual requests OCR directly. Controls come back compact — name/type/x/y, plus value or auto_id only when present — so a 236-control window stays readable; narrow it with control_types, text_contains or only_actionable. This returns parsed text/boxes, not an image.',
     parameters: {
       window_id: windowIdParameter,
       max_depth: { type: 'number', description: 'Tree depth limit, 1–20 (default 7).' },
-      max_nodes: { type: 'number', description: 'Node budget, 10–500 (default 120).' },
+      max_nodes: { type: 'number', description: 'Node budget, 10–500 (default 120). With a filter the scan gets 8x headroom and the filter pages the result.' },
       target_hint: { type: 'string', description: 'Optional target label or text to look for. With a target, UIA expands progressively and falls back to OCR if the target is absent.' },
       target_kind: { type: 'string', description: 'control (default), message (message surface may be OCR-only), or visual (run local OCR directly).' },
       max_attempts: { type: 'number', description: 'UIA expansion attempts when target_hint is set, 1–3 (default 3).' },
+      control_types: { type: 'string', description: 'Keep only these control types, comma separated, e.g. "Button,Edit,MenuItem". Empty keeps all.' },
+      text_contains: { type: 'string', description: 'Keep only controls whose name or value contains this text (case-insensitive).' },
+      only_actionable: { type: 'boolean', description: 'Drop containers and decoration (Pane, Group, Image, ScrollBar…), keeping only controls that accept click/type/toggle/select.' },
     },
     output,
     async execute(args, exec) {
@@ -491,6 +494,9 @@ export function apply(ctx, config) {
       const targetHint = String(args.target_hint ?? '').trim()
       const targetKind = String(args.target_kind ?? 'control').toLowerCase()
       const maxAttempts = args.max_attempts === undefined ? 3 : Number(args.max_attempts)
+      const controlTypes = String(args.control_types ?? '').trim()
+      const textContains = String(args.text_contains ?? '').trim()
+      const onlyActionable = args.only_actionable === true
       if (!Number.isInteger(maxDepth) || maxDepth < 1 || maxDepth > 20) throw new Error('max_depth must be 1–20')
       if (!Number.isInteger(maxNodes) || maxNodes < 10 || maxNodes > 500) throw new Error('max_nodes must be 10–500')
       if (!['control', 'message', 'visual'].includes(targetKind)) throw new Error('target_kind must be control, message or visual')
@@ -499,6 +505,7 @@ export function apply(ctx, config) {
         body: {
           max_depth: maxDepth, max_nodes: maxNodes,
           target_hint: targetHint, target_kind: targetKind, max_attempts: maxAttempts,
+          control_types: controlTypes, text_contains: textContains, only_actionable: onlyActionable,
         },
         signal: exec.signal, timeoutMs: 60_000,
       })

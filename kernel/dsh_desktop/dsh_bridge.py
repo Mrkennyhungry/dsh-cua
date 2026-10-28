@@ -57,6 +57,48 @@ def _inflight_get(action_id: str) -> dict | None:
         return dict(entry) if entry else None
 
 
+def _compact_observation(result):
+    """Shrink an analyze result at the HTTP edge, where only the model consumes it.
+
+    Each element arrived as text/bbox/type/source/id/click{space,x,y} — 132 B for a
+    control whose actionable content is "this button, click here". `bbox` and `click`
+    are the same point computed twice, `id` is array order, `click.space` repeats the
+    document-level `space`.
+
+    This must stay at the edge: `desktop_element_table` and the `goal=` resolver read
+    the full element dicts straight from `desktop_analyze`, and an earlier attempt to
+    strip fields inside that function silently emptied the element table.
+    """
+
+    if not isinstance(result, dict):
+        return result
+    elements = result.get("ui_elements")
+    if not isinstance(elements, list):
+        return result
+    compact = []
+    for element in elements:
+        if not isinstance(element, dict):
+            continue
+        item = {"text": element.get("text", "")}
+        for key in ("type", "source", "caption"):
+            if element.get(key):
+                item[key] = element[key]
+        click = element.get("click")
+        if isinstance(click, dict) and "x" in click and "y" in click:
+            item["x"], item["y"] = click["x"], click["y"]
+        else:
+            box = element.get("bbox")
+            if isinstance(box, (list, tuple)) and len(box) == 4:
+                item["x"] = (int(box[0]) + int(box[2])) // 2
+                item["y"] = (int(box[1]) + int(box[3])) // 2
+        compact.append(item)
+    out = dict(result)
+    out["ui_elements"] = compact
+    out["payload_bytes"] = len(json.dumps(compact, ensure_ascii=False, separators=(",", ":")))
+    out["payload_bytes_full"] = len(json.dumps(elements, ensure_ascii=False, separators=(",", ":")))
+    return out
+
+
 class TaskRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     task: str = Field(min_length=1, max_length=20_000)
@@ -217,6 +259,12 @@ class UiaRequest(BaseModel):
     target_hint: str = Field(default="", max_length=120)
     target_kind: str = Field(default="control", pattern="^(control|message|visual)$")
     max_attempts: int = Field(default=3, ge=1, le=3)
+    # The HTTP surface is what the model reads, so it gets the compact payload by
+    # default; internal callers of desktop_uia_tree keep the full field set.
+    compact: bool = True
+    control_types: str = Field(default="", max_length=200)
+    text_contains: str = Field(default="", max_length=120)
+    only_actionable: bool = False
 
     @field_validator("max_depth")
     @classmethod
@@ -1019,6 +1067,7 @@ def create_router(eternity) -> APIRouter:
         result = invoke(desktop_tools.desktop_analyze, window_id, engine=req.engine, caption=req.caption,
                         caption_icons=req.caption_icons, annotate=req.annotate,
                         scope=req.scope, recover_black=req.recover_black, region=req.region)
+        result = _compact_observation(result)
         if isinstance(result, dict) and not result.get("error"):
             capture_id = uuid.uuid4().hex
             captures[window_id] = capture_id
@@ -1027,12 +1076,17 @@ def create_router(eternity) -> APIRouter:
 
     @router.post("/windows/{window_id}/uia")
     def window_uia(window_id: str, req: UiaRequest):
-        return invoke(
+        result = invoke(
             desktop_tools.desktop_uia_tree, window_id,
             max_depth=req.max_depth, max_nodes=req.max_nodes,
             target_hint=req.target_hint, target_kind=req.target_kind,
             max_attempts=req.max_attempts,
+            compact=req.compact, control_types=req.control_types,
+            text_contains=req.text_contains, only_actionable=req.only_actionable,
         )
+        if isinstance(result, dict) and isinstance(result.get("analysis"), dict):
+            result = {**result, "analysis": _compact_observation(result["analysis"])}
+        return result
 
     @router.post("/windows/{window_id}/page-cache")
     def window_page_cache(window_id: str, req: PageCacheRequest):
