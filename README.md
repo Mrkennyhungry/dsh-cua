@@ -10,6 +10,8 @@ dsh-doraemon@git+https://github.com/Mrkennyhungry/dsh-cua.git#v0.4.5
 
 Or add the market index `https://raw.githubusercontent.com/Mrkennyhungry/dsh-cua/main/market/index.json` on **Plugins → Discover** and install from there. Both paths are described below.
 
+Short on time? **[QUICKSTART.md](QUICKSTART.md)** is one screen: three prerequisites, four steps, one error message to avoid.
+
 ## Install the plugin
 
 Two ways, same spec.
@@ -36,7 +38,7 @@ A tag can be moved; where you need an immutable target, pin the commit instead:
 dsh-doraemon@git+https://github.com/Mrkennyhungry/dsh-cua.git#1e234ec1fdda70d9a70ed1191d7ac327d28976f2
 ```
 
-Requirements: Windows, Node.js >= 22, DSH >= 0.2.1-rc.2 < 0.3.0.
+**Requirements:** Windows, Node.js >= 22, and **DSH 0.2.x** — the current stable line, declared as `>=0.2.1-rc.2 <0.3.0` in `engines.dsh`. DSH enforces that range rather than ignoring it, so a 0.3 client would refuse the bundle. DSH 0.3 does not exist yet; when it ships this plugin has to be retested on it and the upper bound will move in a new release. Nothing to do until then.
 
 ## Install from Discover (optional)
 

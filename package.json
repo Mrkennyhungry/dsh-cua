@@ -22,6 +22,7 @@
     "kernel.js",
     "cordis.patch.yml",
     "README.md",
+    "QUICKSTART.md",
     "requirements.txt",
     "kernel/**/*",
     "!kernel/**/__pycache__/**",
