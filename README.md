@@ -2,6 +2,21 @@
 
 Windows desktop and browser automation for DSH. The Python kernel source ships inside this plugin under `kernel/dsh_desktop`; runtime setup installs only Python dependencies and local OCR/vision weights. The kernel is maintained and released with the plugin.
 
+## Install the plugin
+
+DSH installs plugins from a pnpm spec, so this repository can be installed directly — no npm publish step is required:
+
+```bash
+# Pin a release (recommended)
+pnpm add "dsh-doraemon@git+https://github.com/Mrkennyhungry/dsh-cua.git#v0.4.5"
+```
+
+Add that line to the profile's `package.json` dependencies (or paste the same spec into the DSH plugin install dialog), then restart DSH. The spec also accepts a commit SHA instead of a tag, which is what a market index pins.
+
+Requirements: Node.js >= 22, DSH >= 0.2.1-rc.2 < 0.3.0, Windows.
+
+The 92 MB of ONNX weights are committed to this repository, so a fresh clone runs offline with no download step. GitHub warns above 50 MB per file; the largest file is 76.7 MB, under the 100 MB hard limit. Git LFS is deliberately not used so that installing never requires a second tool.
+
 ## Data boundary and what "success" means
 
 Read [`docs/data-boundary.md`](docs/data-boundary.md) before enabling this on a machine with private content on screen. In short:
