@@ -6,8 +6,13 @@ Three channels, three different amounts of ceremony. Only the last two need a to
 |---|---|---|
 | Git install (`git+https://…#<commit>`) | an SSH key that can push | works today |
 | Plugin market index (`market/index.json`) | nothing — it is a file in this repo | live |
-| npm (`dsh-doraemon@<version>`) | a free npm account + an npm token | not yet published |
-| GitHub Release page | a GitHub token with `contents: write` | not yet created |
+| npm (`dsh-doraemon@<version>`) | a free npm account + an npm token | optional, not published |
+| GitHub Release page | a GitHub token, or the web form | live for v0.4.5 |
+
+**npm is optional.** The git spec and the market index are the supported channels and
+both work today; npm only shortens the install string to `dsh-doraemon@0.4.5` and makes
+the plugin installable from indexes that list npm packages only. Nothing about the
+plugin's behaviour depends on it.
 
 Nothing here requires a paid account. The npm registry is free for public packages,
 and this repository already exists on GitHub, so the GitHub side is a token, not a
@@ -28,6 +33,15 @@ once.
 
 Both tokens grant write access to your accounts. Do not paste them into files, issues,
 or chat logs that persist; if one leaks, delete it on the same page and make a new one.
+
+The GitHub Release needs no token at all — the web form works:
+<https://github.com/Mrkennyhungry/dsh-cua/releases/new?tag=v0.4.5>, paste
+`docs/release-v0.4.5.md` as the body. `scripts/publish.ps1` is only a convenience.
+
+If the npm **signup** page answers with a "verify you are human" wall, that is the
+signup endpoint refusing a data-centre IP, not a problem with this repository: register
+from a phone hotspot or another network, then create the token from any machine. The
+publish itself runs fine from here.
 
 ## Publish
 
