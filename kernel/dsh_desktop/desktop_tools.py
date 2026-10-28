@@ -4406,7 +4406,7 @@ def _uia_walk(
 
 
 
-def _desktop_uia_tree_once(window_id: str, max_depth: int = 7, max_nodes: int = 120) -> dict:
+def _desktop_uia_tree_once(window_id: str, max_depth: int = 7, max_nodes: int = 300) -> dict:
 
     controller = _controller()
     if controller is None:
@@ -4503,7 +4503,7 @@ def _desktop_uia_tree_once(window_id: str, max_depth: int = 7, max_nodes: int = 
 def desktop_uia_tree(
     window_id: str,
     max_depth: int = 7,
-    max_nodes: int = 120,
+    max_nodes: int = 300,
 
     target_hint: str = "",
     target_kind: str = "control",
@@ -4529,7 +4529,10 @@ def desktop_uia_tree(
 
     try:
         depth = max(2, min(int(max_depth), 10))
-        node_limit = max(20, min(int(max_nodes), 300))
+        # 600 is the ceiling because a compact control is ~60-80 B: the whole of a
+        # 236-control Explorer window now costs about what 120 full records did, and
+        # an escalated attempt can double the budget without becoming unreadable.
+        node_limit = max(20, min(int(max_nodes), 600))
         attempt_limit = max(1, min(int(max_attempts), 3))
         if not target_hint:
             attempt_limit = 1
@@ -4587,7 +4590,7 @@ def desktop_uia_tree(
 
         reasons = set(tree.get("truncation_reasons") or [])
         next_depth = min(depth + 5, 10) if "max_depth" in reasons else depth
-        next_nodes = min(max(node_limit * 2, node_limit + 20), 300) if "max_nodes" in reasons else node_limit
+        next_nodes = min(max(node_limit * 2, node_limit + 20), 600) if "max_nodes" in reasons else node_limit
         if next_depth == depth and next_nodes == node_limit:
             break
         depth, node_limit = next_depth, next_nodes

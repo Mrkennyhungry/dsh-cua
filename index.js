@@ -478,7 +478,7 @@ export function apply(ctx, config) {
     parameters: {
       window_id: windowIdParameter,
       max_depth: { type: 'number', description: 'Tree depth limit, 1–20 (default 7).' },
-      max_nodes: { type: 'number', description: 'Node budget, 10–500 (default 120). With a filter the scan gets 8x headroom and the filter pages the result.' },
+      max_nodes: { type: 'number', description: 'Node budget, 10–500 (default 300). A compact control is ~60–80 B, so 300 controls cost about what 120 full records used to; with a filter the scan gets 8x headroom and the filter pages the result.' },
       target_hint: { type: 'string', description: 'Optional target label or text to look for. With a target, UIA expands progressively and falls back to OCR if the target is absent.' },
       target_kind: { type: 'string', description: 'control (default), message (message surface may be OCR-only), or visual (run local OCR directly).' },
       max_attempts: { type: 'number', description: 'UIA expansion attempts when target_hint is set, 1–3 (default 3).' },
@@ -490,7 +490,7 @@ export function apply(ctx, config) {
     async execute(args, exec) {
       const id = boundWindowId(args.window_id)
       const maxDepth = args.max_depth === undefined ? 7 : Number(args.max_depth)
-      const maxNodes = args.max_nodes === undefined ? 120 : Number(args.max_nodes)
+      const maxNodes = args.max_nodes === undefined ? 300 : Number(args.max_nodes)
       const targetHint = String(args.target_hint ?? '').trim()
       const targetKind = String(args.target_kind ?? 'control').toLowerCase()
       const maxAttempts = args.max_attempts === undefined ? 3 : Number(args.max_attempts)

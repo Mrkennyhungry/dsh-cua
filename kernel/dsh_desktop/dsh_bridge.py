@@ -255,7 +255,7 @@ class SwipeRequest(CaptureBound):
 class UiaRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     max_depth: int = Field(default=7, ge=1)
-    max_nodes: int = Field(default=120, ge=10, le=1500)
+    max_nodes: int = Field(default=300, ge=10, le=1500)
     target_hint: str = Field(default="", max_length=120)
     target_kind: str = Field(default="control", pattern="^(control|message|visual)$")
     max_attempts: int = Field(default=3, ge=1, le=3)
