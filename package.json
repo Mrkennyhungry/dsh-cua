@@ -1,0 +1,75 @@
+{
+  "name": "dsh-doraemon",
+  "version": "0.4.5",
+  "description": "Windows desktop automation for DSH with an in-plugin Python kernel.",
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "desktop-automation",
+    "windows",
+    "uia",
+    "gui-agent"
+  ],
+  "private": false,
+  "os": [
+    "win32"
+  ],
+  "type": "module",
+  "main": "index.js",
+  "files": [
+    "index.js",
+    "bridge-client.js",
+    "kernel.js",
+    "cordis.patch.yml",
+    "README.md",
+    "requirements.txt",
+    "kernel/**/*",
+    "!kernel/**/__pycache__/**",
+    "!kernel/**/*.pyc",
+    "scripts/bootstrap.ps1",
+    "scripts/install-elevated-task.ps1",
+    "scripts/run-kernel-high.py",
+    "vendor/weights/**/*",
+    "private-knowledge/console-components.json",
+    "THIRD_PARTY_NOTICES.txt",
+    "docs/**/*"
+  ],
+  "engines": {
+    "node": ">=22",
+    "dsh": ">=0.2.1-rc.2 <0.3.0"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "~4.0.5",
+    "@deepseek-ai/dsh-tools": ">=0.2.1-rc.2 <0.3.0",
+    "@deepseek-ai/schemastery": ">=3.18.5 <4.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/cordis": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-tools": {
+      "optional": true
+    },
+    "@deepseek-ai/schemastery": {
+      "optional": true
+    }
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  },
+  "license": "MIT",
+  "author": "Mrkennyhungry",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Mrkennyhungry/dsh-cua.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Mrkennyhungry/dsh-cua/issues"
+  },
+  "homepage": "https://github.com/Mrkennyhungry/dsh-cua#readme"
+}

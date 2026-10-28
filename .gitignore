@@ -1,0 +1,40 @@
+# Runtime state: kernel token, logs, screenshots, the Python venv, model caches.
+# kernel-state.json carries the bridge bearer token and owner key — never commit it.
+.runtime/
+
+# iOA-console-only knowledge. The public package must not carry customer data.
+private-knowledge-source/
+private-knowledge/
+
+# Local build/refactor scratch
+.workbuddy-refactor-backup/
+*.tgz
+
+# Agent handoff state. NOTE: .handoff/permission-compare/*/weights are directory
+# junctions into .runtime/weights — if this is not ignored, git follows them and
+# stores four copies of the 92 MB model weights.
+.handoff/
+"*.handoff"/
+
+# WorkBuddy port scratch area (its own copy lives outside this repo)
+workbuddy/
+
+# Test caches
+.pytest_cache/
+
+# Node
+node_modules/
+npm-debug.log*
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# Editors / OS
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini

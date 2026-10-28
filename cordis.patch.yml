@@ -1,0 +1,10 @@
+# Install the bundled kernel with scripts/bootstrap.ps1 before use (see README).
+- insert:
+    - id: doraemon
+      name: dsh-doraemon
+      config:
+        tokenEnv: DSH_DESKTOP_BRIDGE_TOKEN
+        waitSeconds: 600
+        autoStart: true
+        bootSeconds: 120
+        keepAlive: true
