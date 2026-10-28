@@ -1,12 +1,12 @@
 {
   "format": 1,
   "title": {
-    "en": "dsh-doraemon",
-    "zh": "dsh-doraemon 桌面自动化"
+    "en": "Mrkennyhungry's DSH plugins",
+    "zh": "Mrkennyhungry 的 DSH 插件"
   },
   "description": {
-    "en": "Windows desktop and browser automation for DSH, with an in-plugin Python kernel.",
-    "zh": "面向 DSH 的 Windows 桌面与浏览器自动化插件，内核随包自带。"
+    "en": "An author index: Desktop automation and related bundles for DSH.",
+    "zh": "作者索引：面向 DSH 的桌面自动化及相关插件。"
   },
   "metadata": {
     "categories": {

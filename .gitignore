@@ -38,3 +38,9 @@ venv/
 .idea/
 Thumbs.db
 desktop.ini
+
+# Publish credentials: scripts/publish.ps1 writes .npmrc only for the duration of a
+# publish and deletes it in a finally block; ignoring it here is the second line of
+# defense against committing an npm token.
+.npmrc
+.npmrc.publish-backup
