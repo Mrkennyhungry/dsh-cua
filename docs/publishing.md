@@ -37,6 +37,9 @@ From the repository root:
 pwsh -File scripts\publish.ps1
 ```
 
+Or double-click `publish.bat` in the repository root — same thing, with a pause at the
+end so the window stays open.
+
 The script asks for each token at a hidden prompt (`NPM_TOKEN` / `GITHUB_TOKEN` work
 too, if you prefer environment variables), then:
 
