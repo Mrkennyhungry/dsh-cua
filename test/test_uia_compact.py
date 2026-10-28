@@ -38,13 +38,15 @@ def node(**overrides):
 class CompactControlTests(unittest.TestCase):
     def test_keeps_only_actionable_fields(self):
         out = _uia_compact_control(node())
-        self.assertEqual(out, {"name": "保存", "type": "Button", "x": 700, "y": 320})
+        self.assertEqual(out, {"name": "保存", "type": "Button", "click_x": 700, "click_y": 320})
         for dropped in ("index", "name_length", "bbox", "auto_id", "name_truncated"):
             self.assertNotIn(dropped, out)
 
     def test_click_point_is_bbox_center(self):
         out = _uia_compact_control(node(bbox=[0, 0, 1000, 500]))
-        self.assertEqual((out["x"], out["y"]), (500, 250))
+        self.assertEqual((out["click_x"], out["click_y"]), (500, 250))
+        self.assertNotIn("x", out)
+        self.assertNotIn("y", out)
 
     def test_value_and_auto_id_survive_when_present(self):
         out = _uia_compact_control(
@@ -133,7 +135,8 @@ class CompactBoundaryTests(unittest.TestCase):
         result = self.call(compact=True)
         self.assertTrue(result["success"])
         self.assertTrue(all("bbox" not in control for control in result["controls"]))
-        self.assertTrue(all("x" in control and "y" in control for control in result["controls"]))
+        self.assertTrue(all("click_x" in control and "click_y" in control for control in result["controls"]))
+        self.assertTrue(all("x" not in control and "y" not in control for control in result["controls"]))
 
     def test_internal_tree_keeps_bbox_for_the_element_table(self):
         self.call(compact=True)
@@ -177,10 +180,17 @@ class CoordinateContractTests(unittest.TestCase):
         self.assertEqual(contract["window_px"], {"width": 2148, "height": 1255})
         self.assertNotIn("observation_px", contract)
 
-    def test_contract_carries_the_observation_scale_when_known(self):
+    def test_contract_names_the_observation_size_without_a_conversion_formula(self):
         contract = desktop_tools._coordinate_contract("window", 2148, 1255, 1366, 798)
         self.assertEqual(contract["observation_px"], {"width": 1366, "height": 798})
-        self.assertEqual(contract["from_observation_px"]["y"], "y_px / 798 * 1000")
+        # The formula was removed deliberately: it invited callers to re-scale a
+        # point that was already normalized (the 2026-10-29 y=666 -> 833 misclick).
+        self.assertNotIn("from_observation_px", contract)
+
+    def test_rule_names_the_click_fields_not_bare_x_y(self):
+        contract = desktop_tools._coordinate_contract("window", 1226, 800)
+        self.assertIn("click_x/click_y", contract["rule"])
+        self.assertNotIn("元素的 x/y", contract["rule"])
 
     def test_desktop_scope_reports_screen_space(self):
         self.assertEqual(desktop_tools._coordinate_contract("desktop", 100, 100)["space"], "screen")
@@ -200,16 +210,30 @@ class ObservationCompactionTests(unittest.TestCase):
             ],
         }
 
-    def test_drops_duplicate_geometry_and_keeps_a_click_point(self):
+    def test_drops_duplicate_geometry_and_keeps_named_click_point(self):
         from dsh_desktop.dsh_bridge import _compact_observation
 
         out = _compact_observation(self.raw)
         first = out["ui_elements"][0]
-        self.assertEqual((first["x"], first["y"]), (50, 50))
+        self.assertEqual((first["click_x"], first["click_y"]), (50, 50))
         self.assertNotIn("bbox", first)
         self.assertNotIn("id", first)
         self.assertNotIn("click", first)
+        self.assertNotIn("x", first)
+        self.assertNotIn("y", first)
         self.assertEqual(out["ui_elements"][1]["caption"], "关闭")
+
+    def test_666_is_not_turned_into_833_by_the_payload(self):
+        """Live regression: a 666px-looking normalized y must stay 666."""
+        from dsh_desktop.dsh_bridge import _compact_observation
+
+        raw = {"ui_elements": [{
+            "text": "童年", "bbox": [70, 650, 125, 682],
+            "click": {"space": "window", "x": 98, "y": 666},
+        }]}
+        element = _compact_observation(raw)["ui_elements"][0]
+        self.assertEqual((element["click_x"], element["click_y"]), (98, 666))
+        self.assertNotEqual(element["click_y"], 833)
 
     def test_original_input_is_not_mutated(self):
         from dsh_desktop.dsh_bridge import _compact_observation
@@ -222,7 +246,7 @@ class ObservationCompactionTests(unittest.TestCase):
 
         raw = {"ui_elements": [{"text": "x", "bbox": [10, 20, 30, 60]}]}
         element = _compact_observation(raw)["ui_elements"][0]
-        self.assertEqual((element["x"], element["y"]), (20, 40))
+        self.assertEqual((element["click_x"], element["click_y"]), (20, 40))
 
     def test_reports_both_sizes(self):
         from dsh_desktop.dsh_bridge import _compact_observation

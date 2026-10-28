@@ -61,9 +61,14 @@ def _compact_observation(result):
     """Shrink an analyze result at the HTTP edge, where only the model consumes it.
 
     Each element arrived as text/bbox/type/source/id/click{space,x,y} — 132 B for a
-    control whose actionable content is "this button, click here". `bbox` and `click`
-    are the same point computed twice, `id` is array order, `click.space` repeats the
-    document-level `space`.
+    control whose actionable content is "this button, click here". `bbox`, `id` and
+    `click.space` are redundant, so they are dropped.
+
+    The point must keep an unambiguous name. A bare `x`/`y` here used to be read as
+    screenshot pixels and scaled a second time (2026-10-29 live: "童年" at y=666 was
+    sent as y=833, the pixels of a different playlist). `click_x`/`click_y` say what
+    the number is, so the caller cannot mistake it for a pixel coordinate merely
+    because the window happens to be 1226x800.
 
     This must stay at the edge: `desktop_element_table` and the `goal=` resolver read
     the full element dicts straight from `desktop_analyze`, and an earlier attempt to
@@ -85,12 +90,12 @@ def _compact_observation(result):
                 item[key] = element[key]
         click = element.get("click")
         if isinstance(click, dict) and "x" in click and "y" in click:
-            item["x"], item["y"] = click["x"], click["y"]
+            item["click_x"], item["click_y"] = click["x"], click["y"]
         else:
             box = element.get("bbox")
             if isinstance(box, (list, tuple)) and len(box) == 4:
-                item["x"] = (int(box[0]) + int(box[2])) // 2
-                item["y"] = (int(box[1]) + int(box[3])) // 2
+                item["click_x"] = (int(box[0]) + int(box[2])) // 2
+                item["click_y"] = (int(box[1]) + int(box[3])) // 2
         compact.append(item)
     out = dict(result)
     out["ui_elements"] = compact

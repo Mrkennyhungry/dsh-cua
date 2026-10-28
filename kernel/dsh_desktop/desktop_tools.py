@@ -1343,33 +1343,34 @@ def _desktop_crop_rect(hwnd: int, region: str) -> tuple[int, int, int, int]:
 
 def _coordinate_contract(scope: str, w: int, h: int,
                          obs_w: Any = None, obs_h: Any = None) -> dict[str, Any]:
-    """Say once, in the payload, what an element's x/y is measured in.
+    """Say once, in the payload, what an element's click point is measured in.
 
     Three sizes exist at the same moment: the window (frame_size), the annotated
     observation the model may look at, and the screenshot on disk. Measured on a
     1626px-tall window, reading the observation as if it were the window produced a
     systematic y offset of 360px and two clicks that landed above their target. The
     fix is not a better prompt, it is one field that makes the relationship explicit.
+
+    Do not publish an image-pixels-to-normalized formula here. `desktop_click_image_point`
+    performs that conversion in code; putting the formula in the observation payload
+    invited callers to re-scale `click_x`/`click_y`, which are already final.
     """
 
     contract: dict[str, Any] = {
         # The unit differs by scope and mixing them up is the misclick itself: a
-        # window-scope x/y is normalized 0-1000 for desktop_click, a desktop-scope
-        # one is an absolute screen pixel for desktop_click_screen.
+        # window-scope click point is normalized 0-1000 for desktop_click, a
+        # desktop-scope one is an absolute screen pixel for desktop_click_screen.
         "click_unit": "screen_pixels" if scope == "desktop" else "normalized_0_1000",
         "click_space": "screen" if scope == "desktop" else "window",
         "space": "screen" if scope == "desktop" else "window",
         "window_px": {"width": int(w), "height": int(h)},
-        "rule": ("每个元素的 x/y 已是最终点击坐标，直接传给 desktop_click_screen，不要看图估算。"
+        "rule": ("每个元素的 click_x/click_y 已是最终点击坐标，直接传给 desktop_click_screen，不要看图估算。"
                  if scope == "desktop" else
-                 "每个元素的 x/y 已是最终点击坐标，直接传给 desktop_click，不要看图估算。"),
+                 "每个元素的 click_x/click_y 已是最终点击坐标，直接传给 desktop_click，不要看图估算。"),
     }
     if isinstance(obs_w, (int, float)) and isinstance(obs_h, (int, float)) and obs_w and obs_h:
+        # Size only, for orientation. No conversion formula: the click point is final.
         contract["observation_px"] = {"width": int(obs_w), "height": int(obs_h)}
-        contract["from_observation_px"] = {
-            "x": f"x_px / {int(obs_w)} * 1000",
-            "y": f"y_px / {int(obs_h)} * 1000",
-        }
     return contract
 
 
@@ -1425,7 +1426,7 @@ def _click_hit_note(window_id: str, x: float, y: float) -> dict[str, Any] | None
         "hit": None,
         "warning": "CLICK_HIT_EMPTY",
         "message": "这个点没落在上次 analyze 的任何元素上，多半是坐标算错了。"
-                   "不要微调数字重试：重新 analyze，直接用元素自带的 x/y。",
+                   "不要微调数字重试：重新 analyze，直接用元素自带的 click_x/click_y。",
     }
     if nearest:
         note["nearest"] = {"text": nearest[0], "x": nearest[1], "y": nearest[2],
@@ -1625,10 +1626,10 @@ def desktop_analyze(
         # clicks that landed above their target.
         "coordinate_contract": _coordinate_contract(scope, w, h),
     }
-    # Which tool the element x/y belongs to, said once at the top level: `space` is
-    # the scope ("desktop"/"window") and its vocabulary did not match the old
-    # per-element click.space ("screen"/"window"), which is how a screen-pixel click
-    # ended up sent to desktop_click.
+    # Which tool the element click point belongs to, said once at the top level:
+    # `space` is the scope ("desktop"/"window") and its vocabulary did not match the
+    # old per-element click.space ("screen"/"window"), which is how a screen-pixel
+    # click ended up sent to desktop_click.
     result["click_space"] = "screen" if scope == "desktop" else "window"
     # Every element carries a ready-to-use click point, tagged with the space it
     # belongs to. Callers must not re-derive it: mixing normalized window coords
@@ -1650,10 +1651,11 @@ def desktop_analyze(
             element["click"] = {"space": "window", "x": ncx, "y": ncy}
     if scope == "desktop":
         result["desktop_origin"] = {"x": desktop_origin[0], "y": desktop_origin[1]}
-        result["hint"] = ("region 已裁到操作区域；元素带 click={space:'screen',x,y}，"
-                          "直接传给 desktop_click_screen(x, y)，不要用 bbox 走窗口归一化。")
+        result["hint"] = ("region 已裁到操作区域；每个元素带 click_x/click_y，"
+                          "直接传给 desktop_click_screen(click_x, click_y)，不要看图像素或 bbox 换算。")
     else:
-        result["hint"] = ("元素带 click={space:'window',x,y}，直接传给 desktop_click(x, y)。")
+        result["hint"] = ("每个元素带 click_x/click_y，直接传给 desktop_click(click_x, click_y)；"
+                          "不要除以图片宽高，也不要按 bbox 换算。")
     timing_ms["caption_icons"] = 0
 
     for key in ("parse_engine_used", "parse_fallback", "parse_fallback_error", "parse_aux_model_called"):
@@ -4344,6 +4346,9 @@ def _uia_compact_control(node: dict[str, Any]) -> dict[str, Any]:
     The dropped fields are derivable (`index` is array order, `name_length` follows
     from `name`, `bbox` center is what click uses) or almost always empty
     (`auto_id` was blank on 220 of 236 nodes, `*_truncated` is false on nearly all).
+
+    The point is named `click_x`/`click_y`, not bare `x`/`y`: the latter was read as
+    screenshot pixels and normalized a second time in live use.
     """
 
     out: dict[str, Any] = {}
@@ -4353,10 +4358,10 @@ def _uia_compact_control(node: dict[str, Any]) -> dict[str, Any]:
     out["type"] = str(node.get("control_type") or "")
     box = node.get("bbox")
     if isinstance(box, (list, tuple)) and len(box) == 4:
-        out["x"] = (int(box[0]) + int(box[2])) // 2
-        out["y"] = (int(box[1]) + int(box[3])) // 2
+        out["click_x"] = (int(box[0]) + int(box[2])) // 2
+        out["click_y"] = (int(box[1]) + int(box[3])) // 2
     elif "x" in node and "y" in node:
-        out["x"], out["y"] = node["x"], node["y"]
+        out["click_x"], out["click_y"] = node["x"], node["y"]
     if node.get("auto_id"):
         out["auto_id"] = node["auto_id"]
     value = node.get("value")
@@ -4583,7 +4588,8 @@ def _desktop_uia_tree_once(window_id: str, max_depth: int = 7, max_nodes: int = 
 
             "如果树完整但目标缺失，或 uia_capability=sparse，应转用 desktop_analyze。"
             if truncated or capability == "sparse" else
-            "用 index 对应的 name/auto_id 判断语义；点击用 bbox 中心走 desktop_click（同坐标系）。"
+            "用 index 对应的 name/auto_id 判断语义；compact 模式点击用 click_x/click_y，"
+            "完整模式用 bbox 中心走 desktop_click（同坐标系）。"
         ),
     }
 
@@ -4592,7 +4598,7 @@ def _desktop_uia_tree_once(window_id: str, max_depth: int = 7, max_nodes: int = 
     "读取已绑定窗口的 UIA 控件树；报告截断原因和内容覆盖摘要。可提供 target_hint 启用目标匹配，"
     "最多三次渐进扩深（每次+5）/扩节点；完整树未找到目标、消息区域 UIA 覆盖稀疏或仍被截断时，"
     "在同一次工具调用内回退到 OmniParser。target_kind 可选 control、message、visual。"
-    "compact=true 时每个控件只留 name/type/x/y（有值才带 value/auto_id），体积约为完整字段的三分之一；"
+    "compact=true 时每个控件只留 name/type/click_x/click_y（有值才带 value/auto_id），体积约为完整字段的三分之一；"
     "control_types（如 Button,Edit）、text_contains、only_actionable 用于在返回前过滤。"
 )
 def desktop_uia_tree(
@@ -4720,6 +4726,8 @@ def desktop_uia_tree(
             "uia_coverage": coverage,
             "control_count": len(public),
             "uia_filter": selection["filter"],
+            "click_space": "window",
+            "click_unit": "normalized_0_1000",
         }
         if compact:
             # The model only ever reads the compact form; `bbox` is kept on the
@@ -4728,11 +4736,12 @@ def desktop_uia_tree(
             # element table once already.
             compacted = [_uia_compact_control(node) for node in public]
             out["controls"] = compacted
-            out["fields"] = "name/type/x/y, plus value or auto_id when present"
+            out["fields"] = "name/type/click_x/click_y, plus value or auto_id when present"
             out["payload_bytes"] = len(json.dumps(compacted, ensure_ascii=False, separators=(",", ":")))
             out["payload_bytes_full"] = len(json.dumps(public, ensure_ascii=False, separators=(",", ":")))
-            out["hint"] = ("每个控件只有 name/type/x/y（有值时才带 value/auto_id）："
-                           "x/y 已是可直接传给 desktop_click 的窗口归一化点击点，不要再按 bbox 自己算中心。"
+            out["hint"] = ("每个控件只有 name/type/click_x/click_y（有值时才带 value/auto_id）："
+                           "click_x/click_y 已是可直接传给 desktop_click 的窗口归一化点击点，"
+                           "不要除以图片宽高，也不要按 bbox 自己算中心。"
                            "控件多时用 control_types / text_contains / only_actionable 收窄。")
         else:
             out["controls"] = public
