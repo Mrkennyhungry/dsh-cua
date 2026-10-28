@@ -1433,10 +1433,75 @@ def _click_hit_note(window_id: str, x: float, y: float) -> dict[str, Any] | None
     return note
 
 
+def _element_is_addressable(element: dict) -> bool:
+    """True when an OCR/YOLO element can be named, so a caller could target it.
+
+    Icons arrive as `text: "icon"` with the real name in `caption`; when neither
+    carries anything but a placeholder the element cannot be clicked by name, and
+    150 of them are pure payload.
+    """
+
+    try:
+        from .decide import PLACEHOLDERS
+    except Exception:  # noqa: BLE001
+        PLACEHOLDERS = {"icon", "ui_element", "unknown", "图标"}
+    # "未知" is the captioner's own "no idea" marker and is not in the shared set.
+    placeholder = {str(item).casefold() for item in PLACEHOLDERS} | {"未知"}
+
+    def named(value: Any) -> bool:
+        text = str(value or "").strip().casefold()
+        # One-character labels are real targets in Chinese UIs ("是"/"否"), and the
+        # punctuation that is not one is already listed in PLACEHOLDERS.
+        return bool(text) and text not in placeholder
+
+    return named(element.get("text")) or named(element.get("caption"))
+
+
+def _overlapping_windows(hwnd: int, client_rect, limit: int = 3) -> list[dict[str, Any]]:
+    """Visible top-level windows stacked above `hwnd` that cover its client area.
+
+    The window-scope capture is a screen crop, so these windows are literally part of
+    the picture the parser reads. Naming them turns "the buttons do not match what I
+    see in my head" into a fact the caller can act on.
+    """
+
+    if client_rect is None:
+        return []
+    left, top = int(client_rect.left), int(client_rect.top)
+    right, bottom = left + int(client_rect.width), top + int(client_rect.height)
+    area = max(1, (right - left) * (bottom - top))
+    found: list[dict[str, Any]] = []
+    current = win32gui.GetTopWindow(0)
+    guard = 0
+    while current and guard < 400:
+        guard += 1
+        if current == hwnd:
+            break  # everything walked so far is above the target
+        try:
+            if win32gui.IsWindowVisible(current) and not win32gui.IsIconic(current):
+                cls = str(win32gui.GetClassName(current) or "")
+                title = str(win32gui.GetWindowText(current) or "").strip()
+                if cls not in ("Progman", "WorkerW", "Shell_TrayWnd", "Windows.UI.Core.CoreWindow") and title:
+                    rect = win32gui.GetWindowRect(current)
+                    overlap_x = max(0, min(rect[2], right) - max(rect[0], left))
+                    overlap_y = max(0, min(rect[3], bottom) - max(rect[1], top))
+                    if overlap_x > 0 and overlap_y > 0:
+                        ratio = (overlap_x * overlap_y) / area
+                        if ratio >= 0.02:
+                            found.append({"title": title[:60], "class": cls[:40],
+                                          "overlap": round(min(ratio, 1.0), 2)})
+        except Exception:  # noqa: BLE001
+            pass
+        current = win32gui.GetWindow(current, 2)  # GW_HWNDNEXT
+    found.sort(key=lambda item: item["overlap"], reverse=True)
+    return found[:limit]
+
+
 def desktop_analyze(
     window_id: str, engine: str = "", caption: bool = True,
     caption_icons: bool = False, annotate: bool = True,
     scope: str = "window", recover_black: bool = False, region: str = "auto",
+    only_actionable: bool = False, max_elements: int = 0,
 ) -> dict:
     """
     Args:
@@ -1704,11 +1769,41 @@ def desktop_analyze(
     timing_ms["total"] = round((time.perf_counter() - total_started) * 1000)
     result["timing_ms"] = timing_ms
     # Remember where the elements were, so a click can say whether it landed on
-    # one of them instead of reporting success for a point in empty space.
+    # one of them instead of reporting success for a point in empty space. Uses the
+    # unfiltered list: a placeholder icon is still a legitimate click target.
     try:
         _remember_observation(window_id, elements, scope)
     except Exception:  # noqa: BLE001
         logger.debug("observation cache skipped", exc_info=True)
+    # The window-scope capture is a screen crop of the client rect, so a window
+    # lying on top is IN the picture and its text is in the element list. Say so,
+    # instead of leaving the caller to wonder why the buttons do not match.
+    if scope == "window":
+        try:
+            client = controller.window.get_client_region(hwnd)
+            occluders = _overlapping_windows(hwnd, client)
+        except Exception:  # noqa: BLE001
+            occluders = []
+        if occluders:
+            result["occlusion"] = {
+                "count": len(occluders),
+                "windows": occluders,
+                "note": ("这些窗口压在目标窗口上方，截图里的像素属于它们，元素表也可能混入它们的内容。"
+                         "要看整层画面用 scope=desktop（region=auto 会把重叠弹层一起裁进来）。"),
+            }
+    # Payload trim happens last: the capture, the overlay and the click cache all
+    # used the full list. Defaults are no-ops so internal callers are unaffected.
+    if only_actionable or max_elements:
+        kept = [element for element in elements if not only_actionable or _element_is_addressable(element)]
+        if max_elements and max_elements > 0:
+            kept = kept[:max_elements]
+        result["ui_elements"] = kept
+        result["elements_filter"] = {
+            "only_actionable": bool(only_actionable),
+            "max_elements": int(max_elements or 0),
+            "scanned": len(elements),
+            "kept": len(kept),
+        }
     return result
 
 

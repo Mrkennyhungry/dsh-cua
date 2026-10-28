@@ -151,6 +151,9 @@ class AnalyzeRequest(BaseModel):
     recover_black: bool = False
     # scope=desktop 时的解析范围：auto = 窗口 + 重叠弹层（默认），window = 只窗口，full = 全桌面。
     region: str = Field(default="auto", pattern="^(auto|window|full)$")
+    # 只裁元素列表，不裁截图：被别的窗口压住时，截图里仍然能看到它们（并回 occlusion）。
+    only_actionable: bool = False
+    max_elements: int = Field(default=0, ge=0, le=2000)
 
 
 class CaptureBound(BaseModel):
@@ -1066,7 +1069,8 @@ def create_router(eternity) -> APIRouter:
     def analyze_window(window_id: str, req: AnalyzeRequest):
         result = invoke(desktop_tools.desktop_analyze, window_id, engine=req.engine, caption=req.caption,
                         caption_icons=req.caption_icons, annotate=req.annotate,
-                        scope=req.scope, recover_black=req.recover_black, region=req.region)
+                        scope=req.scope, recover_black=req.recover_black, region=req.region,
+                        only_actionable=req.only_actionable, max_elements=req.max_elements)
         result = _compact_observation(result)
         if isinstance(result, dict) and not result.get("error"):
             capture_id = uuid.uuid4().hex

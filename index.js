@@ -446,7 +446,7 @@ export function apply(ctx, config) {
 
   register(defineTool({
     name: 'doraemon_analyze',
-    description: 'Capture and parse UI elements into boxes normalized to 0–1000. The default local-deepseek engine runs YOLO icon detection plus RapidOCR on this machine and adds DeepSeek captions for unlabelled icons — no GPU service, no focus change, roughly 2.5s. scope="window" (default) captures only the bound window client area and is the most precise. scope="desktop" captures the whole screen: use it when a dropdown/flyout/menu lives in its own top-level window and therefore falls outside the client rect — those elements come back with screen_rect (absolute pixels) which you click via doraemon_click_screen. Returns ui_elements (bbox, text, caption, type), space, timing_ms and the annotated screenshot path.',
+    description: 'Capture and parse UI elements into boxes normalized to 0–1000. The default local-deepseek engine runs YOLO icon detection plus RapidOCR on this machine and adds DeepSeek captions for unlabelled icons — no GPU service, no focus change, roughly 2.5s. scope="window" (default) captures only the bound window client area and is the most precise; the capture is a screen crop, so a window lying on top still appears in the picture and is named in occlusion. scope="desktop" captures the whole screen: use it when a dropdown/flyout/menu lives in its own top-level window and therefore falls outside the client rect — those elements come back with screen_rect (absolute pixels) which you click via doraemon_click_screen. Returns ui_elements (text, type, x/y, caption), space, click_space, occlusion, timing_ms and the annotated screenshot path.',
     parameters: {
       window_id: windowIdParameter,
       engine: { type: 'string', description: 'omni | qwen | local | local-deepseek; omit for the kernel default (normally local-deepseek).' },
@@ -455,17 +455,22 @@ export function apply(ctx, config) {
       scope: { type: 'string', enum: ['window', 'desktop'], description: 'window = bound window client area (precise, default). desktop = whole screen including popups/overlays; coordinates then live in screen pixels.' },
       region: { type: 'string', enum: ['auto', 'window', 'full'], description: 'scope=desktop only: how much of the desktop to parse. auto (default) crops to the target window plus popups overlapping it — so OCR does not read unrelated windows; window = target window only; full = entire desktop.' },
       recover_black: { type: 'boolean', description: 'When the capture is near-black (minimized window), allow one activating retry. Off by default because activating can collapse a CEF dropdown.' },
+      only_actionable: { type: 'boolean', description: 'Trim the ELEMENT LIST only, never the screenshot: drops elements whose text and caption are both placeholders ("icon", "未知"), which cannot be clicked by name. Windows covering the target stay visible in the picture.' },
+      max_elements: { type: 'number', description: 'Cap the element list (0 = keep all, default). Reading order is preserved.' },
     },
     output,
     async execute(args, exec) {
       const id = boundWindowId(args.window_id)
       const scope = args.scope === 'desktop' ? 'desktop' : 'window'
       const region = ['auto', 'window', 'full'].includes(args.region) ? args.region : 'auto'
+      const maxElements = args.max_elements === undefined ? 0 : Number(args.max_elements)
+      if (!Number.isInteger(maxElements) || maxElements < 0 || maxElements > 2000) throw new Error('max_elements must be 0–2000')
       return bridge.request(`/windows/${id}/analyze`, ownerOf(exec), {
         body: {
           engine: String(args.engine ?? ''), caption: args.caption !== false,
           annotate: args.annotate !== false, scope, region,
           recover_black: args.recover_black === true,
+          only_actionable: args.only_actionable === true, max_elements: maxElements,
         },
         signal: exec.signal, timeoutMs: 60_000,
       })
