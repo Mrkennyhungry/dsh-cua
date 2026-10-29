@@ -43,7 +43,7 @@ class ClickHitTests(unittest.TestCase):
         self.assertEqual(note["warning"], "CLICK_HIT_EMPTY")
         self.assertIsNone(note["hit"])
         self.assertEqual(note["nearest"]["text"], "目标")
-        self.assertEqual((note["nearest"]["x"], note["nearest"]["y"]), (420, 420))
+        self.assertEqual((note["nearest"]["click_x"], note["nearest"]["click_y"]), (420, 420))
         self.assertLess(note["nearest"]["distance"], 120)
 
     def test_nearest_is_by_distance_not_by_screen_order(self):

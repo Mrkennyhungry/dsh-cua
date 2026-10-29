@@ -1429,7 +1429,9 @@ def _click_hit_note(window_id: str, x: float, y: float) -> dict[str, Any] | None
                    "不要微调数字重试：重新 analyze，直接用元素自带的 click_x/click_y。",
     }
     if nearest:
-        note["nearest"] = {"text": nearest[0], "x": nearest[1], "y": nearest[2],
+        # Same naming as the observation payload: a bare x/y in this note was the
+        # one place left where a final 0-1000 point could be mistaken for pixels.
+        note["nearest"] = {"text": nearest[0], "click_x": nearest[1], "click_y": nearest[2],
                            "distance": round(nearest[3])}
     return note
 
