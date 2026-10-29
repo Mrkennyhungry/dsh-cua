@@ -36,7 +36,7 @@ A tag can be moved; where you need an immutable target, pin the release commit i
 (`git rev-parse v0.4.6` prints it):
 
 ```
-dsh-doraemon@git+https://github.com/Mrkennyhungry/dsh-cua.git#<commit-of-v0.4.6>
+dsh-doraemon@git+https://github.com/Mrkennyhungry/dsh-cua.git#445cbc7fd639f7ab99f2780b82ddaf4d9fd27a8d
 ```
 
 **Requirements:** Windows, Node.js >= 22, and **DSH 0.2.x** — the current stable line, declared as `>=0.2.1-rc.2 <0.3.0` in `engines.dsh`. DSH enforces that range rather than ignoring it, so a 0.3 client would refuse the bundle. DSH 0.3 does not exist yet; when it ships this plugin has to be retested on it and the upper bound will move in a new release. Nothing to do until then.

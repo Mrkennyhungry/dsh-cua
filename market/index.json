@@ -59,12 +59,12 @@
       },
       "versions": [
         {
-          "version": "0.4.5",
-          "publishTimestamp": 1793162262,
+          "version": "0.4.6",
+          "publishTimestamp": 1793243718,
           "source": {
             "type": "git",
             "url": "https://github.com/Mrkennyhungry/dsh-cua",
-            "commit": "1e234ec1fdda70d9a70ed1191d7ac327d28976f2"
+            "commit": "445cbc7fd639f7ab99f2780b82ddaf4d9fd27a8d"
           },
           "engines": {
             "dsh": ">=0.2.1-rc.2 <0.3.0"
