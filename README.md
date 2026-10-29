@@ -5,7 +5,7 @@ Windows desktop and browser automation for DSH. The Python kernel source ships i
 **Install in one line** — paste this into **Plugins → Add plugin** in DSH, restart, then run `scripts\bootstrap.ps1` once:
 
 ```
-dsh-doraemon@git+https://github.com/Mrkennyhungry/dsh-cua.git#v0.4.5
+dsh-doraemon@git+https://github.com/Mrkennyhungry/dsh-cua.git#v0.4.6
 ```
 
 Or add the market index `https://raw.githubusercontent.com/Mrkennyhungry/dsh-cua/main/market/index.json` on **Plugins → Discover** and install from there. Both paths are described below.
@@ -19,7 +19,7 @@ Two ways, same spec.
 **From the Web UI:** open **Plugins** in the DSH sidebar, paste this into the install dialog, confirm, then restart DSH:
 
 ```
-dsh-doraemon@git+https://github.com/Mrkennyhungry/dsh-cua.git#v0.4.5
+dsh-doraemon@git+https://github.com/Mrkennyhungry/dsh-cua.git#v0.4.6
 ```
 
 **From the profile's `package.json`**, add the same value as a dependency:
@@ -27,15 +27,16 @@ dsh-doraemon@git+https://github.com/Mrkennyhungry/dsh-cua.git#v0.4.5
 ```json
 {
   "dependencies": {
-    "dsh-doraemon": "git+https://github.com/Mrkennyhungry/dsh-cua.git#v0.4.5"
+    "dsh-doraemon": "git+https://github.com/Mrkennyhungry/dsh-cua.git#v0.4.6"
   }
 }
 ```
 
-A tag can be moved; where you need an immutable target, pin the commit instead:
+A tag can be moved; where you need an immutable target, pin the release commit instead
+(`git rev-parse v0.4.6` prints it):
 
 ```
-dsh-doraemon@git+https://github.com/Mrkennyhungry/dsh-cua.git#1e234ec1fdda70d9a70ed1191d7ac327d28976f2
+dsh-doraemon@git+https://github.com/Mrkennyhungry/dsh-cua.git#<commit-of-v0.4.6>
 ```
 
 **Requirements:** Windows, Node.js >= 22, and **DSH 0.2.x** — the current stable line, declared as `>=0.2.1-rc.2 <0.3.0` in `engines.dsh`. DSH enforces that range rather than ignoring it, so a 0.3 client would refuse the bundle. DSH 0.3 does not exist yet; when it ships this plugin has to be retested on it and the upper bound will move in a new release. Nothing to do until then.
@@ -52,7 +53,7 @@ DSH ships custom plugin markets switched off. To have this plugin listed in **Pl
    ```
 
    Mirror, if `raw.githubusercontent.com` is unreachable: `https://cdn.jsdelivr.net/gh/Mrkennyhungry/dsh-cua@main/market/index.json`.
-3. Pick **dsh-doraemon** and install version 0.4.5, then restart DSH.
+3. Pick **dsh-doraemon** and install version 0.4.6, then restart DSH.
 
 There is no official DSH market: Discover lists only the index sources a user adds, so the URL above is how this plugin reaches that list. The document is DSH's own `format: 1` market index, validated with `@deepseek-ai/dsh-plugin-market-index` before it was committed, and it pins an immutable commit rather than a branch.
 

@@ -18,7 +18,7 @@ Node.js >= 22 is also required (DSH already needs it).
 **1. Install the bundle.** In DSH: **Plugins → Add plugin**, paste, confirm:
 
 ```
-dsh-doraemon@git+https://github.com/Mrkennyhungry/dsh-cua.git#v0.4.5
+dsh-doraemon@git+https://github.com/Mrkennyhungry/dsh-cua.git#v0.4.6
 ```
 
 Or switch on **Custom plugin markets**, add the index

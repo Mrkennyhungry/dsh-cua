@@ -7,10 +7,10 @@ Three channels, three different amounts of ceremony. Only the last two need a to
 | Git install (`git+https://…#<commit>`) | an SSH key that can push | works today |
 | Plugin market index (`market/index.json`) | nothing — it is a file in this repo | live |
 | npm (`dsh-doraemon@<version>`) | a free npm account + an npm token | optional, not published |
-| GitHub Release page | a GitHub token, or the web form | live for v0.4.5 |
+| GitHub Release page | a GitHub token, or the web form | live for v0.4.6 |
 
 **npm is optional.** The git spec and the market index are the supported channels and
-both work today; npm only shortens the install string to `dsh-doraemon@0.4.5` and makes
+both work today; npm only shortens the install string to `dsh-doraemon@0.4.6` and makes
 the plugin installable from indexes that list npm packages only. Nothing about the
 plugin's behaviour depends on it.
 
@@ -35,8 +35,8 @@ Both tokens grant write access to your accounts. Do not paste them into files, i
 or chat logs that persist; if one leaks, delete it on the same page and make a new one.
 
 The GitHub Release needs no token at all — the web form works:
-<https://github.com/Mrkennyhungry/dsh-cua/releases/new?tag=v0.4.5>, paste
-`docs/release-v0.4.5.md` as the body. `scripts/publish.ps1` is only a convenience.
+<https://github.com/Mrkennyhungry/dsh-cua/releases/new?tag=v0.4.6>, paste
+`docs/release-v0.4.6.md` as the body. `scripts/publish.ps1` is only a convenience.
 
 If the npm **signup** page answers with a "verify you are human" wall, that is the
 signup endpoint refusing a data-centre IP, not a problem with this repository: register
@@ -61,15 +61,15 @@ too, if you prefer environment variables), then:
    `pnpm publish --access public`, deletes the file in `finally`, and verifies the
    version resolves from `registry.npmjs.org`;
 2. creates the GitHub Release for the tag matching `package.json`'s version, using
-   [`docs/release-v<version>.md`](release-v0.4.5.md) as the body;
+   [`docs/release-v<version>.md`](release-v0.4.6.md) as the body;
 3. prints what succeeded and what to do next.
 
 Pass `-SkipNpm` or `-SkipRelease` to run only one half. To rewrite the body of a release
-that already exists — for instance after editing `docs/release-v0.4.5.md` — add
+that already exists — for instance after editing `docs/release-v0.4.6.md` — add
 `-SyncExisting`; without it an existing release is left untouched and the script only
 reports that the two differ.
 
-The repo is a git checkout with a `v0.4.5` tag; `pnpm publish` reads the working tree,
+The repo is a git checkout with a `v0.4.6` tag; `pnpm publish` reads the working tree,
 so commit first — the script refuses to run on a dirty tree for that reason.
 
 ## After npm publishes: add the npm source to the index
@@ -80,7 +80,7 @@ own install target:
 
 ```json
 {
-  "version": "0.4.5",
+  "version": "0.4.6",
   "publishTimestamp": 1793162262,
   "source": { "type": "npm" },
   "engines": { "dsh": ">=0.2.1-rc.2 <0.3.0" }
@@ -89,7 +89,7 @@ own install target:
 
 `publishTimestamp` is Unix **seconds**. `source.type: "npm"` optionally takes a
 `registry` URL. To offer both channels for the same version, use distinct versions
-(e.g. a `0.4.5-npm.1` prerelease) — a version string may appear only once per plugin.
+(e.g. a `0.4.6-npm.1` prerelease) — a version string may appear only once per plugin.
 
 ## Adding a plugin to the author index
 
