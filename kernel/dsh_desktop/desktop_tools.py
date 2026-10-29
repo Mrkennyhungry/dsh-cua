@@ -1357,9 +1357,11 @@ def _coordinate_contract(scope: str, w: int, h: int,
         "click_space": "screen" if scope == "desktop" else "window",
         "space": "screen" if scope == "desktop" else "window",
         "window_px": {"width": int(w), "height": int(h)},
-        "rule": ("每个元素的 click_x/click_y 已是最终点击坐标，直接传给 desktop_click_screen，不要看图估算。"
+        "rule": ("每个元素自带 click_unit；click_x/click_y 已是最终屏幕像素坐标，直接传给 desktop_click_screen，"
+                 "不要按 frame_size 或图片宽高再换算。"
                  if scope == "desktop" else
-                 "每个元素的 click_x/click_y 已是最终点击坐标，直接传给 desktop_click，不要看图估算。"),
+                 "每个元素自带 click_unit；click_x/click_y 已是最终 0–1000 归一化坐标，直接传给 desktop_click，"
+                 "不要按 frame_size 或图片宽高再换算。"),
     }
     if isinstance(obs_w, (int, float)) and isinstance(obs_h, (int, float)) and obs_w and obs_h:
         # Size only, for orientation. No conversion formula: the click point is final.
@@ -4461,13 +4463,14 @@ _UIA_ACTIONABLE_TYPES = frozenset({
 def _uia_compact_control(node: dict[str, Any]) -> dict[str, Any]:
     """One control reduced to what an action needs: identity, type, click point.
 
-    Measured on a 236-control Explorer window: 132 B/control before, ~45 after.
+    Measured on a 236-control Explorer window: 132 B/control before, ~60 after.
     The dropped fields are derivable (`index` is array order, `name_length` follows
     from `name`, `bbox` center is what click uses) or almost always empty
     (`auto_id` was blank on 220 of 236 nodes, `*_truncated` is false on nearly all).
 
-    The point is named `click_x`/`click_y`, not bare `x`/`y`: the latter was read as
-    screenshot pixels and normalized a second time in live use.
+    The point is named `click_x`/`click_y` and carries `click_unit` next to it. The
+    old bare `x`/`y` was read as screenshot pixels and normalized a second time; the
+    name change alone still let a normalized y=78 be rescaled to 130 in live use.
     """
 
     out: dict[str, Any] = {}
@@ -4481,6 +4484,8 @@ def _uia_compact_control(node: dict[str, Any]) -> dict[str, Any]:
         out["click_y"] = (int(box[1]) + int(box[3])) // 2
     elif "x" in node and "y" in node:
         out["click_x"], out["click_y"] = node["x"], node["y"]
+    if "click_x" in out:
+        out["click_unit"] = "normalized_0_1000"
     if node.get("auto_id"):
         out["auto_id"] = node["auto_id"]
     value = node.get("value")
@@ -4855,12 +4860,13 @@ def desktop_uia_tree(
             # element table once already.
             compacted = [_uia_compact_control(node) for node in public]
             out["controls"] = compacted
-            out["fields"] = "name/type/click_x/click_y, plus value or auto_id when present"
+            out["fields"] = "name/type/click_x/click_y/click_unit, plus value or auto_id when present"
             out["payload_bytes"] = len(json.dumps(compacted, ensure_ascii=False, separators=(",", ":")))
             out["payload_bytes_full"] = len(json.dumps(public, ensure_ascii=False, separators=(",", ":")))
-            out["hint"] = ("每个控件只有 name/type/click_x/click_y（有值时才带 value/auto_id）："
+            out["hint"] = ("每个控件只有 name/type/click_x/click_y/click_unit（有值时才带 value/auto_id）："
                            "click_x/click_y 已是可直接传给 desktop_click 的窗口归一化点击点，"
-                           "不要除以图片宽高，也不要按 bbox 自己算中心。"
+                           "click_unit 固定为 normalized_0_1000；不要除以图片宽高、frame_size，"
+                           "也不要按 bbox 自己算中心。"
                            "控件多时用 control_types / text_contains / only_actionable 收窄。")
         else:
             out["controls"] = public

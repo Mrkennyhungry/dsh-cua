@@ -12,11 +12,12 @@ platforms: [windows]
 
 ## 坐标系（全部统一）
 
-- 所有坐标均为窗口内归一化 **0–1000**（左上 (0,0)，右下 (1000,1000)），基准为窗口客户区。
+- 所有窗口坐标均为窗口内归一化 **0–1000**（左上 (0,0)，右下 (1000,1000)），基准为窗口客户区。
 - `desktop_analyze`（本地视觉解析）与 `desktop_uia_tree`（UIA 控件树）返回的 bbox 与
   `desktop_click` / `desktop_right_click` / `desktop_swipe` / `desktop_scroll` 使用**同一坐标系**，可直接互换。
-- `desktop_analyze.width/height` 是返回的 `image_path` 实际像素尺寸（截图可能缩至 1366）；`source_width/source_height` 是缩放前的窗口客户区像素尺寸。桌面分辨率、原始尺寸、保存图像素和窗口归一化 bbox 是不同坐标系，不要混用。
-- 优先从最新 bbox 算中心 `x=round((x1+x2)/2), y=round((y1+y2)/2)` 并直接交给 `desktop_click`。如果位置是按保存截图的像素读出的，使用 `desktop_click_image_point(window_id, image_x, image_y, image_width, image_height)`；不要把截图像素直接传给归一化 `desktop_click`。看不清或框太窄时用 `desktop_uia_tree` 核对；点击后重新分析确认是否命中。
+- 每个元素自带 `click_unit` 与 `click_space`。`click_x/click_y` 已经是最终点击坐标：先原样复制，**不要**再按 `frame_size`、`width/height` 或 bbox 做任何乘除。看到 `click_unit="normalized_0_1000"` 就说明它已经是窗口归一化值（例如 `click_y=78` 就是 78，不是 78px）；把它当像素再乘 `1000/height` 会得到错误的 130。
+- 目标有可见文字时，优先用 `desktop_click(goal="文字")`，不要在坐标上手工推导；如果 `goal` 返回 no confident match，再回退到该元素的 `click_x/click_y`。
+- 只有在没有可用标签、或 `goal` 解析失败时，才使用元素坐标。如果位置是按保存截图的像素读出的，使用 `desktop_click_image_point(window_id, image_x, image_y, image_width, image_height)`；不要把截图像素直接传给归一化 `desktop_click`。看不清或框太窄时用 `desktop_uia_tree` 核对；点击后重新分析确认是否命中。
 - 正常桌面操作保留 `desktop_analyze` 默认的 `annotate=true`，供界面显示解析框；只有用户要干净截图或确有具体原因时才设 `annotate=false`。模型 `read_image` 读取的仍是干净图。
 - Qwen 图标 caption 是语义提示，不保证正确。点击重要图标前若 caption 与周边文字/布局不符，先用 `desktop_uia_tree` 或重新观察较清晰截图核实，不能单凭 caption 猜点击。
 

@@ -489,7 +489,7 @@ export function apply(ctx, config) {
 
   register(defineTool({
     name: 'doraemon_analyze',
-    description: 'Capture and parse UI elements into boxes normalized to 0–1000. The default local-deepseek engine runs YOLO icon detection plus RapidOCR on this machine and adds DeepSeek captions for unlabelled icons — no GPU service, no focus change, roughly 2.5s. scope="window" (default) captures only the bound window client area and is the most precise; the capture is a screen crop, so a window lying on top still appears in the picture and is named in occlusion. scope="desktop" captures the whole screen: use it when a dropdown/flyout/menu lives in its own top-level window and therefore falls outside the client rect — those elements come back with screen_rect (absolute pixels) which you click via doraemon_click_screen. Returns ui_elements (text, type, click_x/click_y, caption), space, click_space, occlusion, timing_ms and the annotated screenshot path. click_x/click_y are already final 0–1000 click coordinates: pass them straight to doraemon_click; never divide by the image width/height.',
+    description: 'Capture and parse UI elements into boxes normalized to 0–1000. The default local-deepseek engine runs YOLO icon detection plus RapidOCR on this machine and adds DeepSeek captions for unlabelled icons — no GPU service, no focus change, roughly 2.5s. scope="window" (default) captures only the bound window client area and is the most precise; the capture is a screen crop, so a window lying on top still appears in the picture and is named in occlusion. scope="desktop" captures the whole screen: use it when a dropdown/flyout/menu lives in its own top-level window and therefore falls outside the client rect — those elements come back with screen_rect (absolute pixels) which you click via doraemon_click_screen. Returns ui_elements (text, type, click_x/click_y/click_unit, caption), space, click_space, occlusion, timing_ms and the annotated screenshot path. click_x/click_y are already final click coordinates, and every element carries click_unit: for scope=window it is normalized_0_1000, for scope=desktop it is screen_pixels. Pass click_x/click_y straight to the matching click tool; never divide or multiply by frame_size, image width or image height.',
     parameters: {
       window_id: windowIdParameter,
       engine: { type: 'string', description: 'omni | qwen | local | local-deepseek; omit for the kernel default (normally local-deepseek).' },
@@ -522,11 +522,11 @@ export function apply(ctx, config) {
 
   register(defineTool({
     name: 'doraemon_uia',
-    description: 'First-line observation for native desktop controls: read UIA names, values and click points without a screenshot. Set target_hint to the control/message you need; the kernel progressively checks UIA and, only when the target is missing or the message surface is sparse, falls back to local OCR/OmniParser in the same call. target_kind=visual requests OCR directly. Controls come back compact — name/type/click_x/click_y, plus value or auto_id only when present — so a 236-control window stays readable; narrow it with control_types, text_contains or only_actionable. click_x/click_y are already final 0–1000 click coordinates; pass them straight to doraemon_click. This returns parsed text/boxes, not an image.',
+    description: 'First-line observation for native desktop controls: read UIA names, values and click points without a screenshot. Set target_hint to the control/message you need; the kernel progressively checks UIA and, only when the target is missing or the message surface is sparse, falls back to local OCR/OmniParser in the same call. target_kind=visual requests OCR directly. Controls come back compact — name/type/click_x/click_y/click_unit, plus value or auto_id only when present — so a 236-control window stays readable; narrow it with control_types, text_contains or only_actionable. click_x/click_y are already final 0–1000 normalized click coordinates, and click_unit says so on every control; pass them straight to doraemon_click and never rescale by frame_size or image size. This returns parsed text/boxes, not an image.',
     parameters: {
       window_id: windowIdParameter,
       max_depth: { type: 'number', description: 'Tree depth limit, 1–20 (default 7).' },
-      max_nodes: { type: 'number', description: 'Node budget, 10–500 (default 300). A compact control is ~60–80 B, so 300 controls cost about what 120 full records used to; with a filter the scan gets 8x headroom and the filter pages the result.' },
+      max_nodes: { type: 'number', description: 'Node budget, 10–500 (default 300). A compact control is ~80–100 B, so 300 controls still cost roughly what 100 full records used to; with a filter the scan gets extra headroom and the filter pages the result.' },
       target_hint: { type: 'string', description: 'Optional target label or text to look for. With a target, UIA expands progressively and falls back to OCR if the target is absent.' },
       target_kind: { type: 'string', description: 'control (default), message (message surface may be OCR-only), or visual (run local OCR directly).' },
       max_attempts: { type: 'number', description: 'UIA expansion attempts when target_hint is set, 1–3 (default 3).' },
@@ -651,11 +651,11 @@ export function apply(ctx, config) {
 
   register(defineTool({
     name: 'doraemon_click',
-    description: 'Click inside a bound window. Two ways to aim: normalized 0–1000 client coordinates (from a doraemon_analyze or doraemon_uia bbox centre), or goal="登录按钮" — the local decision layer picks the element from the window’s own element table and clicks it, so the table never enters your context. Prefer goal when you know the label but do not want to read the table. button=right opens a context menu.',
+    description: 'Click inside a bound window. Prefer goal="库" when the target has a visible text label — the local decision layer resolves it from the window’s own element table. If goal returns no confident match, fall back to normalized 0–1000 x/y copied verbatim from that element’s click_x/click_y; click_unit confirms normalized_0_1000. Only targets with no usable label go straight to coordinates. Never derive or rescale x/y from the screenshot, frame_size, width or height. button=right opens a context menu.',
     parameters: {
       window_id: windowIdParameter,
-      x: { type: 'number', description: 'Normalized x, 0–1000. Optional when goal is given.' },
-      y: { type: 'number', description: 'Normalized y, 0–1000. Optional when goal is given.' },
+      x: { type: 'number', description: 'Normalized x, 0–1000. Copy click_x verbatim; optional when goal is given. Never rescale by frame_size or image width.' },
+      y: { type: 'number', description: 'Normalized y, 0–1000. Copy click_y verbatim; optional when goal is given. Never rescale by frame_size or image height.' },
       goal: { type: 'string', description: 'What to click, e.g. "登录按钮" or "点击「新建任务」". Resolved locally; nothing is clicked when the match is below the confidence gate.' },
       source: { type: 'string', description: 'Element table for goal: auto (default, UIA then OCR) | uia | ocr.' },
       caption: { type: 'boolean', description: 'Annotate icons so nameless buttons (close/minimise) become addressable by name. Costs one caption pass (~3s) and is cached.' },

@@ -103,13 +103,17 @@ PHYSICAL INPUT AND COMMANDER FEEDBACK:
   syntax and rejects dangerous combinations; the older controller.hotkey interface
   has a stricter allowlist. Never route around a rejected shortcut using another tool.
 - To open menus, dialogs, new documents etc: CLICK the visible UI element.
-  Coordinate source must be explicit: if using a parsed/UIA bbox, call desktop_click
-  with its normalized 0-1000 center. If selecting a point by looking at the saved
-  image pixels, call desktop_click_image_point with that exact image_path's width and
-  height; never feed image pixels directly to desktop_click. The returned
-  image_path may be resized: width/height describe the saved image,
-  source_width/source_height describe the original client capture. Re-analyze
-  after a failed/ambiguous click; never repeat the same coordinates blindly.
+  Coordinate source must be explicit: prefer desktop_click(goal="visible label");
+  if goal returns no confident match, use the element coordinates. Otherwise copy
+  the element's click_x/click_y verbatim and check its click_unit.
+  A normalized y=78 is already final; do NOT turn it into 130 by multiplying
+  1000/height. Never rescale click_x/click_y by frame_size, image width or height.
+  If selecting a point by looking at the saved image pixels, call
+  desktop_click_image_point with that exact image_path's width and height; never
+  feed image pixels directly to desktop_click. The returned image_path may be
+  resized: width/height describe the saved image, source_width/source_height
+  describe the original client capture. Re-analyze after a failed/ambiguous click;
+  never repeat the same coordinates blindly.
 -   For normal GUI work, keep desktop_analyze's default annotate=true so the dashboard
   receives the element-box overlay. Do not set annotate=false unless the user
   explicitly requests a clean screenshot or there is a concrete reason. The

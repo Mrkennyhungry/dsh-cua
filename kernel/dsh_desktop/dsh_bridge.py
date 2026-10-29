@@ -67,14 +67,16 @@ def _compact_observation(result):
     """Shrink an analyze result at the HTTP edge, where only the model consumes it.
 
     Each element arrived as text/bbox/type/source/id/click{space,x,y} — 132 B for a
-    control whose actionable content is "this button, click here". `bbox`, `id` and
-    `click.space` are redundant, so they are dropped.
+    control whose actionable content is "this button, click here". `bbox` and `id`
+    are derivable, so they are dropped; `click.space` is folded into the short
+    `click_space` field instead of being discarded.
 
-    The point must keep an unambiguous name. A bare `x`/`y` here used to be read as
-    screenshot pixels and scaled a second time (2026-10-29 live: "童年" at y=666 was
-    sent as y=833, the pixels of a different playlist). `click_x`/`click_y` say what
-    the number is, so the caller cannot mistake it for a pixel coordinate merely
-    because the window happens to be 1226x800.
+    The point must keep an unambiguous name *and unit*. A bare `x`/`y` here used to
+    be read as screenshot pixels and scaled a second time (2026-10-29 live: "童年"
+    at normalized y=666 was sent as y=833). Renaming it to `click_x`/`click_y` was
+    not enough: the 2026-10-30 Steam live case read normalized y=78 as a pixel and
+    sent 130. Every element now carries `click_unit` and `click_space` next to the
+    numbers, so the caller never has to infer the unit from the top-level contract.
 
     This must stay at the edge: `desktop_element_table` and the `goal=` resolver read
     the full element dicts straight from `desktop_analyze`, and an earlier attempt to
@@ -86,6 +88,7 @@ def _compact_observation(result):
     elements = result.get("ui_elements")
     if not isinstance(elements, list):
         return result
+    contract = result.get("coordinate_contract") if isinstance(result.get("coordinate_contract"), dict) else {}
     compact = []
     for element in elements:
         if not isinstance(element, dict):
@@ -97,11 +100,17 @@ def _compact_observation(result):
         click = element.get("click")
         if isinstance(click, dict) and "x" in click and "y" in click:
             item["click_x"], item["click_y"] = click["x"], click["y"]
+            item["click_space"] = click.get("space") or contract.get("click_space") or "window"
         else:
-            box = element.get("bbox")
-            if isinstance(box, (list, tuple)) and len(box) == 4:
-                item["click_x"] = (int(box[0]) + int(box[2])) // 2
-                item["click_y"] = (int(box[1]) + int(box[3])) // 2
+            clicked_space = contract.get("click_space") or "window"
+            rect = element.get("screen_rect") if clicked_space == "screen" else element.get("bbox")
+            if isinstance(rect, (list, tuple)) and len(rect) == 4:
+                item["click_x"] = (int(rect[0]) + int(rect[2])) // 2
+                item["click_y"] = (int(rect[1]) + int(rect[3])) // 2
+                item["click_space"] = clicked_space
+        if "click_x" in item and "click_y" in item:
+            item["click_unit"] = ("screen_pixels" if item["click_space"] == "screen"
+                                  else (contract.get("click_unit") or "normalized_0_1000"))
         compact.append(item)
     out = dict(result)
     out["ui_elements"] = compact
