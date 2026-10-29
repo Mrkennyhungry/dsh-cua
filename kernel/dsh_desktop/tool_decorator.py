@@ -184,11 +184,31 @@ def tool(description: str, *, name: str | None = None, param_aliases: dict[str, 
             args_str = ", ".join(f"{k}={v!r}" for k, v in log_args.items())
             logger.info("%s(%s) start", func.__name__, args_str)
 
+            # Cosmetic feedback uses the same action categories for every backend.
+            overlay = None
+            try:
+                from .cursor_feedback import feedback
+                overlay = feedback(func.__name__, bound.arguments)
+            except Exception:
+                pass
             # Execute and time
             start = time.time()
             try:
                 result = func(*args, **kwargs)
                 elapsed = time.time() - start
+                if overlay is not None:
+                    try:
+                        failed = isinstance(result, dict) and (result.get("success") is False or result.get("error"))
+                        if failed: overlay.action("error", duration=1.0)
+                        else:
+                            from .cursor_feedback import classify
+                            rect = ((result.get("control") or {}).get("rect") if isinstance(result,dict) else None)
+                            if isinstance(rect,(list,tuple)) and len(rect)==4:
+                                overlay.action(classify(func.__name__),(rect[0]+rect[2])//2,(rect[1]+rect[3])//2,duration=0.8)
+                            else:
+                                overlay.action(classify(func.__name__), duration=0.8)
+                    except Exception:
+                        pass
 
                 # Inject duration_ms into dict results
                 if isinstance(result, dict):
@@ -199,6 +219,11 @@ def tool(description: str, *, name: str | None = None, param_aliases: dict[str, 
                 return result
             except Exception as e:
                 elapsed = time.time() - start
+                if overlay is not None:
+                    try:
+                        overlay.action("error", duration=1.0)
+                    except Exception:
+                        pass
                 logger.error("%s failed after %.2fs: %s", func.__name__, elapsed, e)
                 raise
 

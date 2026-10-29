@@ -1,0 +1,122 @@
+{
+  "checks": [
+    {
+      "name": "bound click reaches native child at exact coordinates",
+      "passed": true,
+      "detail": {
+        "success": true,
+        "dispatch": "message",
+        "effect": "unconfirmed",
+        "x": 301,
+        "y": 370,
+        "clicks": 1,
+        "note": "Messages delivered; verify the target UI before continuing."
+      }
+    },
+    {
+      "name": "native double click receives DBLCLK",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "native right click receives down and up",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "native scroll receives three wheel events",
+      "passed": true,
+      "detail": {
+        "success": true,
+        "dispatch": "message",
+        "effect": "unconfirmed",
+        "x": 301,
+        "y": 370,
+        "clicks": -3,
+        "note": "Wheel messages delivered; verify the target scrolled."
+      }
+    },
+    {
+      "name": "native drag receives 20 moves and release at destination",
+      "passed": true,
+      "detail": {
+        "success": true,
+        "dispatch": "message",
+        "effect": "unconfirmed",
+        "note": "Drag messages delivered; verify the target moved."
+      }
+    },
+    {
+      "name": "virtual Unicode input changes native Edit value",
+      "passed": true,
+      "detail": {
+        "success": true,
+        "dispatch": "message",
+        "effect": "unconfirmed",
+        "length": 8
+      }
+    },
+    {
+      "name": "virtual key edits only owned control",
+      "passed": true,
+      "detail": {
+        "success": true,
+        "dispatch": "message",
+        "effect": "unconfirmed"
+      }
+    },
+    {
+      "name": "virtual select-all replaces only owned Edit text",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "virtual sprite visibly moves between targets",
+      "passed": true,
+      "detail": {
+        "from": [
+          301,
+          370,
+          349,
+          418
+        ],
+        "to": [
+          451,
+          420,
+          499,
+          468
+        ]
+      }
+    },
+    {
+      "name": "thinking resumes while task remains active",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "overlay visible and error-free",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "finishing task hides sprite",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "real mouse position unchanged for entire test",
+      "passed": true,
+      "detail": {
+        "samples": 921,
+        "positions": [
+          [
+            1493,
+            1093
+          ]
+        ]
+      }
+    }
+  ],
+  "passed": 13,
+  "failed": 0
+}

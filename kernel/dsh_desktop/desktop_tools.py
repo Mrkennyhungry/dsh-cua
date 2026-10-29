@@ -670,8 +670,10 @@ def _safe_window_title(hwnd: int) -> str:
 
 
 def _list_visible_windows(*, include_untitled: bool = False) -> list[dict[str, Any]]:
+    from .decorations import is_decoration_window
     windows: list[dict[str, Any]] = []
     def _cb(hwnd: int, _param: Any) -> None:
+        if is_decoration_window(hwnd): return
         # 最小化窗口不能跳过：实测用户常用应用全是最小化状态
         # （Edge/企业微信/终端都是 ico=1），一旦过滤掉，内核就"看不见"它们，
         # 清理和预检都建立在错误清单上。改为照实报告 + minimized 标注。
@@ -1966,7 +1968,10 @@ def desktop_click_screen(x: int, y: int, clicks: int = 1) -> dict:
         result = controller.input.click_screen(gx, gy, n)
     return {"success": bool(result.get("success", False)),
             "window_id": "", "space": "screen", "x": gx, "y": gy, "clicks": n,
-            "dispatch": "screen", "raw": result,
+            "dispatch": result.get("dispatch", "screen"),
+            **({"effect": result["effect"]} if "effect" in result else {}),
+            **({"error": result["error"]} if result.get("error") else {}),
+            "raw": result,
             "note": "已按屏幕像素点击；结果需要复核，不要据 success 直接断定业务生效。",
             "desktop_origin": {"x": ox, "y": oy}}
 
@@ -1994,16 +1999,24 @@ def desktop_click_message(window_id: str, x: int, y: int, clicks: int = 1) -> di
     import win32api
     import win32con
     lparam = win32api.MAKELONG(px, py)
+    n = max(1, min(int(clicks), 3))
     try:
         win32gui.PostMessage(hwnd, win32con.WM_MOUSEMOVE, 0, lparam)
-        for _ in range(max(1, min(int(clicks), 3))):
-            win32gui.PostMessage(hwnd, win32con.WM_LBUTTONDOWN, win32con.MK_LBUTTON, lparam)
+        for index in range(n):
+            # index 1 is the second press of a double click: WM_LBUTTONDBLCLK.
+            # The OS only synthesizes it for CS_DBLCLKS classes, so posting it is
+            # best effort and the result below stays "unconfirmed".
+            down = win32con.WM_LBUTTONDBLCLK if index == 1 else win32con.WM_LBUTTONDOWN
+            win32gui.PostMessage(hwnd, down, win32con.MK_LBUTTON, lparam)
             win32gui.PostMessage(hwnd, win32con.WM_LBUTTONUP, 0, lparam)
     except Exception as exc:  # noqa: BLE001
-        return {"success": False, "error": f"POSTMESSAGE_FAILED: {exc.__class__.__name__}"}
+        return {"success": False, "dispatch": "message",
+                "error": f"POSTMESSAGE_FAILED: {exc.__class__.__name__}: {exc}"}
     return {"success": True, "window_id": window_id, "x": int(x), "y": int(y),
-            "client_px": [px, py], "dispatch": "message",
-            "note": "消息已投递，但不保证被目标控件处理；请用后续观察确认。"}
+            "client_px": [px, py], "dispatch": "message", "effect": "unconfirmed",
+            "clicks": n,
+            "note": "消息已投递，但不保证被目标控件处理；双击用 WM_LBUTTONDBLCLK 近似，"
+                    "未注册 CS_DBLCLKS 的控件可能只看到两次单击。请用后续观察确认。"}
 
 
 _CURSOR = None
@@ -2012,17 +2025,14 @@ _CURSOR = None
 def _cursor_overlay():
     global _CURSOR
     if _CURSOR is None:
-        from .cursor_overlay import CursorOverlay
-        _CURSOR = CursorOverlay()
-        _CURSOR.start()
+        from .cursor_overlay import get_cursor_overlay
+        _CURSOR = get_cursor_overlay()
     return _CURSOR
 
 
 def _point_cursor_at(hwnd: int, x: int, y: int) -> None:
     """Move the cosmetic cursor before a physical click (opt-in: only after desktop_cursor)."""
-    overlay = _CURSOR
-    if overlay is None:
-        return
+    overlay = _cursor_overlay()
     try:
         controller = _controller()
         region = controller.window.get_client_region(hwnd) if controller else None
@@ -2036,30 +2046,9 @@ def _point_cursor_at(hwnd: int, x: int, y: int) -> None:
 
 @tool("显示/移动一个装饰性光标（透明置顶、鼠标穿透、不抢焦点）：只影响观感，不移动物理鼠标。"
       "传 window_id + 0-1000 坐标，或直接传屏幕像素 x/y；visible=false 隐藏。")
-def desktop_cursor(window_id: str = "", x: int = -1, y: int = -1, visible: bool = True) -> dict:
-    overlay = _cursor_overlay()
-    if not visible:
-        overlay.hide()
-        return {"success": True, "visible": False, "error": overlay.error}
-    if x < 0 or y < 0:
-        return {"success": False, "error": "visible=true 时必须给 x/y"}
-    if window_id:
-        controller = _controller()
-        if controller is None:
-            return {"error": "DESKTOP_NOT_READY: AppController 尚未初始化"}
-        with _STATE._lock:
-            info = _STATE._windows.get(window_id)
-        if info is None:
-            return {"success": False, "error": f"window_id 不存在: {window_id}"}
-        region = controller.window.get_client_region(int(info["hwnd"]))
-        if region is None:
-            return {"success": False, "error": "窗口客户区不可用"}
-        sx = region.left + int(x / 1000 * region.width)
-        sy = region.top + int(y / 1000 * region.height)
-    else:
-        sx, sy = int(x), int(y)
-    overlay.move(sx, sy)
-    return {"success": True, "visible": True, "screen": [sx, sy], "error": overlay.error}
+def desktop_cursor(window_id: str = "", x: int = -1, y: int = -1, visible: bool = True,
+                   theme: str = "whale-maid", palette: str = "ocean", scale: int = 1, action: str = "idle") -> dict:
+    return {"success": False, "error": "CURSOR_REMOVED: the task commander is automatic; input uses the physical mouse."}
 
 
 _GLOW = None
@@ -2292,12 +2281,12 @@ def desktop_click_auto(window_id: str, x: int, y: int, clicks: int = 1, name: st
                         "note": "在绑定窗口的 UIA 子树里命中了可调用控件，没有移动鼠标。"}
     physical = desktop_click(window_id, x, y, clicks)
     payload = dict(physical) if isinstance(physical, dict) else {"result": physical}
-    payload["dispatch_used"] = "sendinput_after_uia_noop" if uia_note else "sendinput"
+    payload["dispatch_used"] = physical.get("dispatch", "physical" if not controller.input.virtual else "virtual")
     payload["restored"] = restored
     if uia_note:
         payload["uia_attempt"] = uia_note
     elif name:
-        payload["uia_attempt"] = "failed; fell back to physical click"
+        payload["uia_attempt"] = "failed; tried configured input backend"
     return payload
 
 
@@ -2360,6 +2349,8 @@ def _sendinput_click_center(hwnd: int) -> bool:
         _fields_ = [("type", _wt.DWORD), ("mi", MOUSEINPUT)]
 
     user32 = _ct.windll.user32
+    original = _wt.POINT()
+    restore = bool(user32.GetCursorPos(_ct.byref(original)))
     try:
         rect = _wt.RECT()
         if not user32.GetWindowRect(_wt.HWND(hwnd), _ct.byref(rect)):
@@ -2415,6 +2406,8 @@ def _sendinput_click_center(hwnd: int) -> bool:
         return sent == 2
     except Exception:
         return False
+    finally:
+        pass  # Physical input stays at its action point; no cosmetic cursor restore.
 
 
 def _unlock_foreground(hwnd: int) -> bool:
@@ -2536,10 +2529,10 @@ def desktop_type_text(window_id: str, text: str) -> dict:
         # 回滚（2026-10-26）：不在这里强制抢前台。上午验证过的路径是
         # act()/调用方负责激活，本函数只核验前台；强制 ensure-focus 会让
         # 没有前台额度的内核把整条链卡死在 FOCUS_FAILED。
-        blocked = _require_foreground(hwnd)
+        blocked = None if controller.input.virtual else _require_foreground(hwnd)
         if blocked:
             return blocked
-        result = controller.input.type_text(text)
+        result = controller.input.type_text(text, hwnd=hwnd)
     result["window_id"] = window_id
     result["effect_verified"] = False
     result["note"] = "输入动作不等于送达：请核对草稿；本工具已粘贴，勿再补 Ctrl+V，勿盲目重试。"
@@ -2672,14 +2665,16 @@ def desktop_press_key(window_id: str, key: str, count: int = 1) -> dict:
         return {"success": False, "error": "Enter 可能触发提交，禁止连发；每次 count=1 并核验结果"}
     hwnd = int(info["hwnd"])
     with controller._input_lock:
-        blocked = _require_foreground(hwnd)
+        blocked = None if controller.input.virtual else _require_foreground(hwnd)
         if blocked:
             return {**blocked, "action_performed": False, "effect_verified": False}
         if is_combo:
-            controller.input.hotkey(*parts)
+            sent = controller.input.hotkey(*parts, hwnd=hwnd)
+            if isinstance(sent, dict) and sent.get("success") is False: return sent
         else:
             for _ in range(count):
-                controller.input.press_key(key_norm, 0.15)
+                sent = controller.input.press_key(key_norm, 0.15, hwnd=hwnd)
+                if isinstance(sent, dict) and sent.get("success") is False: return sent
     # enter/tab/escape can trigger navigation or dialogs; others are cheap.
     _settle(controller, scale=1.0 if key_norm in ("enter", "tab", "escape") else 0.3)
     return {
@@ -2706,9 +2701,11 @@ def desktop_type_keys(window_id: str, text: str, interval: float = 0.03) -> dict
     hwnd = int(info["hwnd"])
     with controller._input_lock:
         # Foreground check inside the input lock (see desktop_type_text note).
-        blocked = _require_foreground(hwnd)
+        blocked = None if controller.input.virtual else _require_foreground(hwnd)
         if blocked:
             return blocked
+        if controller.input.virtual:
+            return controller.input.type_text(text, hwnd=hwnd)
         try:
             import pyautogui
             pyautogui.write(text, interval=max(0.0, min(float(interval), 0.3)))
@@ -3585,11 +3582,12 @@ def desktop_paste_clipboard_file(window_id: str, path: str = "", paths: list[str
 
     with controller._input_lock:
         # Foreground check inside the input lock (see desktop_type_text note).
-        blocked = _require_foreground(hwnd)
+        blocked = None if controller.input.virtual else _require_foreground(hwnd)
         if blocked:
             return blocked
         time.sleep(0.25)
-        controller.input.hotkey("ctrl", "v")
+        sent = controller.input.hotkey("ctrl", "v", hwnd=hwnd)
+        if isinstance(sent, dict) and sent.get("success") is False: return sent
     return {
         "success": True,
         "pasted": files,
@@ -3617,17 +3615,14 @@ def desktop_right_click(window_id: str, x: int, y: int) -> dict:
         return {"success": False, "error": "窗口客户区不可用"}
     abs_x = region.left + int(x / 1000 * region.width)
     abs_y = region.top + int(y / 1000 * region.height)
-    from pynput.mouse import Button
     with controller._input_lock:
-        controller._force_foreground(hwnd)
-        time.sleep(0.15)
-        mouse = controller.input.mouse
-        mouse.position = (abs_x, abs_y)
-        time.sleep(0.05)
-        mouse.press(Button.right)
-        mouse.release(Button.right)
+        result = controller.input.right_click_screen(abs_x, abs_y, hwnd=hwnd)
+    if result.get("success") is False:
+        return {**result, "window_id": window_id, "pos": [x, y]}
     _settle(controller)  # context menu popup/animation needs time to render
-    return {"success": True, "window_id": window_id, "pos": [x, y]}
+    return {"success": True, "window_id": window_id, "pos": [x, y],
+            "dispatch": result.get("dispatch", "physical"),
+            **({"effect": result["effect"]} if "effect" in result else {})}
 
 
 @tool("在已绑定窗口内拖拽/滑动（swipe）：从 (x1,y1) 按住拖到 (x2,y2)，0-1000 归一化坐标，自然轨迹模拟。用于滑块、拖拽上传、选区等。拖拽后会等待片刻让结果渲染完成再返回。")
@@ -3647,14 +3642,15 @@ def desktop_swipe(window_id: str, x1: int, y1: int, x2: int, y2: int, speed: flo
     if region is None:
         return {"success": False, "error": "窗口客户区不可用"}
     with controller._input_lock:
-        controller._force_foreground(hwnd)
+        if not controller.input.virtual: controller._force_foreground(hwnd)
         ax1 = region.left + int(x1 / 1000 * region.width)
         ay1 = region.top + int(y1 / 1000 * region.height)
         ax2 = region.left + int(x2 / 1000 * region.width)
         ay2 = region.top + int(y2 / 1000 * region.height)
-        controller.input.swipe_screen((ax1, ay1), (ax2, ay2), speed=float(min(max(speed, 0.2), 5.0)))
+        drag_result = controller.input.swipe_screen((ax1, ay1), (ax2, ay2), speed=float(min(max(speed, 0.2), 5.0)), hwnd=hwnd)
+    if isinstance(drag_result, dict) and drag_result.get("success") is False: return drag_result
     _settle(controller)
-    return {"success": True, "window_id": window_id, "from": [x1, y1], "to": [x2, y2]}
+    return {**(drag_result or {}), "success": True, "window_id": window_id, "from": [x1, y1], "to": [x2, y2]}
 
 
 @tool("在屏幕绝对像素坐标间拖拽，可跨越窗口（例如把桌面文件拖进应用、桌面图标整理）。"
@@ -3674,9 +3670,10 @@ def desktop_drag_screen(x1: int, y1: int, x2: int, y2: int, speed: float = 1.0) 
     if speed <= 1.0:
         speed = max(1.0, min(5.0, distance / 400.0))
     with controller._input_lock:
-        controller.input.swipe_screen((x1, y1), (x2, y2), speed=float(min(max(speed, 0.2), 5.0)))
+        drag_result = controller.input.swipe_screen((x1, y1), (x2, y2), speed=float(min(max(speed, 0.2), 5.0)))
+    if isinstance(drag_result, dict) and drag_result.get("success") is False: return drag_result
     _settle(controller)
-    return {"success": True, "from": [x1, y1], "to": [x2, y2],
+    return {**(drag_result or {}), "success": True, "from": [x1, y1], "to": [x2, y2],
             "coordinate_space": "screen_pixels",
             "note": "拖拽已执行；请截图确认目标是否收到文件或发生了预期变化。"}
 
@@ -4084,9 +4081,9 @@ def desktop_scroll(window_id: str, x: int, y: int, clicks: int = 3, direction: s
     hwnd = int(info["hwnd"])
     with controller._input_lock:
         # S1：激活后必须核验前台；核验不通过就拒绝，绝不把滚轮发给别的窗口。
-        if not _is_effectively_foreground(hwnd):
+        if not controller.input.virtual and not _is_effectively_foreground(hwnd):
             controller._force_foreground(hwnd)
-        if not _is_effectively_foreground(hwnd):
+        if not controller.input.virtual and not _is_effectively_foreground(hwnd):
             return {"success": False, "error": "SCROLL_TARGET_MISMATCH: 目标窗口不在前台，未派发滚轮",
                     "hint": "先 desktop_switch_window / 解除遮挡；其他窗口的内容不应被滚动。"}
         # S2：激活/最小化恢复后客户区可能已变化，必须在此之后重新取坐标。
@@ -4095,7 +4092,7 @@ def desktop_scroll(window_id: str, x: int, y: int, clicks: int = 3, direction: s
             return {"success": False, "error": "窗口客户区不可用"}
         abs_x = region.left + int(x / 1000 * region.width)
         abs_y = region.top + int(y / 1000 * region.height)
-        result = controller.input.scroll(abs_x, abs_y, int(clicks), direction)
+        result = controller.input.scroll(abs_x, abs_y, int(clicks), direction, hwnd=hwnd)
     _settle(controller, scale=0.4)  # lazy-loaded lists may need a moment to render
     # scroll() echoes ABSOLUTE coords under "x"/"y" — same normalization as
     # desktop_click: echo the input coords, move absolutes to screen_*.
@@ -4984,10 +4981,12 @@ def _uia_batch_step(controller, hwnd, region, table, step, remaining):
             pattern.SetValue(text)
             return "uia_value"
         wrapper.set_focus()
-        blocked = _require_foreground(hwnd)
+        blocked = None if controller.input.virtual else _require_foreground(hwnd)
         if blocked:
             raise ValueError(str(blocked["error"]))
-        sent = controller.input.type_text(text)
+        sent = controller.input.type_text(text, hwnd=hwnd)
+        if isinstance(sent, dict) and sent.get("success") is False:
+            raise ValueError(str(sent.get("error", "virtual text input failed")))
         method = "paste"
     else:
         if element["control_type"] != "Button":

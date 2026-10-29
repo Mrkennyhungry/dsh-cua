@@ -21,6 +21,11 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from . import desktop_tools
 from . import ledger
 
+# Captured once at import: the health response must describe loaded code, not
+# whatever files happen to be on disk after an update.
+_SOURCE_ROOT = Path(__file__).resolve().parent
+_INPUT_REVISION = hashlib.sha256((_SOURCE_ROOT / 'game' / 'input.py').read_bytes()).hexdigest()[:16]
+
 # Playwright is thread-affine inside web_tools: every web call must run on the
 # same worker or it re-attaches over CDP each time.
 _WEB_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="dsh-web")
@@ -233,6 +238,17 @@ class CursorRequest(BaseModel):
     x: int = Field(default=-1, ge=-1, le=20000)
     y: int = Field(default=-1, ge=-1, le=20000)
     visible: bool = True
+    theme: str = "whale-maid"
+    palette: str = "ocean"
+    scale: int = Field(default=1, ge=1, le=2)
+    action: str = "idle"
+
+
+class CursorStateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    active: bool
+    action: str | None = None
+    client_pid: int | None = Field(default=None, ge=1)
 
 
 class KeysRequest(CaptureBound):
@@ -576,7 +592,7 @@ def create_router(eternity) -> APIRouter:
             raise HTTPException(400, "A SHA256 DSH owner identity is required")
         path = request.url.path.removeprefix("/api/dsh")
         lifecycle_paths = ("/windows", "/apps", "/web", "/drag", "/files", "/clipboard", "/desktop", "/cursor", "/kb")
-        if any(path == prefix or path.startswith(prefix + "/") for prefix in lifecycle_paths):
+        if path not in ("/cursor/state", "/mascot/state") and any(path == prefix or path.startswith(prefix + "/") for prefix in lifecycle_paths):
             lifecycle_begin(owner)
         return owner
 
@@ -613,7 +629,14 @@ def create_router(eternity) -> APIRouter:
         # 实测 2026-10-27：`desktop_health` 返回 "pid": null。
         return {"status": "ok", "protocol": 1, "scheduler": "dsh", "parser": eternity.config.parser.engine,
                 "execution_enabled": bool(os.getenv("DEEPSEEK_API_KEY", "").strip()),
-                "bridge": {"pid": os.getpid()},
+                  "bridge": {"pid": os.getpid(), "source_root": str(_SOURCE_ROOT),
+                             "input_mode": "physical", "decoration": "task_commander",
+                             "input_revision": _INPUT_REVISION},
+                  "cursor": ({"visible": desktop_tools._CURSOR.visible,
+                              "target": desktop_tools._CURSOR._target,
+                              "action": desktop_tools._CURSOR._resolved_action(time.monotonic()),
+                              "error": desktop_tools._CURSOR.error}
+                             if desktop_tools._CURSOR is not None else {"visible": False, "started": False}),
                 "ledger": ledger.summary(5)}
 
     @router.post("/tasks")
@@ -1780,7 +1803,18 @@ def create_router(eternity) -> APIRouter:
 
     @router.post("/cursor")
     def cursor(req: CursorRequest):
-        return invoke(desktop_tools.desktop_cursor, req.window_id, req.x, req.y, req.visible)
+        return invoke(desktop_tools.desktop_cursor, req.window_id, req.x, req.y, req.visible, req.theme, req.palette, req.scale, req.action)
+
+    @router.post("/cursor/state")
+    @router.post("/mascot/state")
+    def cursor_state(req: CursorStateRequest, owner: str = Depends(authorize)):
+        overlay = desktop_tools._cursor_overlay()
+        if req.active:
+            overlay.begin_task(owner, lease_seconds=35, client_pid=req.client_pid)
+            if req.action: overlay.action(req.action)
+        else:
+            overlay.end_task(owner)
+        return {"success": overlay.error is None, "active": req.active, "error": overlay.error}
 
     @router.post("/windows/{window_id}/keys")
     def window_keys(window_id: str, req: KeysRequest):

@@ -1070,6 +1070,13 @@ class Eternity:
 
         """Thread target: run the agent conversation, store result on completion."""
         handle._started_at = _time.monotonic()
+        cursor = None
+        try:
+            from .desktop_tools import _cursor_overlay
+            cursor = _cursor_overlay()
+            cursor.begin_task(handle.session_id)
+        except Exception:
+            logger.debug("Cursor thinking feedback unavailable", exc_info=True)
         error_type = None
         error_detail = None
         try:
@@ -1171,6 +1178,8 @@ class Eternity:
             handle.publish(EVT_ERROR, {"message": "agent exception"})
         finally:
             duration_s = round(_time.monotonic() - handle._started_at, 1)
+            if cursor is not None:
+                cursor.end_task(handle.session_id)
             # Business outcome (tri-state), not just framework health: an
             # agent that gives up gracefully ("未能完成：...") is NOT a success.
             res = handle.result or {}

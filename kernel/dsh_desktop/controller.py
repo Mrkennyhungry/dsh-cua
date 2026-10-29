@@ -378,8 +378,8 @@ class AppController:
 
             # Absolute mouse position on the virtual screen
             try:
-                mx, my = win32gui.GetCursorPos()
-                mouse_pos: dict = {"absolute": [mx, my]}
+                point, source = self._screen_pointer_position()
+                mouse_pos: dict = {"absolute": list(point) if point else None, "source": source}
             except Exception:
                 mouse_pos = {"absolute": None}
 
@@ -473,12 +473,13 @@ class AppController:
         """
         if not self.window.is_valid(hwnd):
             return {"success": False, "error": f"Invalid window handle: {hwnd}"}
-        blocked = self._require_foreground(hwnd)
+        blocked = None if self.input.virtual else self._require_foreground(hwnd)
         if blocked:
             return blocked
 
         with self._input_lock:
-            self.input.press_key(key, wait_time)
+            result = self.input.press_key(key, wait_time, hwnd=hwnd)
+            if isinstance(result, dict) and result.get("success") is False: return result
         return {"success": True, "key": key}
 
     # VM environment: composite hotkeys are unreliable (host key events leak in),
@@ -512,12 +513,13 @@ class AppController:
                 ),
                 "allowed": ["ctrl+c", "ctrl+v", "ctrl+a"],
             }
-        blocked = self._require_foreground(hwnd)
+        blocked = None if self.input.virtual else self._require_foreground(hwnd)
         if blocked:
             return blocked
 
         with self._input_lock:
-            self.input.hotkey(*normalized)
+            result = self.input.hotkey(*normalized, hwnd=hwnd)
+            if isinstance(result, dict) and result.get("success") is False: return result
         return {"success": True, "keys": list(normalized), "purpose": self.HOTKEY_ALLOWLIST[normalized]}
 
     @tool("Scroll the mouse wheel at a position. Coordinates normalized [0,1000]. Positive=up/right, negative=down/left.")
@@ -542,11 +544,11 @@ class AppController:
         abs_x = region.left + int(x / 1000 * region.width)
         abs_y = region.top + int(y / 1000 * region.height)
 
-        blocked = self._require_foreground(hwnd)
+        blocked = None if self.input.virtual else self._require_foreground(hwnd)
         if blocked:
             return blocked
         with self._input_lock:
-            result = self.input.scroll(abs_x, abs_y, clicks, direction)
+            result = self.input.scroll(abs_x, abs_y, clicks, direction, hwnd=hwnd)
         return result
 
     @tool("Type text into the focused input via clipboard paste (Ctrl+V). Supports Unicode/CJK. NO activation — requires the window to be foreground already (activate first or click the input).")
@@ -558,13 +560,13 @@ class AppController:
         """
         if not self.window.is_valid(hwnd):
             return {"success": False, "error": f"Invalid window handle: {hwnd}"}
-        blocked = self._require_foreground(hwnd)
+        blocked = None if self.input.virtual else self._require_foreground(hwnd)
         if blocked:
             return blocked
 
         with self._input_lock:
             time.sleep(0.1)
-            result = self.input.type_text(text)
+            result = self.input.type_text(text, hwnd=hwnd)
         return result
 
     @tool("Drag from one point to another using natural mouse simulation. Coordinates normalized [0,1000].", name="drag")
@@ -586,12 +588,13 @@ class AppController:
             return {"success": False, "error": "Window client region not available"}
 
         with self._input_lock:
-            self._force_foreground(hwnd)
+            if not self.input.virtual: self._force_foreground(hwnd)
             abs_x1 = region.left + int(x1 / 1000 * region.width)
             abs_y1 = region.top + int(y1 / 1000 * region.height)
             abs_x2 = region.left + int(x2 / 1000 * region.width)
             abs_y2 = region.top + int(y2 / 1000 * region.height)
-            self.input.swipe_screen((abs_x1, abs_y1), (abs_x2, abs_y2), speed=speed)
+            result = self.input.swipe_screen((abs_x1, abs_y1), (abs_x2, abs_y2), speed=speed, hwnd=hwnd)
+            if isinstance(result, dict) and result.get("success") is False: return result
         return {"success": True, "from": [x1, y1], "to": [x2, y2]}
 
     @tool("Move mouse cursor to normalized [0,1000] coordinates. Brings the window to foreground.")
@@ -610,10 +613,10 @@ class AppController:
             return {"success": False, "error": "Window client region not available"}
 
         with self._input_lock:
-            self._force_foreground(hwnd)
+            if not self.input.virtual: self._force_foreground(hwnd)
             abs_x = region.left + int(x / 1000 * region.width)
             abs_y = region.top + int(y / 1000 * region.height)
-            self.input.mouse_move_screen(abs_x, abs_y)
+            self.input.mouse_move_screen(abs_x, abs_y, hwnd=hwnd)
         return {"success": True, "x": x, "y": y}
 
     @tool("Start a program and wait for its window. Returns hwnd. Use app='name' for registered apps or exe='path' for direct launch.")
@@ -885,10 +888,20 @@ class AppController:
 
     # ── Private helpers ─────────────────────────────────────────────────
 
+    def _screen_pointer_position(self):
+        if self.input.virtual:
+            from .cursor_overlay import peek_cursor_overlay
+            overlay = peek_cursor_overlay()
+            return (overlay._target if overlay is not None else None), "virtual"
+        return win32gui.GetCursorPos(), "physical"
+
     def _get_mouse_position(self, hwnd: int) -> dict:
         """Get normalized mouse position [0,1000] relative to window client area."""
         try:
-            sx, sy = win32gui.GetCursorPos()
+            point, source = self._screen_pointer_position()
+            if point is None:
+                return {"normalized": None, "source": source}
+            sx, sy = point
             if not self.window.is_valid(hwnd):
                 return {"normalized": None, "error": "Invalid window"}
 
@@ -908,7 +921,8 @@ class AppController:
             nx = int(cx / width * 1000) if width > 0 else None
             ny = int(cy / height * 1000) if height > 0 else None
 
-            return {"normalized": [nx, ny] if nx is not None and ny is not None else None}
+            return {"normalized": [nx, ny] if nx is not None and ny is not None else None,
+                    "absolute": [sx, sy], "source": source}
         except Exception as e:
             logger.debug("Failed to get mouse position: %s", e)
             return {"normalized": None, "error": str(e)}

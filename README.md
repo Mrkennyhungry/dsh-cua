@@ -1,5 +1,9 @@
 # DSH Desktop Automation
 
+Desktop coordinate actions use the physical mouse. Task feedback uses a docked,
+click-through pixel whale-maid commander with speech bubbles and wand poses,
+plus the 2-second window glow. See [commander mode](docs/commander-mode.md).
+
 Windows desktop and browser automation for DSH. The Python kernel source ships inside this plugin under `kernel/dsh_desktop`; runtime setup installs only Python dependencies — the OCR and vision model weights are bundled in `vendor/weights`.
 
 **Install in one line** — paste this into **Plugins → Add plugin** in DSH, restart, then run `scripts\bootstrap.ps1` once:

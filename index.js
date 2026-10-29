@@ -4,6 +4,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createBridge, ownerOf } from './bridge-client.js'
+import { installCursorThinking } from './cursor-state.js'
 
 export const name = 'doraemon'
 export const inject = ['tools']
@@ -177,9 +178,17 @@ export function apply(ctx, config) {
     },
   })
   const active = new Map()
+  const cursorFeedback = installCursorThinking(ctx, bridge)
   const registered = []
   const register = (tool) => {
-    ctx.tools.register(tool)
+    const execute = tool.execute
+    ctx.tools.register({ ...tool, async execute(args, exec) {
+      cursorFeedback.begin(exec.agent?.session, tool.name, args)
+      const onAbort = () => cursorFeedback.end(exec.agent?.session)
+      exec.signal?.addEventListener('abort', onAbort, { once: true })
+      try { return await execute.call(tool, args, exec) }
+      finally { exec.signal?.removeEventListener('abort', onAbort) }
+    } })
     registered.push(tool.name)
   }
 
@@ -218,6 +227,7 @@ export function apply(ctx, config) {
     }))
   }
   ctx.effect(() => async () => {
+    await cursorFeedback.dispose()
     if (bridge.ready) {
       await Promise.allSettled([...active].map(([taskId, owner]) =>
         bridge.request(bridge.taskPath(taskId, '/stop'), owner, { body: {} })))
@@ -700,7 +710,7 @@ export function apply(ctx, config) {
 
   register(defineTool({
     name: 'doraemon_type',
-    description: 'Enter literal text into a bound window. Prefer doraemon_invoke(action="set", value=...) when the UIA Edit control supports SetValue; otherwise use mode=paste (default), which uses the clipboard and avoids IME/key-layout conversion. Reserve mode=keys for short key sequences only; Chinese IME or keyboard layout can alter typed punctuation. After typing, verify the target Edit value through doraemon_uia before saving or submitting.',
+    description: 'Enter literal text into a bound window. Prefer UIA SetValue where supported. Otherwise paste uses the clipboard and requires the intended input to be foreground; mode=keys is for short literal key sequences. Physical mouse input handles focus. The corner commander only changes pose. Verify the target value before submitting.',
     parameters: {
       window_id: windowIdParameter,
       text: { type: 'string', required: true, description: '1–2000 characters for paste, 1–500 for keys.' },
@@ -772,7 +782,7 @@ export function apply(ctx, config) {
 
   register(defineTool({
     name: 'doraemon_swipe',
-    description: 'Drag from one normalized point to another inside a bound window, with a natural trajectory (sliders, drag-and-drop, text selection).',
+    description: 'Move the physical mouse along a natural drag path between normalized points inside a bound window. The decorative corner commander stays docked and only changes pose. Verify that the application accepted the drop.',
     parameters: {
       window_id: windowIdParameter,
       x1: { type: 'number', required: true, description: 'Start x, 0–1000.' },
@@ -1083,42 +1093,6 @@ export function apply(ctx, config) {
         body: { quiet_ms, timeout_ms, threshold, max_changed_cells, interval_ms },
         signal: exec.signal,
         timeoutMs: timeout_ms + 20000,
-      })
-    },
-  }))
-
-  register(defineTool({
-    name: 'doraemon_cursor',
-    description: 'Show or move a cosmetic overlay cursor: transparent, always on top, click-through, and it never moves the physical mouse. Give window_id plus normalized x/y, or raw screen pixels with window_id omitted. visible=false hides it. This is purely visual — it does not click anything; once shown, subsequent clicks move it to the action point.',
-    parameters: {
-      window_id: { type: 'string', description: 'Bound window id; omit to use raw screen coordinates.' },
-      x: { type: 'number', description: 'Normalized 0–1000 within window_id, or screen pixel x without it.' },
-      y: { type: 'number', description: 'Normalized 0–1000 within window_id, or screen pixel y without it.' },
-      visible: { type: 'boolean', description: 'false hides the overlay (default true).' },
-    },
-    output,
-    async execute(args, exec) {
-      const visible = args.visible !== false
-      let windowId = ''
-      let x = -1
-      let y = -1
-      if (visible) {
-        x = Number(args.x)
-        y = Number(args.y)
-        if (Number.isFinite(x) && Number.isFinite(y)) {
-          if (String(args.window_id ?? '').trim()) {
-            windowId = boundWindowId(args.window_id)
-          } else {
-            x = Math.trunc(x)
-            y = Math.trunc(y)
-          }
-        } else {
-          throw new Error('x and y are required when visible=true')
-        }
-      }
-      return bridge.request('/cursor', ownerOf(exec), {
-        body: { window_id: windowId, x: visible ? Math.trunc(x) : -1, y: visible ? Math.trunc(y) : -1, visible },
-        signal: exec.signal,
       })
     },
   }))

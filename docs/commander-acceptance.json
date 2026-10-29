@@ -1,0 +1,116 @@
+{
+  "checks": [
+    {
+      "name": "summon does not change foreground",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "decoration is visible and error-free",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "transparent layered no-activate tool window",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "bubble passes native hit testing to Edit",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "commander is in decoration allowlist only",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "decoration excluded from screen capture",
+      "passed": true,
+      "detail": {
+        "display_affinity": true,
+        "different_pixels": 0
+      }
+    },
+    {
+      "name": "real mouse moves to click target",
+      "passed": true,
+      "detail": {
+        "actual": [
+          180,
+          189
+        ],
+        "expected": [
+          181,
+          190
+        ]
+      }
+    },
+    {
+      "name": "click through bubble focuses native Edit",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "physical right click opens native Edit context menu",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "commander stays docked during physical right click",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "physical wheel delivers three detents",
+      "passed": true,
+      "detail": -360
+    },
+    {
+      "name": "physical drag reaches destination",
+      "passed": true,
+      "detail": [
+        199,
+        140
+      ]
+    },
+    {
+      "name": "character never follows real pointer",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "physical clipboard typing reaches Edit",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "task completion leaves no visible character",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "late tool feedback cannot resurrect character",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "abandoned lease self-cleans",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "owner process exit removes character",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "input is physical",
+      "passed": true,
+      "detail": null
+    }
+  ],
+  "passed": 19,
+  "failed": 0
+}

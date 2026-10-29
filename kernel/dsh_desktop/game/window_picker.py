@@ -104,6 +104,8 @@ class WindowPicker:
 
         def callback(hwnd: int, _) -> bool:
             try:
+                from ..decorations import is_decoration_window
+                if is_decoration_window(hwnd): return True
                 if not win32gui.IsWindowVisible(hwnd):
                     return True
                 if win32gui.IsIconic(hwnd):

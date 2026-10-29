@@ -1,0 +1,183 @@
+{
+  "source": "docs/images/whale-maid-reference-v2.png",
+  "grid": {
+    "columns": 4,
+    "rows": 3,
+    "cell": [
+      362,
+      362
+    ]
+  },
+  "frame_size": 48,
+  "resample": "nearest",
+  "frames": [
+    {
+      "index": 0,
+      "row": 0,
+      "column": 0,
+      "file": "frame_00.png",
+      "size": [
+        48,
+        48
+      ],
+      "source_cell": [
+        362,
+        362
+      ]
+    },
+    {
+      "index": 1,
+      "row": 0,
+      "column": 1,
+      "file": "frame_01.png",
+      "size": [
+        48,
+        48
+      ],
+      "source_cell": [
+        362,
+        362
+      ]
+    },
+    {
+      "index": 2,
+      "row": 0,
+      "column": 2,
+      "file": "frame_02.png",
+      "size": [
+        48,
+        48
+      ],
+      "source_cell": [
+        362,
+        362
+      ]
+    },
+    {
+      "index": 3,
+      "row": 0,
+      "column": 3,
+      "file": "frame_03.png",
+      "size": [
+        48,
+        48
+      ],
+      "source_cell": [
+        362,
+        362
+      ]
+    },
+    {
+      "index": 4,
+      "row": 1,
+      "column": 0,
+      "file": "frame_04.png",
+      "size": [
+        48,
+        48
+      ],
+      "source_cell": [
+        362,
+        362
+      ]
+    },
+    {
+      "index": 5,
+      "row": 1,
+      "column": 1,
+      "file": "frame_05.png",
+      "size": [
+        48,
+        48
+      ],
+      "source_cell": [
+        362,
+        362
+      ]
+    },
+    {
+      "index": 6,
+      "row": 1,
+      "column": 2,
+      "file": "frame_06.png",
+      "size": [
+        48,
+        48
+      ],
+      "source_cell": [
+        362,
+        362
+      ]
+    },
+    {
+      "index": 7,
+      "row": 1,
+      "column": 3,
+      "file": "frame_07.png",
+      "size": [
+        48,
+        48
+      ],
+      "source_cell": [
+        362,
+        362
+      ]
+    },
+    {
+      "index": 8,
+      "row": 2,
+      "column": 0,
+      "file": "frame_08.png",
+      "size": [
+        48,
+        48
+      ],
+      "source_cell": [
+        362,
+        362
+      ]
+    },
+    {
+      "index": 9,
+      "row": 2,
+      "column": 1,
+      "file": "frame_09.png",
+      "size": [
+        48,
+        48
+      ],
+      "source_cell": [
+        362,
+        362
+      ]
+    },
+    {
+      "index": 10,
+      "row": 2,
+      "column": 2,
+      "file": "frame_10.png",
+      "size": [
+        48,
+        48
+      ],
+      "source_cell": [
+        362,
+        362
+      ]
+    },
+    {
+      "index": 11,
+      "row": 2,
+      "column": 3,
+      "file": "frame_11.png",
+      "size": [
+        48,
+        48
+      ],
+      "source_cell": [
+        362,
+        362
+      ]
+    }
+  ]
+}

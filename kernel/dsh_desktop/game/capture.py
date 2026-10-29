@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+from contextlib import nullcontext
 
 import cv2
 import mss
@@ -10,6 +11,12 @@ import numpy as np
 from . import window
 
 logger = logging.getLogger(__name__)
+
+
+def _cursor_guard():
+    from ..cursor_overlay import peek_cursor_overlay
+    overlay = peek_cursor_overlay()
+    return overlay.capture_guard() if overlay is not None else nullcontext()
 
 
 class CaptureService:
@@ -34,7 +41,7 @@ class CaptureService:
                 return None
 
             r = region.as_tuple()
-            with mss.mss() as sct:
+            with _cursor_guard(), mss.mss() as sct:
                 raw = sct.grab({"left": r[0], "top": r[1], "width": r[2], "height": r[3]})
             image = np.array(raw)
 
@@ -90,7 +97,7 @@ class CaptureService:
     def capture_desktop(self) -> np.ndarray | None:
         """Capture the entire desktop (all monitors combined)."""
         try:
-            with mss.mss() as sct:
+            with _cursor_guard(), mss.mss() as sct:
                 monitor = sct.monitors[0]  # [0] = virtual screen spanning all monitors
                 raw = sct.grab(monitor)
             return cv2.cvtColor(np.array(raw), cv2.COLOR_BGRA2BGR)

@@ -22,8 +22,8 @@ from .cursor_overlay import (AC_SRC_ALPHA, AC_SRC_OVER, BLENDFUNCTION, BITMAPINF
 from .oklch import oklch_to_rgb
 
 PAD = 10
-IDLE_SECONDS = 4.0
-PERIOD_SECONDS = 2.6
+IDLE_SECONDS = 2.0
+PERIOD_SECONDS = 2.0
 ALPHA_MIN, ALPHA_MAX = 150, 235
 HUE = 252.0          # blue
 CHROMA = 0.085       # deliberately muted

@@ -19,6 +19,7 @@
   "files": [
     "index.js",
     "bridge-client.js",
+    "cursor-state.js",
     "kernel.js",
     "cordis.patch.yml",
     "README.md",
@@ -28,6 +29,7 @@
     "!kernel/**/__pycache__/**",
     "!kernel/**/*.pyc",
     "scripts/bootstrap.ps1",
+    "scripts/reload-cursor-kernel.ps1",
     "scripts/install-elevated-task.ps1",
     "scripts/run-kernel-high.py",
     "vendor/weights/**/*",

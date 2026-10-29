@@ -20,9 +20,43 @@ class InputService:
         self.window = window_service or window.WindowService()
         self.mouse = Controller()
 
+    @property
+    def virtual(self):
+        # Kept for controller compatibility. Input is always physical.
+        return False
+
+    def _feedback(self, action):
+        try:
+            from ..cursor_overlay import peek_cursor_overlay
+            overlay = peek_cursor_overlay()
+            if overlay is not None: overlay.action(action)
+        except Exception:
+            pass
+
+    def _verify_pointer_target(self, x, y):
+        try:
+            actual = tuple(map(int,self.mouse.position))
+            if abs(actual[0]-int(x))<=2 and abs(actual[1]-int(y))<=2: return None
+        except Exception:
+            actual = None
+        return {'success':False,'dispatch':'physical','error':'PHYSICAL_POINTER_MOVE_FAILED: no button or wheel event was sent',
+                'expected':[int(x),int(y)],'actual':actual}
+
+    def right_click_screen(self, x, y, hwnd=None):
+        self._feedback('right_click')
+        self._human_move_to(x, y)
+        failed = self._verify_pointer_target(x,y)
+        if failed: return failed
+        self.mouse.press(Button.right)
+        self.mouse.release(Button.right)
+        return {'success': True, 'dispatch': 'physical', 'x': x, 'y': y}
+
     def click_screen(self, x: int, y: int, clicks: int = 1) -> dict:
         """Click at absolute screen coordinates with human-like movement and timing."""
+        self._feedback('click')
         self._human_move_to(x, y)
+        failed = self._verify_pointer_target(x,y)
+        if failed: return failed
 
         for i in range(clicks):
             if i > 0:
@@ -32,7 +66,7 @@ class InputService:
             time.sleep(random.uniform(0.04, 0.10))
             self.mouse.release(Button.left)
 
-        return {"success": True, "x": x, "y": y, "clicks": clicks}
+        return {"success": True, "dispatch":"physical", "x": x, "y": y, "clicks": clicks}
 
     def _human_move_to(self, x: int, y: int) -> None:
         """Move mouse to (x, y) along a natural Bezier curve with jitter."""
@@ -129,20 +163,23 @@ class InputService:
     def mouse_up(self):
         pyautogui.mouseUp()
 
-    def mouse_move_screen(self, x: int, y: int):
+    def mouse_move_screen(self, x: int, y: int, hwnd=None):
         """Move mouse with human-like curved path and jitter."""
         self._human_move_to(x, y)
 
-    def press_key(self, key: str, wait_time: float = 0.2):
+    def press_key(self, key: str, wait_time: float = 0.2, hwnd=None):
+        self._feedback("key")
         pyautogui.keyDown(key)
-        time.sleep(wait_time)
-        pyautogui.keyUp(key)
+        try:
+            time.sleep(wait_time)
+        finally:
+            pyautogui.keyUp(key)
 
-    def hotkey(self, *keys: str):
+    def hotkey(self, *keys: str, hwnd=None):
         """Press a combination of keys simultaneously (e.g. hotkey('alt', 'left'))."""
         pyautogui.hotkey(*keys)
 
-    def scroll(self, x: int, y: int, clicks: int, direction: str = "vertical") -> dict:
+    def scroll(self, x: int, y: int, clicks: int, direction: str = "vertical", hwnd=None) -> dict:
         """Scroll mouse wheel at specified screen coordinates with human-like movement.
 
         Args:
@@ -152,23 +189,26 @@ class InputService:
         """
         self._human_move_to(x, y)
         time.sleep(random.uniform(0.05, 0.15))
+        failed = self._verify_pointer_target(x,y)
+        if failed: return failed
 
         # A number of desktop apps handle each wheel event as one step even
         # when its delta represents several detents. Send one real detent per
         # event so a request for N clicks is not silently reduced to N/chunk.
         sign = 1 if clicks >= 0 else -1
+        mouse_event = ctypes.windll.user32.mouse_event
+        mouse_event.argtypes = [ctypes.c_uint32,ctypes.c_uint32,ctypes.c_uint32,ctypes.c_uint32,ctypes.c_size_t]
+        mouse_event.restype = None
         for index in range(abs(clicks)):
             delta = sign * 120  # WHEEL_DELTA on Windows
-            if direction == "horizontal":
-                pyautogui.hscroll(delta, _pause=False)
-            else:
-                pyautogui.scroll(delta, _pause=False)
+            mouse_event(0x1000 if direction == 'horizontal' else 0x0800,
+                        0,0,ctypes.c_uint32(delta).value,0)
             if index + 1 < abs(clicks):
                 time.sleep(0.02)
 
         return {"success": True, "x": x, "y": y, "clicks": clicks}
 
-    def type_text(self, text: str) -> dict:
+    def type_text(self, text: str, hwnd=None) -> dict:
         """Type text via clipboard (Ctrl+V) to support Unicode/CJK characters."""
         if not text:
             return {"success": False, "error": "Empty text"}
@@ -216,7 +256,7 @@ class InputService:
         time.sleep(0.1)
         return {"success": True, "length": len(text)}
 
-    def swipe_screen(self, p1, p2, speed: float = 1.0):
+    def swipe_screen(self, p1, p2, speed: float = 1.0, hwnd=None):
         """Natural swipe using cubic Bezier curve with easing and random jitter."""
         p1 = np.array(p1, dtype=float)
         p2 = np.array(p2, dtype=float)
@@ -238,32 +278,36 @@ class InputService:
         total_time = random.uniform(max(0.08, base_time * 0.8), base_time * 1.2)
 
         self.mouse.position = (int(p1[0]), int(p1[1]))
+        failed = self._verify_pointer_target(*p1)
+        if failed: return failed
         time.sleep(random.uniform(0.01, 0.03))
         self.mouse.press(Button.left)
+        try:
 
-        for i in range(1, segments + 1):
-            # Ease-in-out: slow at start/end, faster in middle
-            t = i / segments
-            eased = t * t * (3 - 2 * t)
+            for i in range(1, segments + 1):
+                # Ease-in-out: slow at start/end, faster in middle
+                t = i / segments
+                eased = t * t * (3 - 2 * t)
 
-            # Cubic Bezier interpolation
-            b = (1 - eased)**3 * p1 + \
-                3 * (1 - eased)**2 * eased * cp1 + \
-                3 * (1 - eased) * eased**2 * cp2 + \
-                eased**3 * p2
+                # Cubic Bezier interpolation
+                b = (1 - eased)**3 * p1 + \
+                    3 * (1 - eased)**2 * eased * cp1 + \
+                    3 * (1 - eased) * eased**2 * cp2 + \
+                    eased**3 * p2
 
-            # Add small random jitter (±1-2 pixels)
-            jitter = np.array([random.uniform(-1.5, 1.5), random.uniform(-1.5, 1.5)])
-            pos = b + jitter
+                # Add small random jitter (±1-2 pixels)
+                jitter = np.array([random.uniform(-1.5, 1.5), random.uniform(-1.5, 1.5)])
+                pos = b + jitter
 
-            self.mouse.position = (int(pos[0]), int(pos[1]))
+                self.mouse.position = (int(pos[0]), int(pos[1]))
 
-            # Variable delay: longer at start/end, shorter in middle
-            delay_factor = 1.0 + 0.5 * (1 - math.sin(math.pi * eased))
-            step_delay = (total_time / segments) * delay_factor
-            time.sleep(max(0.001, step_delay))
+                # Variable delay: longer at start/end, shorter in middle
+                delay_factor = 1.0 + 0.5 * (1 - math.sin(math.pi * eased))
+                step_delay = (total_time / segments) * delay_factor
+                time.sleep(max(0.001, step_delay))
 
-        self.mouse.release(Button.left)
+        finally:
+            self.mouse.release(Button.left)
 
 
 Input = InputService

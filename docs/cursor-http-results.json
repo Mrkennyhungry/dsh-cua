@@ -1,0 +1,474 @@
+{
+  "checks": [
+    {
+      "name": "bound click reaches native child at exact coordinates",
+      "passed": true,
+      "detail": {
+        "success": true,
+        "dispatch": "message",
+        "effect": "unconfirmed",
+        "x": 301,
+        "y": 370,
+        "clicks": 1,
+        "note": "Messages delivered; verify the target UI before continuing."
+      }
+    },
+    {
+      "name": "native double click receives DBLCLK",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "native right click receives down and up",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "native scroll receives three wheel events",
+      "passed": true,
+      "detail": {
+        "success": true,
+        "dispatch": "message",
+        "effect": "unconfirmed",
+        "x": 301,
+        "y": 370,
+        "clicks": -3,
+        "note": "Wheel messages delivered; verify the target scrolled."
+      }
+    },
+    {
+      "name": "native drag receives 20 moves and release at destination",
+      "passed": true,
+      "detail": {
+        "success": true,
+        "dispatch": "message",
+        "effect": "unconfirmed",
+        "note": "Drag messages delivered; verify the target moved."
+      }
+    },
+    {
+      "name": "virtual Unicode input changes native Edit value",
+      "passed": true,
+      "detail": {
+        "success": true,
+        "dispatch": "message",
+        "effect": "unconfirmed",
+        "length": 8
+      }
+    },
+    {
+      "name": "virtual key edits only owned control",
+      "passed": true,
+      "detail": {
+        "success": true,
+        "dispatch": "message",
+        "effect": "unconfirmed"
+      }
+    },
+    {
+      "name": "virtual select-all replaces only owned Edit text",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "virtual sprite visibly moves between targets",
+      "passed": true,
+      "detail": {
+        "from": [
+          301,
+          370,
+          349,
+          418
+        ],
+        "to": [
+          451,
+          420,
+          499,
+          468
+        ]
+      }
+    },
+    {
+      "name": "thinking resumes while task remains active",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "overlay visible and error-free",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "finishing task hides sprite",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "HTTP click reaches owned native child",
+      "passed": true,
+      "detail": {
+        "success": true,
+        "dispatch": "message",
+        "effect": "confirmed",
+        "clicks": 1,
+        "note": "Messages delivered; verify the target UI before continuing.",
+        "screen_x": 300,
+        "screen_y": 370,
+        "x": 204,
+        "y": 477,
+        "window_id": "win-b017d00538",
+        "duration_ms": 313,
+        "acted_window": {
+          "window_id": "win-b017d00538",
+          "title": "Doraemon direct verification",
+          "exe": "python.exe"
+        },
+        "windows_added": [
+          {
+            "hwnd": 149753804,
+            "title": "cursor",
+            "exe": "python.exe"
+          }
+        ],
+        "windows_removed": [],
+        "window_evidence": "new_window",
+        "visual_delta": null,
+        "visual_cells": null
+      }
+    },
+    {
+      "name": "HTTP right click reaches owned native child",
+      "passed": true,
+      "detail": {
+        "success": true,
+        "window_id": "win-b017d00538",
+        "pos": [
+          204,
+          477
+        ],
+        "dispatch": "message",
+        "effect": "suspected_noop",
+        "duration_ms": 1203,
+        "obstruction": {
+          "foreground": {
+            "hwnd": 6686792,
+            "title": "ChatGPT",
+            "exe": "ChatGPT.exe",
+            "is_target": false
+          },
+          "overlaps": [
+            {
+              "hwnd": 9242302,
+              "title": "*dsh-markettest-v41flash-20261027.txt - Notepad",
+              "exe": "Notepad.exe",
+              "minimized": null
+            },
+            {
+              "hwnd": 15929192,
+              "title": "Windows 输入体验",
+              "exe": "TextInputHost.exe",
+              "minimized": null
+            },
+            {
+              "hwnd": 28247476,
+              "title": "Program Manager",
+              "exe": "explorer.exe",
+              "minimized": null
+            }
+          ],
+          "blockers": [],
+          "advice": "前台不是目标窗口（当前是 'ChatGPT.exe' 'ChatGPT'），键盘输入会打到它上面。先激活目标窗口，或关掉占位的那个。"
+        },
+        "desktop_screenshot": "C:\\Users\\kennyyzhang\\Documents\\deepseek-harness\\default-workspace\\plugins\\dsh-doraemon\\.runtime\\screenshots\\2026-10-29\\desktop_20261029_164402_720788.jpeg",
+        "foreground_now": {
+          "hwnd": 56954684,
+          "title": "Doraemon direct verification",
+          "class": "DoraemonInputTest53972"
+        },
+        "acted_window": {
+          "window_id": "win-b017d00538",
+          "title": "Doraemon direct verification",
+          "exe": "python.exe"
+        },
+        "windows_added": [],
+        "windows_removed": [],
+        "window_evidence": null,
+        "visual_delta": 0.0,
+        "visual_cells": 0,
+        "escalation": {
+          "recommended": "analyze",
+          "reason": "no_visual_change"
+        }
+      }
+    },
+    {
+      "name": "HTTP scroll changes owned window scroll state",
+      "passed": true,
+      "detail": {
+        "success": true,
+        "dispatch": "message",
+        "effect": "confirmed",
+        "clicks": -2,
+        "note": "Wheel messages delivered; verify the target scrolled.",
+        "screen_x": 300,
+        "screen_y": 370,
+        "x": 204,
+        "y": 477,
+        "window_id": "win-b017d00538",
+        "direction": "vertical",
+        "duration_ms": 481,
+        "acted_window": {
+          "window_id": "win-b017d00538",
+          "title": "Doraemon direct verification",
+          "exe": "python.exe"
+        },
+        "windows_added": [],
+        "windows_removed": [],
+        "window_evidence": null,
+        "visual_delta": 0.07,
+        "visual_cells": 5,
+        "evidence": {
+          "focus_evidence": true,
+          "is_foreground": true,
+          "hwnd_active": 56954684,
+          "hwnd_focus": 112137136,
+          "focus_changed": false,
+          "became_foreground": false
+        }
+      }
+    },
+    {
+      "name": "HTTP drag moves the owned object",
+      "passed": true,
+      "detail": {
+        "success": true,
+        "dispatch": "message",
+        "effect": "suspected_noop",
+        "note": "Drag messages delivered; verify the target moved.",
+        "window_id": "win-b017d00538",
+        "from": [
+          204,
+          477
+        ],
+        "to": [
+          390,
+          609
+        ],
+        "duration_ms": 1411,
+        "obstruction": {
+          "foreground": {
+            "hwnd": 56954684,
+            "title": "Doraemon direct verification",
+            "exe": "python.exe",
+            "is_target": true
+          },
+          "overlaps": [
+            {
+              "hwnd": 9242302,
+              "title": "*dsh-markettest-v41flash-20261027.txt - Notepad",
+              "exe": "Notepad.exe",
+              "minimized": null
+            },
+            {
+              "hwnd": 15929192,
+              "title": "Windows 输入体验",
+              "exe": "TextInputHost.exe",
+              "minimized": null
+            },
+            {
+              "hwnd": 28247476,
+              "title": "Program Manager",
+              "exe": "explorer.exe",
+              "minimized": null
+            }
+          ],
+          "blockers": [],
+          "advice": "有窗口压在目标上：'*dsh-markettest-v41flash-20261027.txt - '（Notepad.exe）。先关掉或移开它。"
+        },
+        "desktop_screenshot": "C:\\Users\\kennyyzhang\\Documents\\deepseek-harness\\default-workspace\\plugins\\dsh-doraemon\\.runtime\\screenshots\\2026-10-29\\desktop_20261029_164408_292271.jpeg",
+        "foreground_now": {
+          "hwnd": 56954684,
+          "title": "Doraemon direct verification",
+          "class": "DoraemonInputTest53972"
+        },
+        "acted_window": {
+          "window_id": "win-b017d00538",
+          "title": "Doraemon direct verification",
+          "exe": "python.exe"
+        },
+        "windows_added": [],
+        "windows_removed": [],
+        "window_evidence": null,
+        "visual_delta": 0.04,
+        "visual_cells": 2,
+        "escalation": {
+          "recommended": "analyze",
+          "reason": "no_visual_change"
+        }
+      }
+    },
+    {
+      "name": "HTTP virtual select all accepted",
+      "passed": true,
+      "detail": {
+        "success": true,
+        "key": "ctrl+a",
+        "count": 1,
+        "window_id": "win-b017d00538",
+        "action_performed": true,
+        "effect_verified": false,
+        "note": "按键已调用，不代表提交成功或消息送达；核验目标会话后再计数，状态不明勿重发。",
+        "duration_ms": 369,
+        "effect": "confirmed",
+        "acted_window": {
+          "window_id": "win-b017d00538",
+          "title": "Doraemon direct verification",
+          "exe": "python.exe"
+        },
+        "windows_added": [],
+        "windows_removed": [],
+        "window_evidence": null,
+        "visual_delta": 0.75,
+        "visual_cells": 25
+      }
+    },
+    {
+      "name": "HTTP Unicode input changes the owned Edit",
+      "passed": true,
+      "detail": {
+        "success": true,
+        "dispatch": "message",
+        "effect": "confirmed",
+        "length": 7,
+        "window_id": "win-b017d00538",
+        "effect_verified": false,
+        "note": "输入动作不等于送达：请核对草稿；本工具已粘贴，勿再补 Ctrl+V，勿盲目重试。",
+        "duration_ms": 1,
+        "acted_window": {
+          "window_id": "win-b017d00538",
+          "title": "Doraemon direct verification",
+          "exe": "python.exe"
+        },
+        "windows_added": [],
+        "windows_removed": [],
+        "window_evidence": null,
+        "visual_delta": 0.73,
+        "visual_cells": 26
+      }
+    },
+    {
+      "name": "HTTP key changes only the owned Edit",
+      "passed": true,
+      "detail": {
+        "success": true,
+        "key": "backspace",
+        "count": 1,
+        "window_id": "win-b017d00538",
+        "action_performed": true,
+        "effect_verified": false,
+        "note": "按键已调用，不代表提交成功或消息送达；核验目标会话后再计数，状态不明勿重发。",
+        "duration_ms": 361,
+        "obstruction": {
+          "foreground": {
+            "hwnd": 56954684,
+            "title": "Doraemon direct verification",
+            "exe": "python.exe",
+            "is_target": true
+          },
+          "overlaps": [
+            {
+              "hwnd": 9242302,
+              "title": "*dsh-markettest-v41flash-20261027.txt - Notepad",
+              "exe": "Notepad.exe",
+              "minimized": null
+            },
+            {
+              "hwnd": 15929192,
+              "title": "Windows 输入体验",
+              "exe": "TextInputHost.exe",
+              "minimized": null
+            },
+            {
+              "hwnd": 28247476,
+              "title": "Program Manager",
+              "exe": "explorer.exe",
+              "minimized": null
+            }
+          ],
+          "blockers": [],
+          "advice": "有窗口压在目标上：'*dsh-markettest-v41flash-20261027.txt - '（Notepad.exe）。先关掉或移开它。"
+        },
+        "desktop_screenshot": "C:\\Users\\kennyyzhang\\Documents\\deepseek-harness\\default-workspace\\plugins\\dsh-doraemon\\.runtime\\screenshots\\2026-10-29\\desktop_20261029_164415_965426.jpeg",
+        "foreground_now": {
+          "hwnd": 56954684,
+          "title": "Doraemon direct verification",
+          "class": "DoraemonInputTest53972"
+        },
+        "effect": "suspected_noop",
+        "acted_window": {
+          "window_id": "win-b017d00538",
+          "title": "Doraemon direct verification",
+          "exe": "python.exe"
+        },
+        "windows_added": [],
+        "windows_removed": [],
+        "window_evidence": null,
+        "visual_delta": 0.15,
+        "visual_cells": 6,
+        "escalation": {
+          "recommended": "analyze",
+          "reason": "no_visual_change"
+        }
+      }
+    },
+    {
+      "name": "HTTP virtual cursor target moves without a physical mouse action",
+      "passed": true,
+      "detail": {
+        "from": {
+          "visible": true,
+          "target": [
+            301,
+            370
+          ],
+          "action": "move",
+          "error": null
+        },
+        "to": {
+          "visible": true,
+          "target": [
+            451,
+            420
+          ],
+          "action": "move",
+          "error": null
+        }
+      }
+    },
+    {
+      "name": "HTTP kernel reports virtual mode and loaded revision",
+      "passed": true,
+      "detail": {
+        "pid": 23200,
+        "source_root": "C:\\Users\\kennyyzhang\\Documents\\deepseek-harness\\default-workspace\\plugins\\dsh-doraemon\\kernel\\dsh_desktop",
+        "input_mode": "virtual",
+        "input_revision": "7a491467c33ec4a7"
+      }
+    },
+    {
+      "name": "real mouse position unchanged for entire test",
+      "passed": true,
+      "detail": {
+        "samples": 9289,
+        "positions": [
+          [
+            1493,
+            1093
+          ]
+        ]
+      }
+    }
+  ],
+  "passed": 22,
+  "failed": 0
+}
