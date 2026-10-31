@@ -1,125 +1,87 @@
-# DSH Desktop Automation
+# DSH CUA — Windows 桌面自动化插件
 
-Desktop coordinate actions use the physical mouse. Task feedback uses a docked,
-click-through pixel whale-maid commander with speech bubbles and wand poses,
-plus the 2-second window glow. See [commander mode](docs/commander-mode.md).
+**简体中文** | [English](README.en.md)
 
-Windows desktop and browser automation for DSH. The Python kernel source ships inside this plugin under `kernel/dsh_desktop`; runtime setup installs only Python dependencies — the OCR and vision model weights are bundled in `vendor/weights`.
+让 **DeepSeek Harness（DSH）操作 Windows 桌面应用与浏览器**。
+结合 **UIA 控件树、本地 OCR、图标检测、窗口绑定和视觉语义识别**，为 AI Agent 提供观察界面、点击输入、跨软件操作和结果读回能力。
 
-**Install in one line** — paste this into **Plugins → Add plugin** in DSH, restart, then run `scripts\bootstrap.ps1` once:
+Windows computer-use plugin for DeepSeek Harness, combining UI Automation (UIA), local OCR, window binding, browser automation and visual grounding.
 
-```
+**[观看完整实测：QQ 音乐 → Steam → B 站 → QQ](https://www.bilibili.com/video/BV1L9xe6sEDi/)**
+
+[快速安装](#快速安装) · [完整安装参考（English）](README.en.md#install-the-plugin) · [数据边界](docs/data-boundary.md) · [反馈问题](https://github.com/Mrkennyhungry/dsh-cua/issues)
+
+## 实测：一句话，完成多个软件里的任务
+
+> 打开 QQ 音乐播放《无敌》；去 Steam 家庭库找《影之刃零》，有就开始下载；再去 B 站找相关教程，把链接通过 QQ 发给我自己，顺便留句话。
+
+这次任务约 **六分半，花费 0.36 元**（作者本次运行记录，非通用性能基准）。演示保留了判断与纠错：识别 Steam 界面、根据磁盘剩余空间选择安装位置、处理独立协议窗口、筛选教程并发送链接。
+
+下载启动后，Agent 继续搜索教程和发送消息；不需要等待整个游戏下载完成。演示中的“完成下载任务”指**已开始下载**。
+
+## 插件提供什么能力
+
+| 能力 | 用途 |
+|---|---|
+| Windows 窗口枚举与绑定 | 获取目标窗口句柄，把后续观察和操作关联到窗口 |
+| UI Automation（UIA） | 读取原生控件的名称、类型、值和位置 |
+| 本地 OCR 与图标检测 | 用 RapidOCR、YOLO 补充文字、图标位置等信息 |
+| 视觉语义识别 | 为无文字图标补充描述，辅助定位 |
+| 桌面输入 | 鼠标点击、键盘输入、快捷键、滚动与拖拽 |
+| 浏览器自动化 | 借助 Playwright/DOM 读取网页、操作页面 |
+| 状态读回与任务反馈 | 检查操作后的界面状态，显示任务提示 |
+
+## 如何执行：观察 → 操作 → 读回
+
+1. 获取并绑定目标窗口，确定操作对象。
+2. 根据任务读取 UIA 控件或浏览器 DOM；信息不足时使用本地 OCR、图标检测及视觉能力。
+3. 执行点击、输入或滚动，重新观察目标状态；结果不明确时先检查，再决定下一步。
+
+这些能力按任务选择，并非每次点击都调用全部识别流程。目标是减少不必要的视觉调用和模型往返；实际速度、费用与准确性取决于模型、应用和任务。
+
+**视觉边界：**图标 caption 开启且有可用 Key 时，会向 DeepSeek 接口发送**标注截图和图标裁图**，并非只传局部裁图。显式读取图片也可能把图像交给 DSH 配置的模型。本地运行的是 OCR 与图标检测，不能将整个插件描述为完全离线。详见[数据边界](docs/data-boundary.md)。
+
+## 快速安装
+
+需要 **Windows 10/11、Node.js >= 22、DSH `>=0.2.1-rc.2 <0.3.0`**，以及已加入 PATH 的 [`uv`](https://docs.astral.sh/uv/getting-started/installation/)。首次安装 Python 依赖需要联网；OCR 和图标检测权重已随仓库分发。
+
+仓库名是 `dsh-cua`；安装包名为 **`dsh-doraemon`**，下列安装命令使用的是包名。
+
+**1. 在 DSH 的 Plugins → Add plugin 中粘贴：**
+
+```text
 dsh-doraemon@git+https://github.com/Mrkennyhungry/dsh-cua.git#v0.4.6
 ```
 
-Or add the market index `https://raw.githubusercontent.com/Mrkennyhungry/dsh-cua/main/market/index.json` on **Plugins → Discover** and install from there. Both paths are described below.
+**2. 重启 DSH。**
 
-Short on time? **[QUICKSTART.md](QUICKSTART.md)** is one screen: three prerequisites, four steps, one error message to avoid.
-
-## Install the plugin
-
-Two ways, same spec.
-
-**From the Web UI:** open **Plugins** in the DSH sidebar, paste this into the install dialog, confirm, then restart DSH:
-
-```
-dsh-doraemon@git+https://github.com/Mrkennyhungry/dsh-cua.git#v0.4.6
-```
-
-**From the profile's `package.json`**, add the same value as a dependency:
-
-```json
-{
-  "dependencies": {
-    "dsh-doraemon": "git+https://github.com/Mrkennyhungry/dsh-cua.git#v0.4.6"
-  }
-}
-```
-
-A tag can be moved; where you need an immutable target, pin the release commit instead
-(`git rev-parse v0.4.6` prints it):
-
-```
-dsh-doraemon@git+https://github.com/Mrkennyhungry/dsh-cua.git#445cbc7fd639f7ab99f2780b82ddaf4d9fd27a8d
-```
-
-**Requirements:** Windows, Node.js >= 22, and **DSH 0.2.x** — the current stable line, declared as `>=0.2.1-rc.2 <0.3.0` in `engines.dsh`. DSH enforces that range rather than ignoring it, so a 0.3 client would refuse the bundle. DSH 0.3 does not exist yet; when it ships this plugin has to be retested on it and the upper bound will move in a new release. Nothing to do until then.
-
-## Install from Discover (optional)
-
-DSH ships custom plugin markets switched off. To have this plugin listed in **Plugins → Discover**:
-
-1. Open **Plugins** in the Web sidebar, choose **More** next to **Experimental plugins**, and switch on **Custom plugin markets**. The page then shows the **Installed** and **Discover** tabs.
-2. On **Discover**, add this index source:
-
-   ```
-   https://raw.githubusercontent.com/Mrkennyhungry/dsh-cua/main/market/index.json
-   ```
-
-   Mirror, if `raw.githubusercontent.com` is unreachable: `https://cdn.jsdelivr.net/gh/Mrkennyhungry/dsh-cua@main/market/index.json`.
-3. Pick **dsh-doraemon** and install version 0.4.6, then restart DSH.
-
-There is no official DSH market: Discover lists only the index sources a user adds, so the URL above is how this plugin reaches that list. The document is DSH's own `format: 1` market index, validated with `@deepseek-ai/dsh-plugin-market-index` before it was committed, and it pins an immutable commit rather than a branch.
-
-The 92 MB of ONNX weights are committed to this repository, so a fresh clone runs offline with no download step. GitHub warns above 50 MB per file; the largest file is 76.7 MB, under the 100 MB hard limit. Git LFS is deliberately not used so that installing never requires a second tool.
-
-## First run on a new machine
-
-Installing the plugin does **not** install the Python runtime. Until bootstrap has run once the kernel refuses to start, and says so: `Run the bundled scripts/bootstrap.ps1 or set repoRoot/pythonPath`.
-
-**1. Install `uv`.** Bootstrap requires it and exits if it is missing; `uv` also fetches the Python 3.11 interpreter for the virtual environment.
-
-**2. Run bootstrap once, from PowerShell:**
+**3. 在安装包目录中打开 PowerShell，运行一次：**
 
 ```powershell
-cd <plugin directory>
+cd "$env:USERPROFILE\.dsh\profiles\<your-profile>\node_modules\dsh-doraemon"
 .\scripts\bootstrap.ps1
 ```
 
-It creates a virtual environment at `%LOCALAPPDATA%\dsh-desktop\venv`, installs `requirements.txt` (onnxruntime, pywinauto, pywebview, playwright, opencv and friends — several hundred MB, this step needs network), and copies the bundled weights to `%LOCALAPPDATA%\dsh-desktop\weights`.
+将 `<your-profile>` 替换为自己的 profile 名称；自定义目录请使用实际安装路径。脚本创建 Python 3.11 环境、安装依赖并复制模型权重。**只安装插件不运行 bootstrap，内核无法启动。**
 
-**3. Restart DSH.** The kernel starts on first tool use and stays available between sessions.
+**4. 再次重启 DSH，尝试一个简单任务：**
 
-**4. Optional — elevated hosts.** Run `scripts/install-elevated-task.ps1` once from an elevated PowerShell if you need to automate applications that are themselves running elevated. The task starts the bundled kernel with High integrity, and applications it starts can inherit that privilege.
+> 用 doraemon 打开记事本，写一行 hello，然后把窗口标题读回来。
 
-### API key
+首次配置、插件市场安装、API Key 与常见问题见 [QUICKSTART.md](QUICKSTART.md) 和 [完整安装参考](README.en.md#install-the-plugin)。插件复用 DSH 中配置的 DeepSeek Key；浏览器默认使用已安装的 Microsoft Edge。
 
-The plugin reuses the DeepSeek key **already configured in DSH** (Settings → Models). It resolves `DEEPSEEK_API_KEY` through `ctx.credentials` and hands it to the kernel, so there is no second copy to set in the environment.
+## 使用限制与结果判断
 
-If the kernel was started without a key, task submission is refused with a hint. Configure the key in DSH and call the tool again — the plugin replaces a keyless kernel that it started itself.
+- 插件依赖 DeepSeek Harness，不是独立运行的桌面助手。
+- 桌面坐标操作使用真实鼠标；前台焦点、自绘界面和管理员窗口会影响操作，不能保证所有 Windows 软件都可自动化。
+- 插件在本机执行真实操作，不是隔离沙箱。首次使用建议从记事本等简单任务开始；文件删除、搬家等操作应先备份并确认。
+- `effect: "confirmed"` 只说明界面发生了变化。业务是否成功，需要根据窗口内容、下载状态、消息记录等明确证据判断。
+- 当前主分支的任务反馈角色是固定停靠、鼠标穿透的像素鲸鱼女仆；它不是虚拟鼠标。详见 [commander mode](docs/commander-mode.md)。
 
-The key is used only for icon captions. Without it, OCR and icon detection still run locally; unnamed icons simply carry no description. See [Data boundary](#data-boundary-and-what-success-means).
+## 反馈与参与
 
-### Browser
+欢迎在 [Issues](https://github.com/Mrkennyhungry/dsh-cua/issues) 提交反馈：请写明 Windows/DSH/插件版本、目标软件、复现步骤和实际结果；截图与日志请先去掉隐私信息和凭据。
 
-Web automation drives the **installed Microsoft Edge** by default, so there is nothing extra to download. Setting `DSH_DESKTOP_BROWSER=chromium` switches to Playwright's Chromium, which requires `playwright install chromium` first.
+如果项目对你有帮助，欢迎点一个 Star，方便后续找到它。
 
-The browser profile lives under the state directory, so **web logins do not transfer between machines** — sign in again on a fresh host.
-
-## Self-check after installing
-
-1. `doraemon_health` returns `status: ok` — bridge and kernel are up.
-2. `doraemon_analyze` on any bound window returns a non-empty `ui_elements` list — the YOLO and OCR weights loaded.
-3. `doraemon_web` opens a page — the Edge channel works.
-
-## Data boundary and what "success" means
-
-Read [`docs/data-boundary.md`](docs/data-boundary.md) before enabling this on a machine with private content on screen. In short:
-
-- OCR (RapidOCR) and icon detection (YOLO) run **locally**.
-- Icon **captions** are the one place screen pixels leave the machine: when a key is available, `desktop_analyze(caption=true)` posts an annotated frame plus icon crops to `api.deepseek.com`. Without a key it makes no network call.
-- Tool results mix three strengths of evidence — **action sent**, **UI changed**, **business result verified**. `effect: "confirmed"` only means the screen moved, not that the task worked.
-
-## Task window lifecycle
-
-The first desktop/browser request records a lightweight window and browser-page baseline. End-of-task cleanup closes only task-owned launches and pages, preserves requested keep items, and reports remaining window differences. Existing desktop windows are never closed just because they were absent from the task's actions.
-
-## Package variants
-
-This generic build contains no company-specific page or component catalog.
-
-Application launch confirms a new window and its process evidence. A forwarded launch or shared process that cannot be attributed returns `LAUNCH_UNCONFIRMED`; inspect the windows before retrying.
-
-Elevated scheduled-task output is appended to `kernel.out.log` and `kernel.err.log` in the configured `stateDir` (or the task home `state` folder for older configurations). Cleanup sends a normal close request, reports an open save prompt as a failure, and does not force-terminate process-only records.
-
-New tool-entry logs redact common text, path and credential fields, including values inside action batches. Existing log files are retained.
+本项目使用 [MIT License](LICENSE)。

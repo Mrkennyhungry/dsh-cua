@@ -1,73 +1,45 @@
-# Quick start
+# 快速上手 / Quick start
 
-One screen: what must be true, four steps, and how to tell it worked. Full reference is
-[`README.md`](README.md).
+[中文介绍](README.md) · [English installation reference](README.en.md#install-the-plugin)
 
-## Before you start
+需要 **Windows 10/11、Node.js >= 22、DSH `>=0.2.1-rc.2 <0.3.0`**，以及已加入 PATH 的 [`uv`](https://docs.astral.sh/uv/getting-started/installation/)。首次安装 Python 依赖需要联网；OCR 和图标检测权重已随仓库分发。
 
-| Requirement | Why, and what happens without it |
-|---|---|
-| **Windows 10/11** | The bundle declares `os: ["win32"]`; the package manager refuses to install it elsewhere. |
-| **DSH 0.2.x** (`>=0.2.1-rc.2`, `<0.3.0` — the current stable line) | DSH enforces the range this package declares, so a DSH 0.3 would refuse to install it. **DSH 0.3 does not exist yet**; when it ships this plugin has to be retested and that upper bound will move. Nothing to do today. |
-| **`uv` on `PATH`, and network access once** | Step 3 builds a Python 3.11 environment and downloads a few hundred MB of packages. |
+仓库名是 `dsh-cua`；安装包名为 **`dsh-doraemon`**，下列安装命令使用的是包名。
 
-Node.js >= 22 is also required (DSH already needs it).
+**1. 在 DSH 的 Plugins → Add plugin 中粘贴：**
 
-## Four steps
-
-**1. Install the bundle.** In DSH: **Plugins → Add plugin**, paste, confirm:
-
-```
+```text
 dsh-doraemon@git+https://github.com/Mrkennyhungry/dsh-cua.git#v0.4.6
 ```
 
-Or switch on **Custom plugin markets**, add the index
-`https://raw.githubusercontent.com/Mrkennyhungry/dsh-cua/main/market/index.json`
-on **Plugins → Discover**, and install from there.
+**2. 重启 DSH。**
 
-**2. Restart DSH.** The bundle is mounted at boot.
-
-**3. Run bootstrap once**, from the installed package directory (or from a clone of the
-repository — the script only needs `scripts/`, `kernel/`, `vendor/weights/` and
-`requirements.txt`):
+**3. 在安装包目录中打开 PowerShell，运行一次：**
 
 ```powershell
 cd "$env:USERPROFILE\.dsh\profiles\<your-profile>\node_modules\dsh-doraemon"
 .\scripts\bootstrap.ps1
 ```
 
-It creates `%LOCALAPPDATA%\dsh-desktop\venv`, installs `requirements.txt`, copies the
-bundled weights, and imports the kernel to prove it works. 5–15 minutes, mostly
-download.
+将 `<your-profile>` 替换为自己的 profile 名称；自定义目录请使用实际安装路径。脚本创建 Python 3.11 环境、安装依赖并复制模型权重。**只安装插件不运行 bootstrap，内核无法启动。**
 
-**4. Restart DSH again**, then ask your agent:
+**4. 再次重启 DSH，尝试一个简单任务：**
 
-> 用 doraemon 打开记事本，写一行 hello，然后把窗口标题读回来
+> 用 doraemon 打开记事本，写一行 hello，然后把窗口标题读回来。
 
-Expect: Notepad opens, text appears, and the tool result reports what it verified.
+## 安装后自检
 
-## Do not skip step 3
+- `doraemon_health` 返回 `status: ok`：桥接和内核已启动。
+- `doraemon_analyze` 在绑定窗口返回非空 `ui_elements`：OCR/图标解析可用。
+- `doraemon_web` 能打开网页：浏览器通道可用。
 
-Installing the plugin does **not** install the Python runtime. Until bootstrap has run
-once, every desktop tool fails with:
+如果看到 `Run the bundled scripts/bootstrap.ps1 or set repoRoot/pythonPath`，先检查是否在正确目录完成了第 3 步。
 
-```
-Run the bundled scripts/bootstrap.ps1 or set repoRoot/pythonPath
-```
+## 可选配置与限制
 
-That is the only error most people hit; it means step 3 was skipped or ran in the wrong
-directory.
+- 图标 caption 复用 DSH 的 DeepSeek Key；本地 OCR/图标检测与云端 caption 的边界见[数据边界说明](docs/data-boundary.md)。
+- 默认使用已安装的 Microsoft Edge；新机器需要重新登录网站。
+- 需要操作管理员程序时，另见[高权限配置](README.en.md#first-run-on-a-new-machine)。
+- `effect: "confirmed"` 只表示界面变化，任务是否成功需要明确读回。
 
-## Optional
-
-- **Elevated windows** (apps running as administrator) need `scripts\install-elevated-task.ps1`
-  once, from an elevated PowerShell. Without it, clicks into those windows are blocked by
-  Windows UIPI.
-- **Icon captions** call `api.deepseek.com` only when `DEEPSEEK_API_KEY` is set. Without
-  it, OCR and icon detection run entirely locally and no screen pixels leave the machine.
-
-## Read before pointing it at private content
-
-[`docs/data-boundary.md`](docs/data-boundary.md) — what leaves the machine, and what
-"success" means in a tool result. Short version: `effect: "confirmed"` means the screen
-changed, not that the task worked.
+插件市场、固定提交安装及更多配置见[完整安装参考](README.en.md#install-the-plugin)。
