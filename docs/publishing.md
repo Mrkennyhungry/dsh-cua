@@ -82,8 +82,7 @@ own install target:
 {
   "version": "0.4.6",
   "publishTimestamp": 1793162262,
-  "source": { "type": "npm" },
-  "engines": { "dsh": ">=0.2.1-rc.2 <0.3.0" }
+  "source": { "type": "npm" }
 }
 ```
 
