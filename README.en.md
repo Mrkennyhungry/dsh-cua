@@ -44,7 +44,7 @@ whale-maid commander provides task feedback; see [commander mode](docs/commander
 
 ## Requirements and limitations
 
-- Windows 10/11, Node.js >= 22, and DSH `>=0.2.1-rc.2 <0.3.0`.
+- Windows 10/11, Node.js >= 22, and DeepSeek Harness. The current main branch does not declare a DSH client-version range; compatibility still depends on the APIs provided by the installed client.
 - `uv` and network access for initial Python dependency installation. OCR and icon
   detection weights are bundled; there is no separate model-weight download.
 - This is a DSH plugin, not a standalone desktop agent or an isolated sandbox.
@@ -56,7 +56,7 @@ whale-maid commander provides task feedback; see [commander mode](docs/commander
 **Install in one line** — paste this into **Plugins → Add plugin** in DSH, restart, then run `scripts\bootstrap.ps1` once:
 
 ```
-dsh-doraemon@git+https://github.com/Mrkennyhungry/dsh-cua.git#v0.4.6
+dsh-doraemon@git+https://github.com/Mrkennyhungry/dsh-cua.git#main
 ```
 
 Or add the market index `https://raw.githubusercontent.com/Mrkennyhungry/dsh-cua/main/market/index.json` on **Plugins → Discover** and install from there. Both paths are described below.
@@ -70,7 +70,7 @@ Two ways, same spec.
 **From the Web UI:** open **Plugins** in the DSH sidebar, paste this into the install dialog, confirm, then restart DSH:
 
 ```
-dsh-doraemon@git+https://github.com/Mrkennyhungry/dsh-cua.git#v0.4.6
+dsh-doraemon@git+https://github.com/Mrkennyhungry/dsh-cua.git#main
 ```
 
 **From the profile's `package.json`**, add the same value as a dependency:
@@ -83,14 +83,7 @@ dsh-doraemon@git+https://github.com/Mrkennyhungry/dsh-cua.git#v0.4.6
 }
 ```
 
-A tag can be moved; where you need an immutable target, pin the release commit instead
-(`git rev-parse v0.4.6` prints it):
-
-```
-dsh-doraemon@git+https://github.com/Mrkennyhungry/dsh-cua.git#445cbc7fd639f7ab99f2780b82ddaf4d9fd27a8d
-```
-
-**Requirements:** Windows, Node.js >= 22, and **DSH 0.2.x** — the compatibility range declared as `>=0.2.1-rc.2 <0.3.0` in `engines.dsh`. DSH enforces that range rather than ignoring it, so a 0.3 client would refuse the bundle. Versions outside that range require compatibility testing and an updated release.
+The `main` spec follows the current branch. For a reproducible install, replace `main` with the exact commit you reviewed.
 
 ## Install from Discover (optional)
 
@@ -104,7 +97,7 @@ DSH ships custom plugin markets switched off. To have this plugin listed in **Pl
    ```
 
    Mirror, if `raw.githubusercontent.com` is unreachable: `https://cdn.jsdelivr.net/gh/Mrkennyhungry/dsh-cua@main/market/index.json`.
-3. Pick **dsh-doraemon** and install version 0.4.6, then restart DSH.
+3. Pick **dsh-doraemon** and install the published market entry, then restart DSH. The market entry remains tied to its published release; use the direct `#main` Git spec above to try the current unpinned branch.
 
 There is no official DSH market: Discover lists only the index sources a user adds, so the URL above is how this plugin reaches that list. The document is DSH's own `format: 1` market index, validated with `@deepseek-ai/dsh-plugin-market-index` before it was committed, and it pins an immutable commit rather than a branch.
 

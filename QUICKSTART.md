@@ -2,14 +2,14 @@
 
 [中文介绍](README.md) · [English installation reference](README.en.md#install-the-plugin)
 
-需要 **Windows 10/11、Node.js >= 22、DSH `>=0.2.1-rc.2 <0.3.0`**，以及已加入 PATH 的 [`uv`](https://docs.astral.sh/uv/getting-started/installation/)。首次安装 Python 依赖需要联网；OCR 和图标检测权重已随仓库分发。
+需要 **Windows 10/11、Node.js >= 22 和 DeepSeek Harness**，以及已加入 PATH 的 [`uv`](https://docs.astral.sh/uv/getting-started/installation/)。首次安装 Python 依赖需要联网；OCR 和图标检测权重已随仓库分发。
 
-仓库名是 `dsh-cua`；安装包名为 **`dsh-doraemon`**，下列安装命令使用的是包名。
+仓库名是 `dsh-cua`；安装包名为 **`dsh-doraemon`**。当前主分支不限定 DSH 客户端版本，实际可用性取决于客户端提供的插件 API。
 
 **1. 在 DSH 的 Plugins → Add plugin 中粘贴：**
 
 ```text
-dsh-doraemon@git+https://github.com/Mrkennyhungry/dsh-cua.git#v0.4.6
+dsh-doraemon@git+https://github.com/Mrkennyhungry/dsh-cua.git#main
 ```
 
 **2. 重启 DSH。**
