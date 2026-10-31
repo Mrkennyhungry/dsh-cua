@@ -7,6 +7,10 @@
 
 Windows computer-use plugin for DeepSeek Harness, combining UI Automation (UIA), local OCR, window binding, browser automation and visual grounding.
 
+[![DSH CUA 跨软件操作演示：音乐搜索、Steam 选择磁盘、QQ 发送链接](docs/images/demo.gif)](https://www.bilibili.com/video/BV1L9xe6sEDi/)
+
+*44 秒操作选段拼接，保留录屏原有速度；局部裁切放大，较早聊天记录已遮挡。点击动图观看完整实测。*
+
 **[观看完整实测：QQ 音乐 → Steam → B 站 → QQ](https://www.bilibili.com/video/BV1L9xe6sEDi/)**
 
 [快速安装](#快速安装) · [完整安装参考（English）](README.en.md#install-the-plugin) · [数据边界](docs/data-boundary.md) · [反馈问题](https://github.com/Mrkennyhungry/dsh-cua/issues)
