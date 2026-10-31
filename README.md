@@ -10,11 +10,11 @@ Windows computer-use plugin for DeepSeek Harness, combining UI Automation (UIA),
 <a href="https://www.bilibili.com/video/BV1L9xe6sEDi/">
   <picture>
     <source srcset="https://raw.githubusercontent.com/Mrkennyhungry/dsh-cua/main/docs/images/demo.gif" type="image/gif">
-    <img src="docs/images/demo-poster.png" alt="DSH CUA 跨软件操作演示：音乐搜索、Steam 选择磁盘、QQ 发送链接" width="960" height="700">
+    <img src="docs/images/demo-poster.png" alt="DSH CUA 操作演示：QQ 音乐搜索并双击播放，Steam 选择磁盘并接受协议" width="960">
   </picture>
 </a>
 
-*44 秒操作选段拼接，保留录屏原有速度；局部裁切放大，较早聊天记录已遮挡。点击动图观看完整实测。*
+*72 秒操作选段拼接，片段保持录屏原有速度并省略无操作等待；画面下方字幕标出当前动作。点击动图观看完整实测。*
 
 **[观看完整实测：QQ 音乐 → Steam → B 站 → QQ](https://www.bilibili.com/video/BV1L9xe6sEDi/)**
 
@@ -90,6 +90,8 @@ cd "$env:USERPROFILE\.dsh\profiles\<your-profile>\node_modules\dsh-doraemon"
 ## 反馈与参与
 
 欢迎在 [Issues](https://github.com/Mrkennyhungry/dsh-cua/issues) 提交反馈：请写明 Windows/DSH/插件版本、目标软件、复现步骤和实际结果；截图与日志请先去掉隐私信息和凭据。
+
+感谢 [LINUX DO](https://linux.do/) 提供开源项目交流空间，欢迎佬友讨论 Windows 桌面自动化实践。
 
 如果项目对你有帮助，欢迎点一个 Star，方便后续找到它。
 

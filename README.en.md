@@ -10,11 +10,11 @@ and read back results. The installable package is named `dsh-doraemon`.
 <a href="https://www.bilibili.com/video/BV1L9xe6sEDi/">
   <picture>
     <source srcset="https://raw.githubusercontent.com/Mrkennyhungry/dsh-cua/main/docs/images/demo.gif" type="image/gif">
-    <img src="docs/images/demo-poster.png" alt="DSH CUA demo: music search, Steam disk selection and QQ link delivery" width="960" height="700">
+    <img src="docs/images/demo-poster.png" alt="DSH CUA demo: double-clicking a song in QQ Music and accepting Steam's license agreement" width="960">
   </picture>
 </a>
 
-*44 seconds of selected recording segments at their original recorded speed, cropped for readability. Earlier chat messages are masked. Click to watch the full demo.*
+*72 seconds of selected actions at their original recorded speed, with idle waits removed and action captions below the screen. Click to watch the full demo.*
 
 **[Watch the cross-app demo on Bilibili](https://www.bilibili.com/video/BV1L9xe6sEDi/)**
 — QQ Music → Steam → Bilibili → QQ. The author reports approximately 6.5 minutes
@@ -26,6 +26,8 @@ disk selection, not just successful clicks.
 
 **[快速上手 / Quick start](QUICKSTART.md)** · [Data boundary](docs/data-boundary.md)
 · [Report a problem](https://github.com/Mrkennyhungry/dsh-cua/issues)
+
+Thanks to [LINUX DO](https://linux.do/) for the community space to share and discuss open-source projects.
 
 ## How it works
 
