@@ -7,7 +7,7 @@ Combines **Windows UI Automation (UIA), local OCR, icon detection, window bindin
 and visual grounding** so an AI agent can inspect controls, interact with apps,
 and read back results. The installable package is named `dsh-doraemon`.
 
-[![DSH CUA demo: music search, Steam disk selection and sending a link in QQ](docs/images/demo.gif)](https://www.bilibili.com/video/BV1L9xe6sEDi/)
+[![DSH CUA demo: music search, Steam disk selection and sending a link in QQ](https://raw.githubusercontent.com/Mrkennyhungry/dsh-cua/main/docs/images/demo.gif)](https://www.bilibili.com/video/BV1L9xe6sEDi/)
 
 *44 seconds of selected recording segments at their original recorded speed, cropped for readability. Earlier chat messages are masked. Click to watch the full demo.*
 
