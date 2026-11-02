@@ -1510,22 +1510,22 @@ def desktop_analyze(
     """
     scope = str(scope or "window").strip().lower()
     if scope not in ("window", "desktop"):
-        return {"error": "scope 仅支持 window 或 desktop"}
+        return {"success": False, "error": "scope 仅支持 window 或 desktop"}
     region = str(region or "auto").strip().lower()
     if region not in ("auto", "window", "full"):
-        return {"error": "region 仅支持 auto、window 或 full"}
+        return {"success": False, "error": "region 仅支持 auto、window 或 full"}
     controller = _controller()
     if controller is None:
-        return {"error": "DESKTOP_NOT_READY: AppController 尚未初始化"}
+        return {"success": False, "error": "DESKTOP_NOT_READY: AppController 尚未初始化"}
     if not engine:
         configured = getattr(getattr(getattr(controller, "config", None), "parser", None), "engine", "omni")
         engine = os.getenv("DSH_DESKTOP_PARSER_ENGINE") or (configured if isinstance(configured, str) else "omni")
     if engine not in ("omni", "qwen", "local", "local-deepseek"):
-        return {"error": "engine 仅支持 omni、qwen、local 或 local-deepseek"}
+        return {"success": False, "error": "engine 仅支持 omni、qwen、local 或 local-deepseek"}
     with _STATE._lock:
         info = _STATE._windows.get(window_id)
     if info is None:
-        return {"error": f"window_id 不存在: {window_id}"}
+        return {"success": False, "error": f"window_id 不存在: {window_id}"}
     hwnd = int(info["hwnd"])
     total_started = time.perf_counter()
     # VISION capture must NEVER disturb focus (2026-09-07 live regression:
@@ -1567,17 +1567,17 @@ def desktop_analyze(
     except Exception as exc:
         timing_ms = {"capture": round((time.perf_counter() - stage_started) * 1000)}
         timing_ms["total"] = round((time.perf_counter() - total_started) * 1000)
-        return {"error": f"截图失败: {exc.__class__.__name__}", "timing_ms": timing_ms}
+        return {"success": False, "error": f"截图失败: {exc.__class__.__name__}", "timing_ms": timing_ms}
     timing_ms = {"capture": round((time.perf_counter() - stage_started) * 1000)}
     if frame is None:
         timing_ms["total"] = round((time.perf_counter() - total_started) * 1000)
-        return {"error": "截图失败", "timing_ms": timing_ms}
+        return {"success": False, "error": "截图失败", "timing_ms": timing_ms}
     if _is_blank_frame(frame):
         # A black frame is not "nothing on screen": it means the capture is
         # unusable (minimized window, locked session, PrintWindow failure).
         # Returning it silently makes OCR invent nothing and wastes a step.
         timing_ms["total"] = round((time.perf_counter() - total_started) * 1000)
-        return {"error": "CAPTURE_BLACK: 截图为空或近全黑",
+        return {"success": False, "error": "CAPTURE_BLACK: 截图为空或近全黑",
                 "hint": ("窗口可能已最小化/被锁屏。先 desktop_topmost 或激活窗口再截图；"
                          "或传 recover_black=true 允许本次激活重截。"),
                 "scope": scope, "timing_ms": timing_ms}
@@ -1593,7 +1593,7 @@ def desktop_analyze(
     except Exception as exc:
         timing_ms["parse"] = round((time.perf_counter() - stage_started) * 1000)
         timing_ms["total"] = round((time.perf_counter() - total_started) * 1000)
-        return {"error": f"解析失败: {exc.__class__.__name__}", "timing_ms": timing_ms}
+        return {"success": False, "error": f"解析失败: {exc.__class__.__name__}", "timing_ms": timing_ms}
     timing_ms["parse"] = round((time.perf_counter() - stage_started) * 1000)
     if "error" in parsed:
 
@@ -1736,7 +1736,7 @@ def desktop_analyze(
     except Exception as exc:
         timing_ms["save"] = round((time.perf_counter() - stage_started) * 1000)
         timing_ms["total"] = round((time.perf_counter() - total_started) * 1000)
-        return {"error": f"截图保存失败: {exc.__class__.__name__}", "timing_ms": timing_ms}
+        return {"success": False, "error": f"截图保存失败: {exc.__class__.__name__}", "timing_ms": timing_ms}
     timing_ms["save"] = round((time.perf_counter() - stage_started) * 1000)
 
     timing_ms["annotate"] = 0
@@ -1796,6 +1796,7 @@ def desktop_analyze(
             "scanned": len(elements),
             "kept": len(kept),
         }
+    result["success"] = True
     return result
 
 
@@ -2631,6 +2632,13 @@ def desktop_press_key(window_id: str, key: str, count: int = 1) -> dict:
         # 它是可逆的（新建的空文档，不写盘、不覆盖任何文件），所以放行；
         # 保存类组合（ctrl+s / ctrl+shift+s）仍然单独评估，不在这里放开。
         "ctrl+n",
+        # ctrl+s：保存当前文档。2026-11-02 实测放行的理由——
+        # 很多应用（记事本、Notepad++ 等自绘菜单）在 UIA 里没有可达的"保存"
+        # 菜单项，不放行就只能靠盲点工具栏图标；而保存是对"刚输入的这个文档"
+        # 的普通写盘动作，不会关闭窗口、不会丢弃内容（对比 ctrl+w/alt+f4）。
+        # ctrl+shift+s（另存为）仍不放行：它会弹出文件对话框，需要人工/模型
+        # 选择目标路径，属于"绕过界面语义"的捷径。
+        "ctrl+s",
     }
     if is_combo:
         if key_norm not in ALLOWED_COMBOS:
@@ -5024,7 +5032,47 @@ def _uia_batch_step(controller, hwnd, region, table, step, remaining):
     return method
 
 
-@tool("仅向已绑定窗口发送 WM_CLOSE 并等待关闭；不结束进程、不强关、无兜底。")
+_SAVE_PROMPT_SAVE = {"保存", "save", "&save"}
+_SAVE_PROMPT_DISCARD = {"不保存", "don't save", "dont save", "&don't save"}
+
+
+def _detect_save_prompt(hwnd: int) -> dict:
+    """Detect a save/discard prompt that belongs to hwnd.
+
+    Win11 Notepad renders its prompt INSIDE the window (a UIA group with
+    保存/不保存/取消), not as a #32770 top-level dialog, so a dialog-window
+    check alone never sees it. The pair 保存 + 不保存 together is specific
+    enough: a ribbon/toolbar has a Save button but no Don't-Save button.
+    """
+    try:
+        from pywinauto import Desktop
+    except Exception:  # noqa: BLE001 - detection is advisory only
+        return {"save_prompt": False}
+    try:
+        win = Desktop(backend="uia").window(handle=hwnd)
+        if not win.exists(timeout=0):
+            return {"save_prompt": False}
+        labels = []
+        for child in win.descendants():
+            try:
+                if child.element_info.control_type != "Button":
+                    continue
+                text = (child.window_text() or "").strip()
+                if text:
+                    labels.append(text)
+            except Exception:  # noqa: BLE001 - a dying UIA tree is normal here
+                continue
+    except Exception:  # noqa: BLE001
+        return {"save_prompt": False}
+    lowered = {label.lower() for label in labels}
+    if lowered & _SAVE_PROMPT_SAVE and lowered & _SAVE_PROMPT_DISCARD:
+        return {"save_prompt": True, "prompt_buttons": labels[:8]}
+    return {"save_prompt": False}
+
+
+@tool("向已绑定窗口发送正常关闭请求（WM_CLOSE），不强制结束进程。"
+      "文档有未保存改动时应用会弹保存确认：本工具会识别出来并立即返回 "
+      "save_prompt=true，而不是等到超时；此时由调用方决定保存还是放弃。")
 def desktop_close_window_soft(window_id: str, timeout_s: float = 8.0) -> dict:
     import win32con
     controller = _controller()
@@ -5041,10 +5089,19 @@ def desktop_close_window_soft(window_id: str, timeout_s: float = 8.0) -> dict:
     except Exception as exc:  # noqa: BLE001 - 明确回报系统拒绝，不回落强杀
         return {"success": False, "error": f"WM_CLOSE_FAILED: {type(exc).__name__}: {exc}", "hwnd": hwnd}
     deadline = time.monotonic() + max(0.5, min(float(timeout_s), 30.0))
+    next_prompt_check = time.monotonic() + 0.6
     while win32gui.IsWindow(hwnd) and time.monotonic() < deadline:
         time.sleep(0.2)
+        if time.monotonic() >= next_prompt_check:
+            next_prompt_check = time.monotonic() + 0.6
+            prompt = _detect_save_prompt(hwnd)
+            if prompt.get("save_prompt"):
+                return {"success": False, "closed": False, "hwnd": hwnd, "save_prompt": True,
+                        "prompt_buttons": prompt.get("prompt_buttons", []),
+                        "error": ("SAVE_PROMPT: 窗口有未保存改动，正在等待保存确认；"
+                                  "请在保存与不保存之间选择后再核对窗口状态")}
     closed = not win32gui.IsWindow(hwnd)
-    return {"success": closed, "closed": closed, "hwnd": hwnd,
+    return {"success": closed, "closed": closed, "hwnd": hwnd, "save_prompt": False,
             **({} if closed else {"error": "CLOSE_TIMEOUT: 窗口未在时限内关闭（可能等待用户确认）"})}
 
 

@@ -2,7 +2,12 @@
 DesktopCore Telemetry
 
 Lightweight telemetry module. Async, silent on failure.
-User can opt out via telemetry.enabled: false in config.yaml.
+
+OFF by default: it must be switched on explicitly with `telemetry.enabled: true`
+in config.yaml, which only the standalone desktop app reads. The DSH plugin
+kernel never turns it on, so plugin sessions send nothing. Before 2026-11-02
+this flag defaulted to True and the plugin mode therefore reported tool errors
+and an install id without the user asking for it.
 """
 
 import uuid
@@ -17,8 +22,9 @@ from .config import dsh_desktop_home
 
 logger = logging.getLogger(__name__)
 
-# Module-level enabled flag — set by __main__.py after loading config
-enabled = True
+# Module-level enabled flag — set by __main__.py after loading config.
+# Default False: nothing leaves the machine unless the user opts in.
+enabled = False
 
 TELEMETRY_URL = "https://telemetry.gaott.top/event"
 TELEMETRY_WRITE_TOKEN = "dsh_desktop-write-token-2026"
