@@ -3388,9 +3388,9 @@ def _focus_state(hwnd: int) -> dict[str, Any] | None:
 
 
 # ── Window scope lock ────────────────────────────────────────────────────
-# One window at a time, kernel-wide: the user picks a window once and every
-# action on a different window is refused instead of silently driving it.
-_SCOPE_LOCK = {"window_id": None}
+# The user picks an application window once. Later windows of that application
+# stay eligible even when they are new top-level HWNDs or live in another process.
+_SCOPE_LOCK = {"window_id": None, "window": {}}
 
 
 def locked_window_id() -> str | None:
@@ -3404,30 +3404,70 @@ def lock_window(window_id: str) -> dict:
         return {"success": False, "error": f"window_id 不存在: {window_id}"}
     with _STATE._lock:
         _SCOPE_LOCK["window_id"] = window_id
-    return {"success": True, "locked": window_id,
-            "window": {k: info.get(k) for k in ("title", "exe", "pid", "hwnd")}}
+        _SCOPE_LOCK["window"] = {k: info.get(k) for k in ("title", "exe", "pid", "hwnd")}
+    return {"success": True, "locked": window_id, "scope": "application",
+            "window": dict(_SCOPE_LOCK["window"])}
 
 
 def unlock_window() -> dict:
     with _STATE._lock:
         previous = _SCOPE_LOCK["window_id"]
         _SCOPE_LOCK["window_id"] = None
+        _SCOPE_LOCK["window"] = {}
     return {"success": True, "unlocked": previous}
 
 
+def _in_locked_application(candidate: dict, locked: dict) -> bool:
+    """Whether candidate belongs to the app selected by the user.
+
+    Matching only the original HWND would refuse save dialogs and newly opened
+    windows. Exe identity covers a new process of the same app; process ancestry
+    and the Win32 owner chain cover renderer windows and owned popups whose exe
+    name is not exposed consistently.
+    """
+    if not candidate or not locked:
+        return False
+    candidate_exe = str(candidate.get("exe") or "").strip().lower()
+    locked_exe = str(locked.get("exe") or "").strip().lower()
+    if candidate_exe and locked_exe and candidate_exe == locked_exe:
+        return True
+    candidate_hwnd = int(candidate.get("hwnd") or 0)
+    locked_hwnd = int(locked.get("hwnd") or 0)
+    if candidate_hwnd and locked_hwnd:
+        try:
+            from .game.window import _has_owner_link
+            if _has_owner_link(candidate_hwnd, locked_hwnd):
+                return True
+        except Exception:
+            pass
+    candidate_pid = int(candidate.get("pid") or 0)
+    locked_pid = int(locked.get("pid") or 0)
+    if candidate_pid and locked_pid:
+        try:
+            from .game.window import _is_process_descendant_of
+            return _is_process_descendant_of(candidate_pid, locked_pid)
+        except Exception:
+            pass
+    return False
+
+
 def scope_block(window_id: str) -> dict | None:
-    """Refusal when a different window is locked, else None."""
+    """Refusal when window_id belongs to another application, else None."""
     locked = locked_window_id()
     if not locked or locked == window_id:
         return None
-    info = bound_window_info(locked) or {}
+    with _STATE._lock:
+        locked_info = dict(_SCOPE_LOCK["window"])
+    if _in_locked_application(bound_window_info(window_id), locked_info):
+        return None
     return {
         "success": False,
-        "error": (f"WINDOW_SCOPE_LOCKED: 当前只允许操作已锁定的窗口 "
-                  f"「{info.get('title','')}」（{info.get('exe','')}），本次动作针对的是另一个窗口。"
+        "error": (f"WINDOW_SCOPE_LOCKED: 当前只允许操作应用 "
+                  f"「{locked_info.get('title','')}」（{locked_info.get('exe','')}）的窗口，"
+                  "包括它之后新开的窗口和弹窗；本次目标属于另一个应用。"
                   "如需切换，先解除锁定或重新选择窗口。"),
-        "locked_window": {"window_id": locked, "title": info.get("title", ""),
-                          "exe": info.get("exe", ""), "hwnd": info.get("hwnd", 0)},
+        "locked_window": {"window_id": locked, **locked_info},
+        "scope": "application",
     }
 
 

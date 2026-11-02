@@ -211,7 +211,9 @@ class CursorOverlay:
         from .mascot_theme import ACTIONS
         if action not in ACTIONS: raise ValueError("unknown cursor action")
         with self._lock:
-            if not self._tasks: return
+            # Companion mode also gives immediate feedback for a picker click;
+            # without this, _say() was silently discarded whenever no task ran.
+            if not self._tasks and not self._companion: return
             self._action, self._action_until = action, time.monotonic() + duration
             self._visible = True
 
@@ -305,7 +307,9 @@ class CursorOverlay:
             if msg == 0x0084:  # WM_NCHITTEST
                 # Only the idle companion accepts clicks; while a task runs the
                 # sprite must stay click-through or it would block the user's mouse.
-                return 0 if self._clickable_now else -1  # HTCLIENT / HTTRANSPARENT
+                # HTCLIENT is 1, not 0. Returning 0 (HTERROR/HTNOWHERE) leaves
+                # the mascot visible but swallows every real mouse click.
+                return 1 if self._clickable_now else -1  # HTCLIENT / HTTRANSPARENT
             if msg == 0x0202:  # WM_LBUTTONUP -> open the picker menu
                 callback = self._on_click
                 if callback is not None and self._clickable_now:

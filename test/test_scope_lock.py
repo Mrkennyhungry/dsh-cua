@@ -25,15 +25,41 @@ class ScopeLockTests(unittest.TestCase):
         self.assertFalse(result["success"])
         self.assertIsNone(desktop_tools.locked_window_id())
 
-    def test_other_windows_are_refused_while_locked(self):
-        info = {"window_id": "win-a", "title": "记事本", "exe": "notepad.exe", "hwnd": 10, "pid": 99}
-        with mock.patch.object(desktop_tools, "bound_window_info", return_value=info):
+    def test_other_applications_are_refused_while_locked(self):
+        infos = {
+            "win-a": {"title": "记事本", "exe": "notepad.exe", "hwnd": 10, "pid": 99},
+            "win-b": {"title": "浏览器", "exe": "msedge.exe", "hwnd": 20, "pid": 100},
+        }
+        with mock.patch.object(desktop_tools, "bound_window_info",
+                               side_effect=lambda window_id: infos.get(window_id, {})):
             self.assertTrue(desktop_tools.lock_window("win-a")["success"])
             self.assertIsNone(desktop_tools.scope_block("win-a"))
             blocked = desktop_tools.scope_block("win-b")
         self.assertIsNotNone(blocked)
         self.assertIn("WINDOW_SCOPE_LOCKED", blocked["error"])
         self.assertEqual(blocked["locked_window"]["window_id"], "win-a")
+
+    def test_new_window_of_same_application_is_allowed(self):
+        infos = {
+            "win-a": {"title": "文档 1", "exe": "notepad.exe", "hwnd": 10, "pid": 99},
+            "win-new": {"title": "文档 2", "exe": "Notepad.exe", "hwnd": 30, "pid": 120},
+        }
+        with mock.patch.object(desktop_tools, "bound_window_info",
+                               side_effect=lambda window_id: infos.get(window_id, {})):
+            desktop_tools.lock_window("win-a")
+            self.assertIsNone(desktop_tools.scope_block("win-new"))
+
+    def test_owned_popup_is_allowed_even_without_exe_identity(self):
+        infos = {
+            "win-a": {"title": "主窗口", "exe": "app.exe", "hwnd": 10, "pid": 99},
+            "popup": {"title": "保存", "exe": "", "hwnd": 30, "pid": 120},
+        }
+        with mock.patch.object(desktop_tools, "bound_window_info",
+                               side_effect=lambda window_id: infos.get(window_id, {})), \
+                mock.patch("dsh_desktop.game.window._has_owner_link",
+                           side_effect=lambda candidate, owner: (candidate, owner) == (30, 10)):
+            desktop_tools.lock_window("win-a")
+            self.assertIsNone(desktop_tools.scope_block("popup"))
 
     def test_unlock_restores_access(self):
         info = {"window_id": "win-a", "title": "t", "exe": "e", "hwnd": 1, "pid": 2}
