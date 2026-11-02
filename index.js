@@ -5,9 +5,10 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createBridge, ownerOf } from './bridge-client.js'
 import { installCursorThinking } from './cursor-state.js'
+import { installCompanionSelection } from './companion-state.js'
 
 export const name = 'doraemon'
-export const inject = ['tools']
+export const inject = ['tools', 'settings']
 export const Config = Schema.object({
   port: Schema.number().default(8766),
   tokenEnv: Schema.string().default('DSH_DESKTOP_BRIDGE_TOKEN'),
@@ -33,6 +34,8 @@ export const Config = Schema.object({
   // the plugin from posting to /mascot/state at all, which is what a headless or
   // screen-recording host wants.
   commandFeedback: Schema.boolean().default(true),
+  // Runtime-only selection mirror for the Client chip; not a user preference.
+  companionSelection: Schema.string().default('').volatile(),
 })
 
 const taskParameter = { type: 'string', required: true, description: 'The task_id returned by doraemon_run, in this DSH session.' }
@@ -185,6 +188,7 @@ export function apply(ctx, config) {
   const cursorFeedback = config.commandFeedback === false
     ? { begin() {}, end() {}, dispose: async () => {} }
     : installCursorThinking(ctx, bridge)
+  const companionSelection = installCompanionSelection(ctx, bridge)
   if (config.commandFeedback !== false) {
     // The mascot lives in the kernel, so the kernel has to be running for it to
     // dock on screen. One background health call starts it without blocking the
@@ -239,6 +243,7 @@ export function apply(ctx, config) {
     }))
   }
   ctx.effect(() => async () => {
+    await companionSelection.dispose()
     await cursorFeedback.dispose()
     if (bridge.ready) {
       await Promise.allSettled([...active].map(([taskId, owner]) =>

@@ -22,8 +22,14 @@
   ],
   "type": "module",
   "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js"
+  },
   "files": [
     "index.js",
+    "client.js",
+    "companion-state.js",
     "bridge-client.js",
     "cursor-state.js",
     "kernel.js",
@@ -68,6 +74,13 @@
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-conversation"
+      ]
     }
   },
   "scripts": {
