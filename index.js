@@ -29,6 +29,10 @@ export const Config = Schema.object({
   logDir: Schema.string().default(''),
   apiKeyFile: Schema.string().default(''),
   enableExperimentalPageCache: Schema.boolean().default(false),
+  // The docked commander is task feedback drawn on the desktop. Turning it off keeps
+  // the plugin from posting to /mascot/state at all, which is what a headless or
+  // screen-recording host wants.
+  commandFeedback: Schema.boolean().default(true),
 })
 
 const taskParameter = { type: 'string', required: true, description: 'The task_id returned by doraemon_run, in this DSH session.' }
@@ -178,7 +182,9 @@ export function apply(ctx, config) {
     },
   })
   const active = new Map()
-  const cursorFeedback = installCursorThinking(ctx, bridge)
+  const cursorFeedback = config.commandFeedback === false
+    ? { begin() {}, end() {}, dispose: async () => {} }
+    : installCursorThinking(ctx, bridge)
   const registered = []
   const register = (tool) => {
     const execute = tool.execute

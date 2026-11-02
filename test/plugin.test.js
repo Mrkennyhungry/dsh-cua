@@ -15,7 +15,7 @@ function setup(options = {}) {
   process.env.DSH_DESKTOP_BRIDGE_TOKEN = token
   const tools = new Map(), effects = []
   apply({ tools: { register: tool => tools.set(tool.name, tool) }, effect: effect => effects.push(effect) },
-    Config({ waitSeconds: 1, manageKernel: false, ...options }))
+    Config({ waitSeconds: 1, manageKernel: false, commandFeedback: false, ...options }))
   return { tools, effects }
 }
 
@@ -99,9 +99,9 @@ test('every published file is free of private names, private hosts and local pat
 
 test('real 0.2.1-rc.2 SDK registers every tool with canonical output schemas', () => {
   const { tools } = setup()
-  // 30 until doraemon_click_screen was added for popups that live in their own
-  // top-level window and therefore fall outside the bound window's client rect.
-  assert.equal(tools.size, 31)
+  // 31 with doraemon_click_screen, minus doraemon_cursor when the docked commander
+  // replaced the cosmetic pointer.
+  assert.equal(tools.size, 30)
   for (const tool of tools.values()) assert.equal(tool.output.schema.type, 'object')
 })
 
@@ -145,7 +145,8 @@ test('UIA target hints reach the kernel for progressive OCR fallback', async () 
     }, execution())
     assert.equal(call.url, 'http://127.0.0.1:8766/api/dsh/windows/win-0123456789/uia')
     assert.deepEqual(call.body, {
-      max_depth: 7, max_nodes: 120, target_hint: '文件名', target_kind: 'control', max_attempts: 2,
+      max_depth: 7, max_nodes: 300, target_hint: '文件名', target_kind: 'control', max_attempts: 2,
+      control_types: '', text_contains: '', only_actionable: false,
     })
   } finally { globalThis.fetch = original }
 })
