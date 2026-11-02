@@ -12,6 +12,7 @@ import numpy as np
 
 WS_EX_LAYERED = 0x80000
 WS_EX_TRANSPARENT = 0x20
+GWL_EXSTYLE = -20
 WS_EX_TOOLWINDOW = 0x80
 WS_EX_TOPMOST = 0x8
 WS_EX_NOACTIVATE = 0x08000000
@@ -91,6 +92,12 @@ class CursorOverlay:
         self._origin = None
         self._next_owner_check = 0.0
         self._capture_excluded = False
+        # Companion mode: the mascot stays docked while no task runs and its
+        # sprite becomes clickable, so it can open the window/app picker.
+        self._companion = False
+        self._on_click = None
+        self._dock = None
+        self._clickable_now = None
 
     def _layout(self):
         """Use the visible DSH composer area as a best-effort entrance origin."""
@@ -208,6 +215,25 @@ class CursorOverlay:
             self._action, self._action_until = action, time.monotonic() + duration
             self._visible = True
 
+    def set_companion(self, enabled: bool, on_click=None) -> None:
+        """Keep the mascot visible while idle and make its sprite clickable.
+
+        Clicking is what turns it from decoration into a launcher; during a task
+        the sprite goes back to click-through so it never eats the user's clicks.
+        """
+        try:
+            dock, _origin = self._layout()
+        except Exception:
+            dock = (40, 40)
+        with self._lock:
+            self._companion = bool(enabled)
+            self._on_click = on_click if enabled else None
+            self._dock = dock
+            if enabled and not self._tasks:
+                self._target = dock
+                self._visible = True
+                self._shown = False
+
     def hide(self) -> None:
         with self._lock:
             self._visible = False
@@ -262,8 +288,15 @@ class CursorOverlay:
             if msg == 0x0010:  # WM_CLOSE
                 user32.DestroyWindow(hwnd)
                 return 0
-            if msg == 0x0084:  # WM_NCHITTEST -> transparent to the mouse
-                return -1  # HTTRANSPARENT
+            if msg == 0x0084:  # WM_NCHITTEST
+                # Only the idle companion accepts clicks; while a task runs the
+                # sprite must stay click-through or it would block the user's mouse.
+                return 0 if self._clickable_now else -1  # HTCLIENT / HTTRANSPARENT
+            if msg == 0x0202:  # WM_LBUTTONUP -> open the picker menu
+                callback = self._on_click
+                if callback is not None and self._clickable_now:
+                    threading.Thread(target=callback, daemon=True, name="companion-menu").start()
+                return 0
             if msg == 0x0021: return 3  # WM_MOUSEACTIVATE -> MA_NOACTIVATE
             return user32.DefWindowProcW(hwnd, msg, wparam, lparam)
 
@@ -360,7 +393,19 @@ class CursorOverlay:
             with self._lock:
                 now = time.monotonic()
                 self._expire_tasks(now)
-                target, visible = self._target, self._visible and not self._capture_depth
+                if self._companion and not self._tasks and self._target is None:
+                    self._target = self._dock
+                target = self._target
+                visible = (self._visible or self._companion) and not self._capture_depth
+                clickable = bool(self._companion and not self._tasks and not self._capture_depth)
+                if clickable != self._clickable_now:
+                    # WS_EX_TRANSPARENT makes the window ignore the mouse entirely;
+                    # dropping it only in the idle companion state keeps the sprite
+                    # clickable without ever stealing clicks during a task.
+                    style = user32.GetWindowLongW(self._hwnd, GWL_EXSTYLE)
+                    style = (style & ~WS_EX_TRANSPARENT) if clickable else (style | WS_EX_TRANSPARENT)
+                    user32.SetWindowLongW(self._hwnd, GWL_EXSTYLE, style)
+                    self._clickable_now = clickable
                 action = self._resolved_action(now)
                 style = (self._theme, self._palette, self._scale)
                 greeting = '终于轮到我玩电脑了！' if self._tasks and now-self._born < 2 else None

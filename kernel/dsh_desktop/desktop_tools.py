@@ -3387,6 +3387,50 @@ def _focus_state(hwnd: int) -> dict[str, Any] | None:
         return None
 
 
+# ── Window scope lock ────────────────────────────────────────────────────
+# One window at a time, kernel-wide: the user picks a window once and every
+# action on a different window is refused instead of silently driving it.
+_SCOPE_LOCK = {"window_id": None}
+
+
+def locked_window_id() -> str | None:
+    with _STATE._lock:
+        return _SCOPE_LOCK["window_id"]
+
+
+def lock_window(window_id: str) -> dict:
+    info = bound_window_info(window_id)
+    if not info:
+        return {"success": False, "error": f"window_id 不存在: {window_id}"}
+    with _STATE._lock:
+        _SCOPE_LOCK["window_id"] = window_id
+    return {"success": True, "locked": window_id,
+            "window": {k: info.get(k) for k in ("title", "exe", "pid", "hwnd")}}
+
+
+def unlock_window() -> dict:
+    with _STATE._lock:
+        previous = _SCOPE_LOCK["window_id"]
+        _SCOPE_LOCK["window_id"] = None
+    return {"success": True, "unlocked": previous}
+
+
+def scope_block(window_id: str) -> dict | None:
+    """Refusal when a different window is locked, else None."""
+    locked = locked_window_id()
+    if not locked or locked == window_id:
+        return None
+    info = bound_window_info(locked) or {}
+    return {
+        "success": False,
+        "error": (f"WINDOW_SCOPE_LOCKED: 当前只允许操作已锁定的窗口 "
+                  f"「{info.get('title','')}」（{info.get('exe','')}），本次动作针对的是另一个窗口。"
+                  "如需切换，先解除锁定或重新选择窗口。"),
+        "locked_window": {"window_id": locked, "title": info.get("title", ""),
+                          "exe": info.get("exe", ""), "hwnd": info.get("hwnd", 0)},
+    }
+
+
 def _require_foreground(hwnd: int, *, strict: bool = False) -> dict | None:
     """Foreground CHECK for keyboard actions — never activates.
 

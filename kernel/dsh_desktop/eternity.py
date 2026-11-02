@@ -565,6 +565,13 @@ class Eternity:
             agent_tools.register_agent_tools()
             self._disable_agent_dangerous_tools()
             self._registered = True
+        # Companion mode: the mascot stays docked, clickable, and owns the
+        # global hotkeys. Never let a UI failure break kernel startup.
+        try:
+            from . import companion
+            companion.install(self)
+        except Exception:
+            logger.warning("companion mode unavailable", exc_info=True)
 
     def _seed_workbench_skills(self) -> None:
         """Use the manifest-aware synchronizer for updates and user deletions."""

@@ -185,6 +185,12 @@ export function apply(ctx, config) {
   const cursorFeedback = config.commandFeedback === false
     ? { begin() {}, end() {}, dispose: async () => {} }
     : installCursorThinking(ctx, bridge)
+  if (config.commandFeedback !== false) {
+    // The mascot lives in the kernel, so the kernel has to be running for it to
+    // dock on screen. One background health call starts it without blocking the
+    // plugin load; a failure here only means "no companion yet".
+    bridge.request('/health', null, {}).catch(() => {})
+  }
   const registered = []
   const register = (tool) => {
     const execute = tool.execute
@@ -424,9 +430,9 @@ export function apply(ctx, config) {
 
   register(defineTool({
     name: 'doraemon_windows',
-    description: 'List, bind, activate and unbind desktop windows through the local Doraemon kernel. Bind first (action=bind with an hwnd from action=list, or action=foreground for the current foreground window), then pass the returned window_id to doraemon_analyze / doraemon_uia / doraemon_click / doraemon_type / doraemon_key / doraemon_scroll / doraemon_swipe.',
+    description: 'List, bind, activate and unbind desktop windows through the local Doraemon kernel. Bind first (action=bind with an hwnd from action=list, or action=foreground for the current foreground window), then pass the returned window_id to doraemon_analyze / doraemon_uia / doraemon_click / doraemon_type / doraemon_key / doraemon_scroll / doraemon_swipe. action=lock pins the kernel to one bound window: every later action on a different window is refused with WINDOW_SCOPE_LOCKED until action=unlock, which is how a run is kept inside the window the user chose. action=scope reports the lock and the emergency-stop flag.',
     parameters: {
-      action: { type: 'string', required: true, description: 'list | bound | bind | foreground | activate | unbind' },
+      action: { type: 'string', required: true, description: 'list | bound | bind | foreground | activate | unbind | lock | unlock | scope' },
       hwnd: { type: 'number', description: 'Native window handle for action=bind, as returned by action=list.' },
       label: { type: 'string', description: 'Title or process substring for action=bind or foreground.' },
       window_id: { type: 'string', description: 'Bound window id for action=activate or unbind.' },
@@ -449,7 +455,10 @@ export function apply(ctx, config) {
           body: { label: String(args.label ?? '') }, signal: exec.signal,
         })
       }
+      if (action === 'scope') return bridge.request('/scope', owner, { signal: exec.signal })
+      if (action === 'unlock') return bridge.request('/windows/unlock', owner, { body: {}, signal: exec.signal })
       const id = boundWindowId(args.window_id)
+      if (action === 'lock') return bridge.request(`/windows/${id}/lock`, owner, { body: {}, signal: exec.signal })
       if (action === 'unbind') return bridge.request(`/windows/${id}/unbind`, owner, { body: {}, signal: exec.signal })
       if (action === 'activate') {
         const wait = args.wait === undefined ? 1 : Number(args.wait)

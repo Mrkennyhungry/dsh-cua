@@ -846,6 +846,9 @@ def create_router(eternity) -> APIRouter:
         open their result in a separate process several seconds later, so the clicked window's pixels never move
         even though the click clearly worked.
         """
+        scope = desktop_tools.scope_block(window_id)
+        if scope:
+            return scope
         if capture_id and capture_id != captures.get(window_id):
             effect = "refused"
             try:
@@ -1132,6 +1135,29 @@ def create_router(eternity) -> APIRouter:
                 if info is not None:
                     info["scope_owner"] = owner
         return result
+
+    @router.post("/windows/{window_id}/lock")
+    def lock_window(window_id: str):
+        """Kernel-wide lock: every action on another window is refused."""
+        return desktop_tools.lock_window(window_id)
+
+    @router.post("/windows/unlock")
+    def unlock_window():
+        return desktop_tools.unlock_window()
+
+    @router.get("/scope")
+    def scope_status():
+        """Which window the kernel is locked to, plus the emergency-stop flag."""
+        locked = desktop_tools.locked_window_id()
+        info = (desktop_tools.bound_window_info(locked) or {}) if locked else {}
+        return {"locked": bool(locked), "window_id": locked,
+                "window": {k: info.get(k) for k in ("title", "exe", "pid", "hwnd")} if info else None,
+                "stopped": input_gate.stop_engaged()}
+
+    @router.post("/scope/resume")
+    def resume_after_stop():
+        input_gate.clear_stop()
+        return {"success": True, "stopped": False}
 
     @router.post("/windows/foreground")
     def bind_foreground(req: WindowForegroundRequest, owner: str = Depends(authorize)):

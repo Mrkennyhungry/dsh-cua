@@ -109,6 +109,27 @@ def session_blocker() -> dict | None:
     return None
 
 
+_STOP = {"at": 0.0}
+
+
+def emergency_stop() -> None:
+    """Stop all input immediately (hotkey). Stays in effect until clear_stop()."""
+    _STOP["at"] = time.monotonic()
+    logger.warning("emergency stop engaged: all input is refused until cleared")
+
+
+def clear_stop() -> None:
+    _STOP["at"] = 0.0
+
+
+def _stopped() -> bool:
+    return _STOP["at"] > 0.0
+
+
+def stop_engaged() -> bool:
+    return _stopped()
+
+
 def begin_action(timeout_s: float) -> str:
     """Register an input lease for one action and return its token."""
     token = uuid.uuid4().hex
@@ -158,6 +179,8 @@ def current_token() -> str | None:
 
 def guard() -> dict | None:
     """Refusal for the current thread's action, or None when input may proceed."""
+    if _stopped():
+        return _refusal("INPUT_STOPPED", "已按下急停：停止发送输入。解除急停后才会继续。")
     token = current_token()
     if token:
         with _lock:
