@@ -64,6 +64,7 @@ public sealed class PickerWindow : PopupWindow
             Content = list,
             MaxHeight = 510,
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
         });
         Content = Panel(content);
         Opened += (_, _) => PlaceNear(anchorX, anchorY);
@@ -71,40 +72,52 @@ public sealed class PickerWindow : PopupWindow
 
     private ArcButton ItemButton(PickerItem item)
     {
-        var row = new Grid { ColumnDefinitions = new ColumnDefinitions("40,*") };
+        var row = new Grid
+        {
+            // ArcButton centers its content by desired width. Without a fixed row
+            // width, every path gets a different left edge and long paths are
+            // clipped before the icon. A fixed grid makes every row identical.
+            Width = 500,
+            ColumnDefinitions = new ColumnDefinitions("40,*"),
+            HorizontalAlignment = HorizontalAlignment.Left,
+        };
         var icon = IconLoader.ForItem(item);
-        Control iconControl = icon is null
-            ? new Border
-            {
-                Width = 28,
-                Height = 28,
-                CornerRadius = new CornerRadius(6),
-                Background = new SolidColorBrush(Color.Parse("#35353B")),
-                Child = new TextBlock
+        Control iconControl = new Border
+        {
+            // Always reserve the same slot, including while an icon is unavailable.
+            Width = 28,
+            Height = 28,
+            CornerRadius = new CornerRadius(6),
+            Background = new SolidColorBrush(Color.Parse("#35353B")),
+            Child = icon is null
+                ? new TextBlock
                 {
                     Text = string.IsNullOrEmpty(item.Title) ? "?" : item.Title[..1],
                     HorizontalAlignment = HorizontalAlignment.Center,
                     VerticalAlignment = VerticalAlignment.Center,
                     Foreground = SecondaryText,
-                },
-            }
-            : new Image { Source = icon, Width = 28, Height = 28 };
-        iconControl.VerticalAlignment = VerticalAlignment.Center;
+                }
+                : new Image { Source = icon, Width = 28, Height = 28 },
+            VerticalAlignment = VerticalAlignment.Center,
+        };
         row.Children.Add(iconControl);
 
         var text = new StackPanel
         {
+            HorizontalAlignment = HorizontalAlignment.Stretch,
             Children =
             {
                 new TextBlock
                 {
                     Text = item.Title, FontSize = 14, Foreground = PrimaryText,
                     TextTrimming = TextTrimming.CharacterEllipsis,
+                    HorizontalAlignment = HorizontalAlignment.Left,
                 },
                 new TextBlock
                 {
                     Text = item.Subtitle, FontSize = 11, Foreground = SecondaryText,
                     TextTrimming = TextTrimming.CharacterEllipsis,
+                    HorizontalAlignment = HorizontalAlignment.Left,
                     Margin = new Thickness(0, 3, 0, 0),
                 },
             },
