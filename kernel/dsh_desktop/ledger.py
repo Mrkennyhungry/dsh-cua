@@ -55,7 +55,7 @@ def record(exe: str, action: str, effect: str, *, title: str = "", detail: str =
             if detail:
                 entry["last_detail"] = detail[:200]
             _path().write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-    except Exception:  # noqa: BLE001 - telemetry must never block the action
+    except Exception:  # noqa: BLE001 - bookkeeping must never block the action
         pass
 
 

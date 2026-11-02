@@ -28,8 +28,6 @@ from .prompts import DEFAULT_SYSTEM_PROMPT
 from .config import Config
 from .controller import AppController, extract_image_path
 from .events import EVT_DELTA, EVT_TOOL_CALL, EVT_TOOL_RESULT, EVT_REASONING, EVT_STEP_CONTEXT, EVT_ERROR, EVT_SESSION
-from . import telemetry
-from .version import __version__
 
 logger = logging.getLogger(__name__)
 
@@ -405,9 +403,6 @@ class SessionHandle:
     tool_trace: list[dict] = field(default_factory=list)
     _started_at: float = field(default_factory=_time.monotonic)
     _tool_call_count: int = 0
-    # (tool_name, error_type) pairs already reported to telemetry this
-    # session — a broken tool retried in a loop must not spam events.
-    _reported_tool_errors: set = field(default_factory=set)
     # 死循环熔断状态：动作型 web 工具的最近页面签名窗口 + 已注入
     # 纠正提示次数。web_tools 侧每个动作结果携带 page_sig。
     _action_sigs: list[str] = field(default_factory=list)
@@ -488,12 +483,6 @@ def _detect_action_loop(handle: SessionHandle, name: str, result) -> None:
         logger.debug("loop interrupt failed", exc_info=True)
 
 
-# ── Tool-failure telemetry ─────────────────────────────────────────────
-
-# Cap on distinct (tool, error_type) pairs reported per session.
-_MAX_TOOL_ERROR_REPORTS = 10
-
-
 def _tool_error_message(result) -> str | None:
     """Extract the error message from a tool result, or None on success.
 
@@ -515,24 +504,6 @@ def _tool_error_message(result) -> str | None:
     if obj.get("success") is False:
         return "tool reported success=false"
     return None
-
-
-def _track_tool_failure(handle: SessionHandle, name: str, result) -> None:
-    """Send a telemetry event when a tool call failed (deduped per session)."""
-    message = _tool_error_message(result)
-    if message is None:
-        return
-    # Dispatch-level exceptions are wrapped by hermes as
-    # "Tool execution failed: <ExcType>: <msg>" (tools.registry.dispatch).
-    error_type = "exception" if message.startswith("Tool execution failed:") else "tool_error"
-    key = (name, error_type)
-    if key in handle._reported_tool_errors or len(handle._reported_tool_errors) >= _MAX_TOOL_ERROR_REPORTS:
-        return
-    handle._reported_tool_errors.add(key)
-    telemetry.track_tool_error(
-        __version__, name, error_type,
-        error_detail=message[:300],
-    )
 
 
 class Eternity:
@@ -847,10 +818,6 @@ class Eternity:
                         handle._task_report = dict(report_obj)
             except Exception:
                 logger.debug("tool trace append failed", exc_info=True)
-            try:
-                _track_tool_failure(handle, name, result)
-            except Exception:
-                logger.debug("Tool-failure telemetry failed", exc_info=True)
             try:
                 _detect_action_loop(handle, name, result)
             except Exception:
@@ -1167,7 +1134,6 @@ class Eternity:
             })
             handle.publish(EVT_ERROR, {"message": "agent exception"})
         finally:
-            duration_s = round(_time.monotonic() - handle._started_at, 1)
             if cursor is not None:
                 cursor.end_task(handle.session_id)
             # Business outcome (tri-state), not just framework health: an
@@ -1179,16 +1145,6 @@ class Eternity:
             if not error_type and (res.get("status") == "interrupted"
                                    or res.get("completed") is False or res.get("partial")):
                 task_outcome = "unknown"
-            try:
-                telemetry.track_session_completed(
-                    __version__, success=task_outcome == "succeeded",
-                    tool_call_count=handle._tool_call_count,
-                    duration_seconds=duration_s,
-                )
-                if error_type:
-                    telemetry.track_agent_error(__version__, error_type, error_detail)
-            except Exception:
-                logger.debug("session telemetry failed", exc_info=True)
             # AI post-mortem: review the trace with the LLM and persist a
             # semantic draft (correction / success path) in a worker thread —
             # the session stream is already closed by now.

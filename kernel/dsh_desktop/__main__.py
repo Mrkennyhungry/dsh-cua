@@ -213,7 +213,6 @@ def main():
     def _shutdown() -> None:
         """Gracefully stop all background services.  Always calls os._exit(0)."""
         logger.info("Shutting down...")
-        telemetry.track_exit(__version__, round((_time.time() - _start_time) / 3600, 2))
         if tray:
             tray.stop()
         if im_bridge and im_loop:
@@ -250,7 +249,6 @@ def main():
 
     # ── Main-thread imports (lightweight; heavy deps deferred to the worker) ──
     from .config import Config
-    from . import telemetry
     from .tray import TrayManager
     from .updater import check_for_update, UpdateInfo
     from .webview_api import start_webview, WebviewAPI
@@ -285,9 +283,6 @@ def main():
         _shutdown()
 
     _phase("config")
-
-    # Set telemetry enabled from config
-    telemetry.enabled = cfg.telemetry_enabled
 
     # Ensure workspace directories exist
     Path(cfg.workspace.screenshot_dir).mkdir(parents=True, exist_ok=True)
@@ -366,7 +361,6 @@ def main():
                 im_thread.start()
                 platform_name, _ = active
                 logger.info("IM bridge started (%s)", platform_name)
-                telemetry.track_im_connected(__version__, platform_name)
 
             # WeCom (企业微信): group-robot webhook push and/or two-way
             # self-built-app callback. Independent of the IM bridge above —
@@ -415,36 +409,6 @@ def main():
             logger.info("API server started on http://%s:%s/", server_host, actual_port)
             mem_tag("after server start")
             _phase("server")
-
-            # Track app start
-            _features = []
-            if active:
-                _features.append("im_bridge")
-            if wecom_bridge is not None:
-                _features.append("wecom_bridge")
-            if cfg.cron.enabled:
-                _features.append("cron")
-            if cfg.memory.memory_enabled:
-                _features.append("memory")
-
-            _skill_count = None
-            _cron_count = None
-            try:
-                _skills_dir = dsh_desktop_home() / "skills"
-                if _skills_dir.is_dir():
-                    _skill_count = sum(1 for d in _skills_dir.iterdir() if d.is_dir())
-            except Exception:
-                pass
-            try:
-                from .cron import list_jobs as _list_jobs
-                _cron_count = len(_list_jobs(include_disabled=False))
-            except Exception:
-                pass
-
-            telemetry.track_start(__version__, _features,
-                                  skill_count=_skill_count, cron_count=_cron_count,
-                                  model_provider=cfg.model.provider or None,
-                                  model_name=cfg.model.default or None)
 
             _set_status("Ready")
             _window_ref[0].load_url(f"http://{server_host}:{actual_port}?lang={cfg.language}")

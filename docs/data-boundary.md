@@ -13,14 +13,13 @@
 | `desktop_read_image` | **是** | 由 DSH 侧配置的视觉模型端点决定（插件只返回 base64） | 显式调用该工具 | 不调用 |
 | 受控浏览器 `web_*` | 否（本机 Chromium） | — | — | — |
 | 网页 `web_extract` 的正文 | 由调用方模型决定 | 同上 | 调用后把文本交给模型 | 不调用 |
-| 遥测 | 默认**否** | `https://telemetry.gaott.top/event`（`telemetry.py:29`） | 仅当 `config.yaml` 里 `telemetry.enabled: true`（只有独立桌面版会读这个开关；插件模式从不开启） | 保持默认即可 |
 
 关键事实：
 
 1. **caption 是唯一一处"把画面送出去"的地方**。发送内容是被检测图标标注过的整帧截图 + 若干图标裁图拼贴，`deepseek_caption.py:104`；不含桌面其它窗口的裁剪（整帧按被测窗口客户区截取）。
 2. 未配置 `DEEPSEEK_API_KEY` 时，`deepseek_caption.caption_icons()` 直接返回 `deepseek_called: false`，**不会发起任何网络请求**（`deepseek_caption.py:167-168`）。此时"纯本地"成立。
 3. 截图本身只落盘在 `.runtime/screenshots/<date>/`，不自动上传。
-4. **遥测默认关闭**（`telemetry.py:27` 的 `enabled = False`）。插件模式下内核不会打开它，因此不会有 install id、工具错误详情或会话统计外发；只有独立桌面版在用户显式打开 `telemetry.enabled` 后才上报。
+4. **不含遥测**：没有装机统计、没有错误上报，内核不会向外发送使用数据，也没有安装 ID 之类的标识（0.4.8 移除了 `telemetry` 模块及其全部调用点）。
 5. `kernel-boot.json` 以**明文**保存 bridge token，以及（存在时）`DEEPSEEK_API_KEY`。权限已收紧为：当前用户 + `SYSTEM` + `Administrators`（`kernel.js` 写入后用 `icacls /inheritance:r` 重设）。它必须是明文——高权限计划任务要读它传给内核。
 
 ## 二、CDP 端口

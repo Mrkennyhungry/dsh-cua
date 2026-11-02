@@ -269,10 +269,6 @@ class Config:
     language: str = "zh-CN"
     close_behavior: str = "ask"  # "ask", "minimize", "close"
     autostart: bool = False
-    # Telemetry is OPT-IN: internal/business deployments should not send run
-    # metadata (model names, outcomes, error digests) to the upstream domain
-    # by default. Flip to True explicitly if you want to support upstream.
-    telemetry_enabled: bool = False
 
     @property
     def config_path(self) -> Path:
@@ -428,8 +424,6 @@ class Config:
             })
         if "autostart" in data:
             cfg.autostart = bool(data["autostart"])
-        if "telemetry_enabled" in data:
-            cfg.telemetry_enabled = bool(data["telemetry_enabled"])
         return cfg
 
     def to_dict(self) -> dict:
@@ -465,8 +459,6 @@ class Config:
             self.close_behavior = data["close_behavior"]
         if "autostart" in data:
             self.autostart = bool(data["autostart"])
-        if "telemetry_enabled" in data:
-            self.telemetry_enabled = bool(data["telemetry_enabled"])
         if "memory" in data:
             for k, v in data["memory"].items():
                 if hasattr(self.memory, k):
