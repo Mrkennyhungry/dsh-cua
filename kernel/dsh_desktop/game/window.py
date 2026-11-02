@@ -228,6 +228,41 @@ def is_effectively_foreground(hwnd: int) -> bool:
     return False
 
 
+def is_foreground_target(hwnd: int) -> bool:
+    """Strict check for KEYBOARD input: will the keystroke land in hwnd?
+
+    Only two shapes qualify:
+      1. hwnd is the foreground window itself;
+      2. the foreground window is a child of hwnd, or a window hwnd owns
+         (combo dropdown, in-app dialog) — the keystroke still belongs to
+         hwnd's UI.
+
+    It deliberately does NOT accept "same process" or "process descendant",
+    which is_effectively_foreground does for activation/capture decisions.
+    Those rules also match a *sibling* top-level window of the same
+    application, and SendInput then delivers the text to that sibling while
+    the caller believes it typed into the target.
+
+    Reproduced 2026-11-02 with Notepad: two top-level windows in one process,
+    the bound one behind; is_effectively_foreground() answered True, the paste
+    landed in the front window, and desktop_type reported success.
+    """
+    try:
+        fg = win32gui.GetForegroundWindow()
+    except Exception:
+        return False
+    if not fg:
+        return False
+    if fg == hwnd:
+        return True
+    try:
+        if win32gui.GetAncestor(fg, 2) == hwnd:  # GA_ROOT: a control of hwnd has focus
+            return True
+    except Exception:
+        pass
+    return _has_owner_link(fg, hwnd)
+
+
 class WindowService:
     """Stateless Win32 window operations."""
 

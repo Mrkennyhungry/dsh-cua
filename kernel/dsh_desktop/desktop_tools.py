@@ -2515,7 +2515,7 @@ def desktop_type_text(window_id: str, text: str) -> dict:
         # 回滚（2026-10-26）：不在这里强制抢前台。上午验证过的路径是
         # act()/调用方负责激活，本函数只核验前台；强制 ensure-focus 会让
         # 没有前台额度的内核把整条链卡死在 FOCUS_FAILED。
-        blocked = None if controller.input.virtual else _require_foreground(hwnd)
+        blocked = None if controller.input.virtual else _require_foreground(hwnd, strict=True)
         if blocked:
             return blocked
         result = controller.input.type_text(text, hwnd=hwnd)
@@ -2651,7 +2651,7 @@ def desktop_press_key(window_id: str, key: str, count: int = 1) -> dict:
         return {"success": False, "error": "Enter 可能触发提交，禁止连发；每次 count=1 并核验结果"}
     hwnd = int(info["hwnd"])
     with controller._input_lock:
-        blocked = None if controller.input.virtual else _require_foreground(hwnd)
+        blocked = None if controller.input.virtual else _require_foreground(hwnd, strict=True)
         if blocked:
             return {**blocked, "action_performed": False, "effect_verified": False}
         if is_combo:
@@ -2687,7 +2687,7 @@ def desktop_type_keys(window_id: str, text: str, interval: float = 0.03) -> dict
     hwnd = int(info["hwnd"])
     with controller._input_lock:
         # Foreground check inside the input lock (see desktop_type_text note).
-        blocked = None if controller.input.virtual else _require_foreground(hwnd)
+        blocked = None if controller.input.virtual else _require_foreground(hwnd, strict=True)
         if blocked:
             return blocked
         if controller.input.virtual:
@@ -3449,20 +3449,34 @@ def _focus_state(hwnd: int) -> dict[str, Any] | None:
         return None
 
 
-def _require_foreground(hwnd: int) -> dict | None:
+def _require_foreground(hwnd: int, *, strict: bool = False) -> dict | None:
     """Foreground CHECK for keyboard actions — never activates.
 
     Focus design: activate is a standalone step at the START of
     a flow (desktop_switch_window); press/type/paste actions are pure SendInput and
     must not re-activate windows (activation perturbs embedded webviews and
     could type into the wrong window anyway). Refuse with guidance instead.
+
+    strict=True is used by every keyboard action: the foreground window must be
+    hwnd itself, a child of it, or a window it owns. The loose check
+    (is_effectively_foreground) also accepts any window of the SAME process, so
+    with two windows of one application the keystroke would land in the sibling
+    window while this function reported "foreground" (reproduced 2026-11-02 with
+    Notepad). Activation and capture keep the loose check: there, a sibling
+    window of the same app is a legitimate state to observe.
     """
     import win32gui
-    if _is_effectively_foreground(hwnd):
+    if strict:
+        from .game.window import is_foreground_target
+        satisfied = is_foreground_target(hwnd)
+    else:
+        satisfied = _is_effectively_foreground(hwnd)
+    if satisfied:
         return None
     fg_hwnd = 0
     fg_title = ""
     fg_exe = ""
+    same_process = False
     try:
         fg_hwnd = win32gui.GetForegroundWindow()
         fg_title = win32gui.GetWindowText(fg_hwnd)[:60]
@@ -3470,19 +3484,35 @@ def _require_foreground(hwnd: int) -> dict | None:
         fg_exe = fg_exe.get("exe", "")
     except Exception:
         pass
+    if fg_hwnd:
+        try:
+            import win32process
+            fg_pid = win32process.GetWindowThreadProcessId(fg_hwnd)[1]
+            target_pid = win32process.GetWindowThreadProcessId(hwnd)[1]
+            same_process = bool(fg_pid and fg_pid == target_pid)
+        except Exception:
+            same_process = False
+    hint = (
+        "目标窗口不是前台窗口（键入会打到别的窗口）。"
+        "三条路任选：① desktop_click 点一下目标输入框（真实点击会激活+放置光标）；"
+        "② desktop_switch_window 激活绑定窗；"
+        "③ 若前台窗口就是你想输入的子窗（常见于 CEF/多进程应用，如 desktop 登录窗 "
+        "DESKTOP_LOGIN_Monitor 属于另一进程、与主窗无亲缘关系），"
+        "直接 desktop_pick_foreground 绑定它再键入。"
+    )
+    if strict and same_process:
+        hint += (
+            "注意：前台窗口与目标是同一个程序的另一个窗口，按键会落进前台那个；"
+            "先 desktop_switch_window 把目标切到前台，或改用 desktop_pick_foreground "
+            "绑定当前前台窗口。"
+        )
     return {
         "success": False,
-        "error": (
-            "目标窗口不是前台窗口（键入会打到别的窗口）。"
-            "三条路任选：① desktop_click 点一下目标输入框（真实点击会激活+放置光标）；"
-            "② desktop_switch_window 激活绑定窗；"
-            "③ 若前台窗口就是你想输入的子窗（常见于 CEF/多进程应用，如 desktop 登录窗 "
-            "DESKTOP_LOGIN_Monitor 属于另一进程、与主窗无亲缘关系），"
-            "直接 desktop_pick_foreground 绑定它再键入。"
-        ),
+        "error": hint,
         "foreground_title": fg_title,
         "foreground_hwnd": fg_hwnd,
         "foreground_exe": fg_exe,
+        "foreground_is_same_process": same_process,
     }
 
 
@@ -3565,7 +3595,7 @@ def desktop_paste_clipboard_file(window_id: str, path: str = "", paths: list[str
 
     with controller._input_lock:
         # Foreground check inside the input lock (see desktop_type_text note).
-        blocked = None if controller.input.virtual else _require_foreground(hwnd)
+        blocked = None if controller.input.virtual else _require_foreground(hwnd, strict=True)
         if blocked:
             return blocked
         time.sleep(0.25)
@@ -4964,7 +4994,7 @@ def _uia_batch_step(controller, hwnd, region, table, step, remaining):
             pattern.SetValue(text)
             return "uia_value"
         wrapper.set_focus()
-        blocked = None if controller.input.virtual else _require_foreground(hwnd)
+        blocked = None if controller.input.virtual else _require_foreground(hwnd, strict=True)
         if blocked:
             raise ValueError(str(blocked["error"]))
         sent = controller.input.type_text(text, hwnd=hwnd)
