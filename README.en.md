@@ -78,7 +78,7 @@ dsh-doraemon@git+https://github.com/Mrkennyhungry/dsh-cua.git#main
 ```json
 {
   "dependencies": {
-    "dsh-doraemon": "git+https://github.com/Mrkennyhungry/dsh-cua.git#v0.4.6"
+    "dsh-doraemon": "git+https://github.com/Mrkennyhungry/dsh-cua.git#v0.4.7"
   }
 }
 ```
