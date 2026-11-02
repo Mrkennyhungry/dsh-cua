@@ -7,7 +7,7 @@ Three channels, three different amounts of ceremony. Only the last two need a to
 | Git install (`git+https://…#<commit>`) | an SSH key that can push | works today |
 | Plugin market index (`market/index.json`) | nothing — it is a file in this repo | live |
 | npm (`dsh-doraemon@<version>`) | a free npm account + an npm token | optional, not published |
-| GitHub Release page | a GitHub token, or the web form | live for v0.4.6 |
+| GitHub Release page | a GitHub token, or the web form | live for v0.4.7 |
 
 **npm is optional.** The git spec and the market index are the supported channels and
 both work today; npm only shortens the install string to `dsh-doraemon@0.4.7` and makes
