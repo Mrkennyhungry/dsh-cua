@@ -178,10 +178,9 @@ def main():
     _ensure_single_instance()
 
     # ── DPI awareness (must be set before any window creation) ──────────
-    try:
-        ctypes.windll.shcore.SetProcessDpiAwareness(1)  # type: ignore[attr-defined]
-    except Exception:
-        pass
+    from .dpi import set_per_monitor_v2
+
+    set_per_monitor_v2()
 
     # ── Logging (configured early so startup timing is captured) ──────────
     _setup_logging(_dsh_desktop_home_path / "logs")

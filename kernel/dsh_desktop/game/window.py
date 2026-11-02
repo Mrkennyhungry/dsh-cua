@@ -24,9 +24,12 @@ class Region:
     def as_tuple(self) -> tuple[int, int, int, int]:
         return self.left, self.top, self.width, self.height
 
-# Make this process DPI-aware so all coordinates are physical pixels,
-# matching what screen capture libraries (mss, pyautogui) expect.
-ctypes.windll.user32.SetProcessDPIAware()
+# Make this process Per-Monitor V2 DPI aware so all coordinates are physical
+# pixels, matching what screen capture libraries (mss, pyautogui) expect — and
+# so two monitors with different scales stay consistent.
+from ..dpi import set_per_monitor_v2  # noqa: E402
+
+set_per_monitor_v2()
 
 logger = logging.getLogger(__name__)
 
@@ -335,7 +338,10 @@ class WindowService:
             return True
 
         try:
-            _user32.ShowWindow(hwnd, SW_RESTORE)
+            # SW_RESTORE unconditionally un-maximizes a healthy window and moves the
+            # user's layout; it is only needed when the target is minimized.
+            if win32gui.IsIconic(hwnd):
+                _user32.ShowWindow(hwnd, SW_RESTORE)
         except Exception:
             pass
 

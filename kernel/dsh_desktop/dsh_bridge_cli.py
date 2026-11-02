@@ -33,6 +33,12 @@ def main() -> None:
     os.environ["HERMES_BUNDLED_SKILLS"] = str(Path(__file__).parent / "skills")
     os.environ["DSH_DESKTOP_PARSER_ENGINE"] = "local-deepseek"
 
+    # Must run before the first window/UIA call: without it Windows virtualises
+    # coordinates by the system DPI and every click on a scaled display drifts.
+    from .dpi import set_per_monitor_v2
+
+    set_per_monitor_v2()
+
     import uvicorn
     from fastapi import FastAPI, Request
     from fastapi.responses import JSONResponse

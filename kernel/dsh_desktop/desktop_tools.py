@@ -1091,7 +1091,11 @@ def force_foreground(hwnd: int) -> bool:
         for t in thread_ids:
             if t and t != current_thread and user32.AttachThreadInput(current_thread, t, True):
                 attached.append(t)
-        user32.ShowWindow(hwnd, 9)  # SW_RESTORE
+        # SW_RESTORE only matters for a minimized window; on a normal one it also
+        # un-maximizes it and resizes the user's layout (2026-11-02).
+        import win32gui as _wg
+        if _wg.IsIconic(hwnd):
+            user32.ShowWindow(hwnd, 9)  # SW_RESTORE
         # 实测（2026-10-26）：高完整性应用（desktop 等）的最小化窗口，
         # 普通令牌下 ShowWindow/BringWindowToTop 全部无效（iconic 仍为 1，
         # rect 停在 -21333）；SwitchToThisWindow 能真正恢复并提到 z-order。
@@ -1132,7 +1136,8 @@ def desktop_switch_window(window_id: str, wait: float = 1.0) -> dict:
         return {"success": False, "error": f"window_id 不存在: {window_id}"}
     hwnd = int(info["hwnd"])
     try:
-        win32gui.ShowWindow(hwnd, 9)  # SW_RESTORE
+        if win32gui.IsIconic(hwnd):
+            win32gui.ShowWindow(hwnd, 9)  # SW_RESTORE only when minimized
         win32gui.SetForegroundWindow(hwnd)
     except Exception:
         pass  # 裸调用被前台锁拒绝时走强前台化
@@ -2302,101 +2307,6 @@ def desktop_click_image_point(
     return result
 
 
-def _sendinput_click_center(hwnd: int) -> bool:
-    """用 SendInput 向目标窗口注入一次真实左键点击，**选一个未被遮挡的点**。
-
-    为什么需要它（实测 2026-10-27）：
-      内核与目标同为 High（S-1-16-12288）时，以下三种方式全部
-      **返回成功但 GetForegroundWindow() 不变**（Windows 静默忽略）：
-        · SwitchToThisWindow
-        · keybd_event(VK_MENU) + SetForegroundWindow
-        · AttachThreadInput + SetForegroundWindow
-      只有 SendInput 注入的事件被系统当作**真实用户输入**，前台才真正切换。
-
-    为什么不能固定点"客户区中心"（实测踩过）：
-      企业微信 rect=(493,490,2183,1951)，其中点 (1338,612) 落在占位的
-      IDE 窗口范围内 → SendInput 点到了 IDE 上 → 企业微信仍然没被激活。
-      所以必须先用 WindowFromPoint 确认这个点真的落在目标窗口上，
-      候选点按「中心 → 左上 → 右上 → 左下 → 右下 → 左中 → 右中」依次试。
-
-    注意：结构体在函数内定义——本模块顶层没有 import ctypes/wintypes，
-    大量函数是函数内 `import ctypes`，模块级定义结构体会 NameError。
-    """
-    import ctypes as _ct
-    from ctypes import wintypes as _wt
-
-    class MOUSEINPUT(_ct.Structure):
-        _fields_ = [
-            ("dx", _wt.LONG), ("dy", _wt.LONG),
-            ("mouseData", _wt.DWORD), ("dwFlags", _wt.DWORD),
-            ("time", _wt.DWORD), ("dwExtraInfo", _ct.POINTER(_ct.c_ulong)),
-        ]
-
-    class INPUT(_ct.Structure):
-        _fields_ = [("type", _wt.DWORD), ("mi", MOUSEINPUT)]
-
-    user32 = _ct.windll.user32
-    original = _wt.POINT()
-    restore = bool(user32.GetCursorPos(_ct.byref(original)))
-    try:
-        rect = _wt.RECT()
-        if not user32.GetWindowRect(_wt.HWND(hwnd), _ct.byref(rect)):
-            return False
-        left, top = rect.left, rect.top
-        width, height = rect.right - rect.left, rect.bottom - rect.top
-        if width <= 4 or height <= 4:
-            return False
-        # 纵向取标题栏下方约 1/12（避开标题栏按钮），横向取若干候选
-        y_top = top + max(40, height // 12)
-        y_mid = top + height // 2
-        candidates = [
-            (left + width // 2, y_top),
-            (left + width // 8, y_top),
-            (left + width - width // 8, y_top),
-            (left + width // 8, y_mid),
-            (left + width - width // 8, y_mid),
-            (left + width // 2, y_mid),
-            (left + width // 2, top + height - max(40, height // 12)),
-        ]
-
-        user32.WindowFromPoint.restype = _wt.HWND
-        user32.GetAncestor.argtypes = [_wt.HWND, _wt.UINT]
-        user32.GetAncestor.restype = _wt.HWND
-        GA_ROOT = 2
-
-        chosen = None
-        for (x, y) in candidates:
-            try:
-                pt = _wt.POINT(int(x), int(y))
-                hit = user32.WindowFromPoint(pt)
-                if not hit:
-                    continue
-                root = user32.GetAncestor(_wt.HWND(hit), GA_ROOT) or hit
-                if int(root) == int(hwnd):
-                    chosen = (int(x), int(y))
-                    break
-            except Exception:
-                continue
-        if chosen is None:
-            # 全部候选点都被遮挡：不点击，避免点到别的窗口上做错事
-            return False
-
-        user32.SetCursorPos(chosen[0], chosen[1])
-        time.sleep(0.05)
-        down = INPUT(0, MOUSEINPUT(0, 0, 0, 0x0002, 0, None))   # LEFTDOWN
-        up = INPUT(0, MOUSEINPUT(0, 0, 0, 0x0004, 0, None))     # LEFTUP
-        user32.SendInput.argtypes = [_wt.UINT, _ct.POINTER(INPUT), _ct.c_int]
-        user32.SendInput.restype = _wt.UINT
-        sent = user32.SendInput(1, _ct.byref(down), _ct.sizeof(INPUT))
-        time.sleep(0.02)
-        sent += user32.SendInput(1, _ct.byref(up), _ct.sizeof(INPUT))
-        return sent == 2
-    except Exception:
-        return False
-    finally:
-        pass  # Physical input stays at its action point; no cosmetic cursor restore.
-
-
 def _unlock_foreground(hwnd: int) -> bool:
     """绕过 Windows 前台锁（三级降级）。
 
@@ -2439,11 +2349,31 @@ def _unlock_foreground(hwnd: int) -> bool:
     except Exception:
         pass
 
-    # 3) SendInput 真实点击（实测唯一能突破前台锁的方式）
-    if _sendinput_click_center(hwnd):
-        time.sleep(0.25)
+    # 3) AttachThreadInput + SetForegroundWindow —— 只改 z-order，不再向客户区
+    #    注入点击。过去这里的"真实点击"能突破前台锁，但它会在目标窗口里点中一个
+    #    真实控件（工具栏按钮、输入框），是自动化里最危险的一类副作用；激活失败
+    #    时改为明确返回失败，由调用方决定是否用 desktop_click 显式点击。
+    try:
+        fg = user32.GetForegroundWindow()
+        cur_tid = _ct.windll.kernel32.GetCurrentThreadId()
+        attached = False
+        if fg:
+            fg_tid = user32.GetWindowThreadProcessId(fg, None)
+            if fg_tid and fg_tid != cur_tid:
+                attached = bool(user32.AttachThreadInput(fg_tid, cur_tid, True))
+        try:
+            if user32.IsIconic(target):
+                user32.ShowWindow(target, 9)  # SW_RESTORE only when minimized
+            user32.BringWindowToTop(target)
+            user32.SetForegroundWindow(target)
+        finally:
+            if attached:
+                user32.AttachThreadInput(fg_tid, cur_tid, False)
+        time.sleep(0.12)
         if _require_foreground(hwnd) is None:
             return True
+    except Exception:
+        pass
     return False
 
 
@@ -3474,6 +3404,13 @@ def _require_foreground(hwnd: int, *, strict: bool = False) -> dict | None:
     window of the same app is a legitimate state to observe.
     """
     import win32gui
+    # Session-level refusal first: on a locked screen, a UAC prompt or a
+    # disconnected RDP session the keystroke goes nowhere even though the target
+    # window looks fine.
+    from . import input_gate
+    gated = input_gate.guard()
+    if gated:
+        return gated
     if strict:
         from .game.window import is_foreground_target
         satisfied = is_foreground_target(hwnd)
