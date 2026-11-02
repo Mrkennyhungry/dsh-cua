@@ -19,6 +19,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from . import desktop_tools
+from . import input_gate
 from . import ledger
 
 # Captured once at import: the health response must describe loaded code, not
@@ -572,6 +573,51 @@ class FileDeleteRequest(BaseModel):
 _LAST_SIGNATURE: dict[str, tuple[float, list | None]] = {}
 
 
+# The effect signature is a 48x48 grayscale thumbnail (2304 cells, a cell counts as
+# changed when it differs by >15 levels). Measured on this machine 2026-11-02:
+# typing one line into a 460x240 window -> cells=20, mean=0.48; a caret blink or a
+# hover ring moves only a handful of cells. Hence: many changed cells OR a broad
+# repaint confirms; a couple of cells never does.
+_PIXEL_CONFIRM_CELLS = 15
+_PIXEL_CONFIRM_MEAN = 2.0
+
+
+def _pixel_change_confirms(change: dict | None) -> bool:
+    """Whether a pixel signature delta is strong enough to call an action confirmed."""
+    if not change:
+        return False
+    return (change.get("cells", 0) >= _PIXEL_CONFIRM_CELLS
+            or change.get("mean", 0.0) >= _PIXEL_CONFIRM_MEAN)
+
+
+def _split_related_windows(window_id: str, windows: list[dict]) -> tuple[list[dict], list[dict]]:
+    """Split new windows into "spawned by the acted-on app" and "everything else".
+
+    A new top-level window is only evidence for the action when the application
+    that was acted on produced it: same process, or a descendant process (CEF /
+    Electron helpers). A notification from an unrelated app must not turn a
+    no-op into "confirmed".
+    """
+    info = desktop_tools.bound_window_info(window_id) or {}
+    target_pid = int(info.get("pid") or 0)
+    related, unrelated = [], []
+    for window in windows or []:
+        pid = int(window.get("pid") or 0)
+        if target_pid and pid == target_pid:
+            related.append(window)
+            continue
+        linked = False
+        if target_pid and pid:
+            try:
+                from .game.window import _is_process_descendant_of
+
+                linked = _is_process_descendant_of(pid, target_pid)
+            except Exception:  # noqa: BLE001 - ancestry is best effort
+                linked = False
+        (related if linked else unrelated).append(window)
+    return related, unrelated
+
+
 def create_router(eternity) -> APIRouter:
     token = os.getenv("DSH_DESKTOP_BRIDGE_TOKEN", "")
     lock = threading.RLock()
@@ -832,15 +878,23 @@ def create_router(eternity) -> APIRouter:
         # not "failed" — and the window check below usually resolves it.
         pool = ThreadPoolExecutor(max_workers=1)
         timed_out = False
+        input_token = input_gate.begin_action(action_timeout_s)
         try:
-            result = pool.submit(invoke, fn, *args, **kwargs).result(timeout=action_timeout_s)
+            result = pool.submit(
+                input_gate.run_bound, input_token, invoke, fn, *args, **kwargs
+            ).result(timeout=action_timeout_s)
         except FuturesTimeoutError:
             timed_out = True
+            # The worker thread is still alive and may be about to send input.
+            # Cancel its lease first: every input method checks the gate, so
+            # nothing lands on a UI the caller has already given up on.
+            input_gate.cancel_action(input_token)
             result = {"success": None,
                       "error": f"动作已派发，但 {action_timeout_s:.0f}s 内未返回"
-                               "（目标 UI 线程可能被弹窗或加载占住）"}
+                               "（目标 UI 线程可能被弹窗或加载占住）；该动作的后续输入已作废"}
         finally:
             pool.shutdown(wait=False)
+            input_gate.end_action(input_token)
         logging.info('act:action-done timed_out=%s', timed_out)
         time.sleep(0.12)
         # Window first: a spawned window is stronger evidence than pixels, and it
@@ -860,7 +914,13 @@ def create_router(eternity) -> APIRouter:
         evidence = None
         if change is None:
             effect, escalation = "unverifiable", {"recommended": "analyze", "reason": "capture_unavailable"}
-        elif change["mean"] >= 1.2 or change["cells"] >= 10:
+        elif _pixel_change_confirms(change):
+            # Tightened 2026-11-02. The signature is a 48x48 thumbnail, so the
+            # mean is diluted by whichever corner changed: typing one line into a
+            # 460x240 window measured cells=21, mean=0.53 (verified live). Requiring
+            # both therefore reported a real, visible input as suspected_noop.
+            # A caret blink changes 1-4 cells, so 15 cells is safely above noise,
+            # and a >=2.0 mean covers a broad repaint that moves few discrete cells.
             effect, escalation = "confirmed", None
         else:
             # Pixels did not move. That is often legitimate (the tab was already
@@ -958,7 +1018,10 @@ def create_router(eternity) -> APIRouter:
                         )
                         previous_focus = uia_state.get(state_key)
                         uia_state[state_key] = current
-                        if previous_focus != current:
+                        # First look at this window only records a baseline: with
+                        # previous_focus None there is nothing to compare, yet the
+                        # old check counted it as a change and confirmed the action.
+                        if previous_focus is not None and previous_focus != current:
                             effect, escalation = "confirmed", None
                             evidence = {
                                 "focus_evidence": True,
@@ -975,8 +1038,13 @@ def create_router(eternity) -> APIRouter:
                 except Exception as exc:  # noqa: BLE001
                     # 不静默吞：读焦点失败本身是信息（可能前台线程拿不到）
                     logging.warning("focus readback failed: %s", exc)
-        if added:
+        related_added, unrelated_added = _split_related_windows(window_id, added)
+        if related_added:
+            # Only a window this application spawned is evidence that the action
+            # worked. Before this, any new window anywhere on the desktop (an
+            # unrelated app, a chat notification) confirmed the action.
             effect, escalation = "confirmed", None
+            evidence = {**(evidence or {}), "new_window_related": True}
         # The acted-on window disappearing IS the effect (a close button worked).
         # Pixels cannot confirm that: there is no window left to fingerprint.
         if acted_gone:
@@ -1017,10 +1085,16 @@ def create_router(eternity) -> APIRouter:
         except Exception:  # noqa: BLE001
             payload["acted_window"] = {"window_id": window_id}
         payload["windows_added"] = [{"hwnd": w["hwnd"], "title": w["title"], "exe": w["exe"]}
-                                    for w in added][:5]
+                                    for w in related_added][:5]
+        if unrelated_added:
+            # Reported, but never as confirmation: these belong to other apps.
+            payload["windows_added_unrelated"] = [
+                {"hwnd": w["hwnd"], "title": w["title"], "exe": w["exe"]} for w in unrelated_added][:5]
         payload["windows_removed"] = [{"hwnd": w["hwnd"], "title": w["title"]}
                                       for w in removed][:5]
-        payload["window_evidence"] = "new_window" if added else ("window_closed" if acted_gone else None)
+        payload["window_evidence"] = ("new_window" if related_added else
+                                      "window_closed" if acted_gone else
+                                      "new_window_unrelated" if unrelated_added else None)
         if timed_out:
             payload["timed_out"] = True
         payload["visual_delta"] = None if change is None else round(change["mean"], 2)
