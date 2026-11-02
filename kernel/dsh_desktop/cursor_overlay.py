@@ -249,6 +249,13 @@ class CursorOverlay:
                 self._target = dock
                 self._visible = True
                 self._shown = False
+            elif not enabled:
+                # Disabling companion mode is a real visibility change, not just
+                # a flag: DSH may exit while the kernel deliberately stays alive.
+                self._visible = False
+                self._shown = False
+        if not enabled and self._hwnd:
+            ctypes.windll.user32.ShowWindow(self._hwnd, SW_HIDE)
 
     def hide(self) -> None:
         with self._lock:

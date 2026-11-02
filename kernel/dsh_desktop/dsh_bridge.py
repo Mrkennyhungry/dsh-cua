@@ -110,6 +110,11 @@ def _compact_observation(result):
     return out
 
 
+class CompanionStartRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    client_pid: int = Field(gt=0)
+
+
 class TaskRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     task: str = Field(min_length=1, max_length=20_000)
@@ -665,6 +670,23 @@ def create_router(eternity) -> APIRouter:
         return {"task_id": task["task_id"], "session_id": sid,
                 "status": "running" if running else "finished" if result is not None else "unknown",
                 "result": result, "progress": progress, "created_at": task["created_at"]}
+
+    @router.post("/companion/start")
+    def start_companion(req: CompanionStartRequest):
+        """Attach DSH-owned companion UI, including after a resident-kernel restart."""
+        from . import companion
+
+        companion.install(eternity)
+        companion.get_companion().watch_client(req.client_pid)
+        return {"success": True}
+
+    @router.post("/companion/shutdown")
+    def shutdown_companion():
+        """DSH closed: hide its UI without killing a deliberately resident kernel."""
+        from . import companion
+
+        companion.shutdown()
+        return {"success": True}
 
     @router.get("/health")
     def health():

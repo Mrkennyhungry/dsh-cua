@@ -193,7 +193,9 @@ export function apply(ctx, config) {
     // The mascot lives in the kernel, so the kernel has to be running for it to
     // dock on screen. One background health call starts it without blocking the
     // plugin load; a failure here only means "no companion yet".
-    bridge.request('/health', null, {}).catch(() => {})
+    bridge.request('/companion/start', '0'.repeat(64), {
+      body: { client_pid: process.pid },
+    }).catch(() => {})
   }
   const registered = []
   const register = (tool) => {
@@ -243,6 +245,7 @@ export function apply(ctx, config) {
     }))
   }
   ctx.effect(() => async () => {
+    await bridge.request('/companion/shutdown', '0'.repeat(64), { body: {} }).catch(() => {})
     await companionSelection.dispose()
     await cursorFeedback.dispose()
     if (bridge.ready) {

@@ -97,6 +97,7 @@ class Companion:
         self._menu_guard = threading.Lock()
         self._ui_process = None
         self._ui_responses: queue.Queue = queue.Queue()
+        self._client_pid: int | None = None
         self._apps_cache: tuple[float, list[dict]] = (0.0, [])
         self._windows_cache: tuple[float, list[dict]] = (0.0, [])
 
@@ -116,6 +117,66 @@ class Companion:
         self._start_outside_click_listener()
         self._start_ui_server()
         threading.Thread(target=self._prewarm, daemon=True, name="companion-prewarm").start()
+
+    def watch_client(self, client_pid: int) -> None:
+        """Tie companion UI to the DSH process, including abnormal client exits."""
+        import psutil
+
+        pid = int(client_pid)
+        if pid <= 0:
+            raise ValueError("client_pid must be positive")
+        if self._client_pid == pid:
+            return
+        self._client_pid = pid
+
+        def watch() -> None:
+            while self._client_pid == pid and psutil.pid_exists(pid):
+                time.sleep(1.0)
+            if self._client_pid == pid:
+                logger.info("DSH client %s exited; shutting down companion UI", pid)
+                self.shutdown()
+
+        threading.Thread(target=watch, daemon=True, name="companion-client-watch").start()
+
+    def shutdown(self) -> None:
+        """Detach all DSH-owned UI while allowing the kernel to stay resident."""
+        with self._lock:
+            overlay = self._overlay
+            self._overlay = None
+            self._eternity = None
+            self._client_pid = None
+        if overlay is not None:
+            try:
+                overlay.set_companion(False)
+                overlay.hide()
+            except Exception:  # noqa: BLE001 - shutdown must continue
+                logger.debug("failed to hide companion overlay", exc_info=True)
+        for listener in (self._hotkeys, self._mouse_listener):
+            try:
+                if listener is not None:
+                    listener.stop()
+            except Exception:  # noqa: BLE001
+                logger.debug("failed to stop companion listener", exc_info=True)
+        self._hotkeys = None
+        self._mouse_listener = None
+        process = self._ui_process
+        self._ui_process = None
+        if process is not None and process.poll() is None:
+            try:
+                process.terminate()
+                process.wait(timeout=2)
+            except Exception:  # noqa: BLE001 - include a hung Arc process
+                try:
+                    process.kill()
+                except Exception:
+                    pass
+        self._menu_open = False
+        try:
+            from . import desktop_tools as dt
+
+            dt.unlock_window()
+        except Exception:  # noqa: BLE001
+            logger.debug("failed to clear companion window lock", exc_info=True)
 
     def _start_ui_server(self) -> None:
         """Start the Arc runtime once; each click then only shows a window."""
@@ -432,3 +493,7 @@ def install(eternity) -> Companion:
     companion = get_companion()
     companion.install(eternity)
     return companion
+
+
+def shutdown() -> None:
+    get_companion().shutdown()
