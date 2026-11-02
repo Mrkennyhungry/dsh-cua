@@ -9,7 +9,10 @@ window.__ModuleLoader__.load({
       const [raw, setRaw] = React.useState(() => form.getSnapshot().value?.companionSelection || '')
       const [busy, setBusy] = React.useState(false)
       React.useEffect(() => form.subscribe((snapshot) => {
-        setRaw(snapshot.value?.companionSelection || '')
+        // ConfigForm invokes a subscriber once without arguments when it is
+        // registered, then with a snapshot on later writes.
+        const value = snapshot?.value ?? form.getSnapshot().value
+        setRaw(value?.companionSelection || '')
       }), [form])
       if (!raw) return null
       let selection

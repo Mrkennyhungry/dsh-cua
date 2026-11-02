@@ -9,7 +9,7 @@ function loadClient(form) {
   const React = {
     createElement: (type, props, ...children) => ({ type, props: { ...(props || {}), children } }),
     useState: (initial) => [typeof initial === 'function' ? initial() : initial, () => {}],
-    useEffect: () => {},
+    useEffect: (effect) => effect(),
   }
   const context = {
     window: { __ModuleLoader__: { load: (value) => { definition = value } } },
@@ -46,7 +46,7 @@ test('Client registers a composer dock chip and cancel clears the shared field',
     getSnapshot: () => ({ value: { companionSelection: JSON.stringify({
       title: '微信', exe: 'Weixin.exe', pid: 23744, hwnd: 67282,
     }) } }),
-    subscribe: () => () => {},
+    subscribe: (listener) => { listener(); return () => {} },
     set: async (field, value) => { writes.push({ field, value }); return true },
   }
   const registration = loadClient(form)
@@ -63,7 +63,7 @@ test('Client registers a composer dock chip and cancel clears the shared field',
 test('Client renders nothing when no window is selected', () => {
   const form = {
     getSnapshot: () => ({ value: { companionSelection: '' } }),
-    subscribe: () => () => {},
+    subscribe: (listener) => { listener(); return () => {} },
     set: async () => true,
   }
   const registration = loadClient(form)
