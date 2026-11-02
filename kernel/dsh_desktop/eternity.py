@@ -174,15 +174,6 @@ ENABLED_TOOLSETS = [
     "dsh_desktop_cron",
 ]
 
-# QCL 兜底会话专用精简工具集：Computer-use 恢复只需要 desktop（桌面/视觉/资产）
-# + web（浏览器 DOM）。全套 77 工具的 schema 基线 ~21K token：既拖慢每次
-# prefill，又会把 context_budget 压缩阈值顶穿（基线 > 阈值 → 每轮压缩抖动，
-# 每次压缩再耗一次 ~20s 摘要调用，且多次压缩会丢历史精度）。
-QCL_FALLBACK_TOOLSETS = [
-    desktop_tools.DESKTOP_TOOLSET,
-    web_tools.WEB_TOOLSET,
-]
-
 # Desktop hardening: agent-facing tools removed from the app_controller toolset for
 # this deployment. They stay importable for trusted manual use in code, but are
 # not advertised to or callable by the model.
@@ -417,7 +408,7 @@ class SessionHandle:
     # (tool_name, error_type) pairs already reported to telemetry this
     # session — a broken tool retried in a loop must not spam events.
     _reported_tool_errors: set = field(default_factory=set)
-    # 死循环熔断状态（宪法 R14）：动作型 web 工具的最近页面签名窗口 + 已注入
+    # 死循环熔断状态：动作型 web 工具的最近页面签名窗口 + 已注入
     # 纠正提示次数。web_tools 侧每个动作结果携带 page_sig。
     _action_sigs: list[str] = field(default_factory=list)
     _loop_warns: int = 0
@@ -431,15 +422,14 @@ class SessionHandle:
         self.stream.publish({"event": event, "data": data})
 
 
-# ── 死循环熔断（宪法 R14；借鉴 jev-ultrafast 的 BLOCKED 机制）────────────────
+# ── 死循环熔断 ────────────────────────────────────────────────────────────────
 #
 # 模型反复点同一个无效元素 / 重复同一输入而页面毫无反馈时，会话只会烧 token
-# 直到超时（历史上是 AI 兜底失败的主要形态之一）。web_* 动作工具的成功结果
+# 直到超时。web_* 动作工具的成功结果
 # 现在携带 page_sig（URL+可见文本头 hash）：连续 _LOOP_STEER_THRESHOLD 次
 # 动作签名完全不变 = 动作没有产生任何可观察效果 → 先 steer 注入纠正提示给
-# 模型一次自纠机会（换 selector/重新 snapshot/判 ENV_UNFIXABLE）；警告后
-# 再次连续无变化 → interrupt 终止会话（qcl_runner 按 failed 落盘，语义与
-# 超时强制终止一致）。
+# 模型一次自纠机会（换 selector/重新 snapshot/说明无法完成）；警告后
+# 再次连续无变化 → interrupt 终止会话（语义与超时强制终止一致）。
 
 _LOOP_ACTION_TOOLS = {"web_click", "web_type", "web_press_key", "web_select_option"}
 _LOOP_STEER_THRESHOLD = 3  # 连续 N 次动作签名无变化 → steer 警告
@@ -448,8 +438,8 @@ _LOOP_STEER_MESSAGE = (
     "动作没有生效。禁止再用同样的 selector/参数重试。请立即换策略："
     "① web_snapshot 重新采集（页面可能已变化，旧 selector 已失效）；"
     "② 用结构化诊断换更精确的 selector；"
-    "③ 若目标在本页面确实无法达成（按钮不存在/被权限拦截），直接给出结论行"
-    "（ENV_FIXED / ENV_UNFIXABLE / CASE_RESULT），不要继续空转。"
+    "③ 若目标在本页面确实无法达成（按钮不存在/被权限拦截），直接说明无法完成的原因并结束，"
+    "不要继续空转。"
 )
 
 
@@ -922,7 +912,7 @@ class Eternity:
         mc = self.config.model
         if max_iterations is None:
             max_iterations = self.config.workspace.max_iterations
-        toolsets = QCL_FALLBACK_TOOLSETS if source == "qcl_runner" else ENABLED_TOOLSETS
+        toolsets = ENABLED_TOOLSETS
         if source == "dsh":
             toolsets = [toolset for toolset in toolsets if toolset != "dsh_desktop_cron"]
         try:
@@ -1256,7 +1246,7 @@ class Eternity:
             if base and m.api_key:
                 # 复盘走快档模型（model.fast）：每会话必触发的高频轻任务
                 # （总结/结构化提取），auxiliary service 实测快 2-3 倍；草稿仍需人工
-                # 审核进召回，质量风险有闸（宪法 R12/R19 精神）。
+                # 审核进召回，质量风险有闸。
                 llm = (base, m.api_key, m.effective_fast)
         except Exception:
             llm = None
@@ -1480,7 +1470,7 @@ class Eternity:
         if pending_reviews:
             # 知识复盘线程（LLM 后置分析）：会话结束后异步运行，批末进程退出
             # 时可能还在调 LLM。等它写完知识文件再退出（cap 90s，超时放行），
-            # 否则环境修复经验沉淀丢失——那正是下次兜底最需要的召回来源。
+            # 否则本次会话的经验沉淀会丢失。
             logger.info(
                 "Waiting for %d knowledge review thread(s) to finish...", len(pending_reviews),
             )

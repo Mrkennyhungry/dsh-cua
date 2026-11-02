@@ -1,9 +1,11 @@
-"""Desktop tools for DesktopCore — remote OmniParser, multi-window sessions, scoped file ops.
+"""Desktop tools for DesktopCore — UI parsing, multi-window sessions, scoped file ops.
 
 This module is imported by dsh_desktop.eternity for its side effect of registering
-the "desktop" toolset. It follows the same security posture as desktop-harness-poc:
+the "desktop" toolset.
 
-- Parser: remote OmniParser2 FastAPI service on the GPU box (no local OCR/YOLO).
+- Parser: local RapidOCR + YOLO icon detection by default (engine=local-deepseek).
+  An optional self-hosted OmniParser-compatible service can be configured with
+  PARSER_SERVICE_URL / PARSER_SERVICE_TOKEN for engine=omni/qwen.
 - Windows: multiple windows can be bound in one session (multi-window switching),
   reusing DesktopCore's WindowService / CaptureService / InputService.
 - Files: create/write/delete only files the agent created in this session,
@@ -314,7 +316,7 @@ _MAX_SESSION_FILES = 200
 _MAX_DELETE_OPS = 100
 
 
-# ── Settings resolution (env → external_agent settings) ──────────────────────────
+# ── Settings resolution (UI config → env) ────────────────────────────────────────
 
 def _config_parser_settings() -> tuple[str, str]:
     """Parser settings from the workbench UI (Config.parser, persisted in config.yaml)."""
@@ -331,24 +333,14 @@ def _config_parser_settings() -> tuple[str, str]:
 def _resolve_parser_settings() -> tuple[str, str]:
     """Resolve PARSER_SERVICE_URL / PARSER_SERVICE_TOKEN.
 
-    Priority: UI config (settings dialog → config.yaml) → env vars →
-    external_agent/settings.py if importable. Empty values otherwise (tools report a
-    config error instead of guessing).
+    Priority: UI config (settings dialog → config.yaml) → env vars. Empty values
+    otherwise (tools report a config error instead of guessing).
     """
     url, token = _config_parser_settings()
     if url and token:
         return url, token
     url = url or (os.getenv("PARSER_SERVICE_URL") or "").strip().rstrip("/")
     token = token or (os.getenv("PARSER_SERVICE_TOKEN") or "").strip()
-    if url and token:
-        return url, token
-    try:  # external_agent is an external project; settings may not be importable here
-        from external_agent import settings as desktop_settings  # type: ignore
-    except Exception:
-        desktop_settings = None
-    if desktop_settings is not None:
-        url = url or str(getattr(desktop_settings, "PARSER_SERVICE_URL", "") or "").strip().rstrip("/")
-        token = token or str(getattr(desktop_settings, "PARSER_SERVICE_TOKEN", "") or "").strip()
     return url, token
 
 
@@ -492,23 +484,17 @@ def _standard_window_chrome_caption(element: dict[str, Any]) -> str | None:
 
 
 class ParserClient:
-    """Minimal client for the shared OmniParser2 FastAPI service."""
+    """Minimal client for an optional self-hosted OmniParser-compatible service."""
 
     def __init__(self) -> None:
         self._session = requests.Session()
-        # The parser is an INTRANET service (e.g. 10.x.x.x). Never let it be
-        # routed through the machine's system proxy: a locally running proxy
-        # client (Clash/v2ray style, WinINET ProxyEnable=1) can't reach
-        # internal networks and turns every call into a ProxyError.
-        self._session.trust_env = False
-        self._session.proxies = {"http": None, "https": None}
 
     def parse(
         self, frame: np.ndarray, engine: str = "omni", *, caption: bool = True,
     ) -> dict[str, Any]:
         url, token = _resolve_parser_settings()
         if not url or not token:
-            return {"error": "PARSER_NOT_CONFIGURED: 需要 PARSER_SERVICE_URL 和 PARSER_SERVICE_TOKEN（env 或 external_agent settings）"}
+            return {"error": "PARSER_NOT_CONFIGURED: 需要 PARSER_SERVICE_URL 和 PARSER_SERVICE_TOKEN（设置页或环境变量）"}
         jpeg, enc_w, enc_h = _encode_frame_jpeg(frame)
         headers = _parser_headers(token)
         last_error = ""
@@ -978,7 +964,7 @@ def desktop_pick_window(hwnd: Any = None, label: str = "") -> dict:
     #      这种报错对模型没有任何指导意义，它只会原样重试。改为返回可执行的指引 + 候选列表。
     #   ② 传字符串句柄（"984636" / "0x1F30CC"）或从 desktop_list_windows 复制来的 dict/list，
     #      统一归一化成 int。
-    #   ③ 只给了标题字符串（如 "腾讯 desktop"）时当 label 用，按标题/进程名唯一匹配。
+    #   ③ 只给了标题字符串（如 "无标题 - 记事本"）时当 label 用，按标题/进程名唯一匹配。
     raw = hwnd
     if isinstance(raw, dict):
         raw = raw.get("hwnd")
@@ -1079,7 +1065,7 @@ def set_topmost(hwnd: int, on: bool) -> None:
 
 
 def force_foreground(hwnd: int) -> bool:
-    """强制窗口置前台（UATA win_uia/engine.py bring_to_foreground 同款）。
+    """强制窗口置前台。
 
     裸 SetForegroundWindow 会被 Windows 前台锁静默拒绝（pywin32 报
     (3, 'SetForegroundWindow', '系统找不到指定的路径') 等）；
@@ -1114,7 +1100,7 @@ def force_foreground(hwnd: int) -> bool:
         except Exception:
             pass
         user32.BringWindowToTop(hwnd)
-        # external automation agent 套路：TOPMOST→NOTOPMOST 强制提 z-order——对付逻辑前台但
+        # TOPMOST→NOTOPMOST 强制提 z-order——对付逻辑前台但
         # 被 TOPMOST 窗口（IDE 悬浮面板等）视觉遮挡的情况。
         # 走 set_topmost 以复用 64 位 HWND 签名（裸调用会把 -1 截成 32 位而失败）。
         try:
@@ -2202,7 +2188,7 @@ _TABLE_TTL_SECONDS = 20.0
 
 # Control types worth invoking. Containers can never be invoked and only cost a
 # COM round trip; Custom/Text/Image stay in because frameworks do expose invokable
-# elements under those types (WorkBuddy's clickable region is not a Button).
+# elements under those types (some apps expose clickable regions that are not Buttons).
 _HIT_SKIP_TYPES = {"Pane", "Group", "Document", "Window", "TitleBar", "ScrollBar", "MenuBar"}
 _HIT_CACHE: dict[tuple[int, int, int], tuple[float, object]] = {}
 
@@ -2610,11 +2596,11 @@ def desktop_press_key(window_id: str, key: str, count: int = 1) -> dict:
         "enter", "tab", "escape", "backspace", "space", "delete", "home", "end",
         "pageup", "pagedown", "up", "down", "left", "right",
     }
-    # 组合键策略（对齐 external automation agent agent_actions）：格式校验 + 危险键 blocklist，
+    # 组合键策略：格式校验 + 危险键 blocklist，
     # 不再是小白名单——LLM 写错格式（ctrl_esc / "ctrl a"）直接报错并给正确写法，
     # 防止 pyautogui 静默失败导致 agent 死循环重试。
     modifier_keys = {"ctrl", "alt", "shift", "win"}
-    # 危险组合：关窗口/锁屏/运行对话框（external automation agent confirm.py 的 CONFIRM 拦截集）
+    # 危险组合：关窗口/锁屏/运行对话框
     combo_blocklist = {"ctrl+w", "alt+f4", "win+l", "win+r", "ctrl+alt+delete"}
     function_keys = {f"f{i}" for i in range(1, 25)}
     key_aliases = {"control": "ctrl", "esc": "escape", "meta": "win"}
@@ -2789,13 +2775,13 @@ def desktop_parser_status() -> dict:
     from requests import Session
     url, _token = _resolve_parser_settings()
     configured = parser_configured()
-    ui_url, ui_token = _config_parser_settings()
-    if ui_url and ui_token:
+    _ui_url, ui_token = _config_parser_settings()
+    if ui_token:
         token_source = "ui_config"
     elif os.getenv("PARSER_SERVICE_TOKEN"):
         token_source = "env"
     else:
-        token_source = "external_agent.settings" if configured else "missing"
+        token_source = "missing"
     result: dict[str, Any] = {
         "configured": configured,
         "url": url or None,
@@ -2805,9 +2791,6 @@ def desktop_parser_status() -> dict:
     if configured:
         try:
             s = Session()
-            # Intranet service — bypass the system proxy (see ParserClient).
-            s.trust_env = False
-            s.proxies = {"http": None, "https": None}
             resp = s.get(f"{url}/health", timeout=5)
             result["reachable"] = resp.status_code == 200
             result["status_code"] = resp.status_code
@@ -2978,7 +2961,7 @@ def _scan_registry_apps(query: str, limit: int = 10) -> list[dict[str, str]]:
     """Match installed programs by DisplayName in the Uninstall registry keys.
 
     HKCU 单用户安装里 InstallLocation 经常为空，可执行路径常在 DisplayIcon
-    （实测 WorkBuddy：InstallLocation 为空，DisplayIcon=...\\WorkBuddyAI.exe,0）。
+    （实测有应用 InstallLocation 为空，DisplayIcon=...\\App.exe,0）。
     """
     import winreg
     hits: list[dict[str, str]] = []
@@ -3351,7 +3334,7 @@ def desktop_search_kb(query: str, top_k: int = 4, source: str = "all") -> dict:
     }
 
 
-# ── Clipboard (DLP scenario core, ported from external_agent exec_clipboard) ─────
+# ── Clipboard ────────────────────────────────────────────────────────────────────
 
 def _bound_hwnd(window_id: str) -> tuple[int, dict[str, Any]] | tuple[None, dict]:
     controller = _controller()
@@ -3469,7 +3452,7 @@ def _focus_state(hwnd: int) -> dict[str, Any] | None:
 def _require_foreground(hwnd: int) -> dict | None:
     """Foreground CHECK for keyboard actions — never activates.
 
-    Mirrors external automation agent buddy design: activate is a standalone step at the START of
+    Focus design: activate is a standalone step at the START of
     a flow (desktop_switch_window); press/type/paste actions are pure SendInput and
     must not re-activate windows (activation perturbs embedded webviews and
     could type into the wrong window anyway). Refuse with guidance instead.
@@ -3882,7 +3865,7 @@ def desktop_element_table(window_id: str, source: str = "auto", fresh: bool = Fa
         rows = from_uia()
         used = "uia"
     # 5 was too low: an app that exposes only its nav tabs gave 9 UIA elements and
-    # silently dropped every card label that OCR could see. 15 keeps WorkBuddy-class
+    # silently dropped every card label that OCR could see. 15 keeps UIA-rich
     # windows on UIA while pushing thin-a11y apps to OCR. Captioned icons are the
     # point of a merge, so caption=True forces it.
     if wanted == "ocr" or (wanted == "auto" and (len(rows) < 15 or caption)):

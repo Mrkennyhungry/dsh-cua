@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
 import path, { delimiter, join } from 'node:path'
@@ -24,18 +24,76 @@ function execution(id = 'session-1') {
 }
 
 
+// Stored encoded so this public test is not itself a readable list of the names
+// it guards against. This is not secrecy: it only keeps them out of plain-text
+// search. To edit, decode, change the JSON array and re-encode.
+const decodeTerms = (encoded) => JSON.parse(Buffer.from(encoded, 'base64').toString('utf8'))
+const ROOT_FILE_TERMS = decodeTerms('WyJpb2EiLCJ0ZW5jZW50Iiwi5LyB5Lia5b6u5L+hIiwid2VtYWlsIiwidmVudXMiLCJ3b3JrYnVkZHkiLCLkupHmmboiLCLlhoXnvZEiLCIxMC45MSIsIm9hLmNvbSIsImM6XFx1c2Vyc1xcIiwiL3VzZXJzLyIsImFkbWluaXN0cmF0b3IiXQ==')
+const PUBLISHED_FILE_TERMS = decodeTerms('WyJxY2wiLCJ1YXRhIiwid29ya2J1ZGR5IiwiYWdlbnRfdjIiLCJleHRlcm5hbF9hZ2VudCIsImV4dGVybmFsIGF1dG9tYXRpb24gYWdlbnQiLCJoYXJuZXNzX2JyaWRnZSIsImhhcm5lc3MtcG9jIiwiamV2LXVsdHJhZmFzdCIsIuWuquazlSIsImd0dDExNiIsIndlYl9hZG1pbiIsInRlbmNlbnQiLCJ3ZW1haWwiLCJ2ZW51cyIsIuS6keaZuiIsIuWGhee9kSIsIm9hLmNvbSIsInVzZXJzXFxhZG1pbmlzdHJhdG9yIl0=')
+
 test('shipped files carry no customer, endpoint or machine-local references', async () => {
-  // This plugin is ported out of an internal project: nothing customer-specific
-  // (product names, intranet hosts, absolute user paths) may ride along.
+  // Nothing customer-specific (product names, private hosts, absolute user paths)
+  // may ride along in the plugin entry files.
   const shipped = ['index.js', 'kernel.js', 'bridge-client.js', 'cordis.patch.yml', 'package.json']
-  const banned = ['ioa', 'tencent', '企业微信', 'wemail', 'venus', 'workbuddy', '云智',
-    '内网', '10.91', 'oa.com', 'c:\\users\\', '/users/', 'administrator']
   for (const file of shipped) {
     const text = (await readFile(new URL(`../${file}`, import.meta.url), 'utf8')).toLowerCase()
-    for (const term of banned) {
+    for (const term of ROOT_FILE_TERMS) {
       assert.ok(!text.includes(term), `${file} must not contain "${term}"`)
     }
   }
+})
+
+const repoRoot = fileURLToPath(new URL('..', import.meta.url))
+const BINARY_FILE = /\.(png|gif|jpe?g|ico|onnx|ttf|woff2?|pyc)$/i
+// Third-party minified bundles and model weights are not authored here.
+const THIRD_PARTY_PREFIXES = ['kernel/dsh_desktop/static/vendor/', 'vendor/weights/']
+
+/** Every text file `npm pack` would publish, expanded from package.json#files. */
+function shippedTextFiles() {
+  const manifest = JSON.parse(readFileSync(join(repoRoot, 'package.json'), 'utf8'))
+  const found = new Set(['package.json', 'LICENSE'])
+  const walk = (dir) => {
+    for (const entry of readdirSync(join(repoRoot, dir), { withFileTypes: true })) {
+      const rel = `${dir}/${entry.name}`
+      if (entry.isDirectory()) walk(rel)
+      else found.add(rel)
+    }
+  }
+  for (const pattern of manifest.files) {
+    if (pattern.startsWith('!')) continue
+    if (pattern.endsWith('/**/*')) walk(pattern.slice(0, -'/**/*'.length))
+    else found.add(pattern)
+  }
+  return [...found].filter((file) => existsSync(join(repoRoot, file))
+    && !file.includes('__pycache__/') && !BINARY_FILE.test(file)
+    && !THIRD_PARTY_PREFIXES.some((prefix) => file.startsWith(prefix)))
+}
+
+test('every published file is free of private names, private hosts and local paths', () => {
+  const manifest = JSON.parse(readFileSync(join(repoRoot, 'package.json'), 'utf8'))
+  assert.ok(!manifest.files.some((file) => file.includes('private-knowledge')),
+    'private catalogs must never be listed in package.json#files')
+  const patterns = [
+    /\b(?:9|10|11|21|30)\.\d{1,3}\.\d{1,3}\.\d{1,3}\b/,
+    /\b172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}\b/,
+    /\b192\.168\.\d{1,3}\.\d{1,3}\b/,
+    /\bioa\b/i,
+    /\bdlp\b/i,
+    /[a-z]:\\{1,2}users\\{1,2}(?!public\b|\.\.\.|<)/i,
+  ]
+  const files = shippedTextFiles()
+  assert.ok(files.some((file) => file.startsWith('kernel/')), 'the scan must cover the bundled kernel')
+  const offenders = []
+  for (const file of files) {
+    const text = readFileSync(join(repoRoot, file), 'utf8')
+    const lower = text.toLowerCase()
+    for (const term of PUBLISHED_FILE_TERMS) if (lower.includes(term)) offenders.push(`${file}: "${term}"`)
+    for (const pattern of patterns) {
+      const hit = text.match(pattern)
+      if (hit) offenders.push(`${file}: ${hit[0]}`)
+    }
+  }
+  assert.deepEqual(offenders, [])
 })
 
 
@@ -537,7 +595,7 @@ test('package.json is BOM-free and parseable, and every shipped file exists', as
   const raw = await readFile(new URL('../package.json', import.meta.url))
   assert.notDeepEqual([...raw.subarray(0, 3)], [0xef, 0xbb, 0xbf], 'package.json must not start with a BOM')
   const manifest = JSON.parse(raw.toString('utf8'))
-  for (const file of manifest.files.filter(file => !file.includes('*') && !file.startsWith('private-knowledge/'))) {
+  for (const file of manifest.files.filter(file => !file.includes('*'))) {
     await readFile(new URL(`../${file}`, import.meta.url))
   }
   assert.ok(manifest.files.includes('kernel/**/*'), 'bundled kernel source must be included')

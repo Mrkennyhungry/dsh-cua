@@ -1,7 +1,7 @@
 ---
 name: desktop-actions
 description: "Desktop 桌面自动化动作全集。Triggers: 发送文件, 上传文件, 粘贴文件, 剪贴板, 复制粘贴, setclipboard, 右键, 拖拽, 滑动, swipe, 滚动, 控件, uia, 控件树, omniparser, 启动应用, 激活窗口, 腾讯文档, 企业微信, 桌面操作"
-tags: [desktop, desktop-automation, windows, dlp]
+tags: [desktop, desktop-automation, windows]
 platforms: [windows]
 ---
 
@@ -70,7 +70,7 @@ platforms: [windows]
 粘贴成功但 Enter 被拒绝时先检查草稿，只重试未完成动作；发送结果不明时核对历史，禁止盲目重发。
 输入文本单次最多 2000 字符；分片必须明确编号，不能把分片数冒充已完成记录数。
 
-**焦点规则（对齐 external_agent buddy 实战设计）**：
+**焦点规则**：
 - `desktop_switch_window` 是**独立的激活动作**——放在流程开头（或切换窗口时），懒加载应用 `wait=2-3`
 - 之后的 click/press/type **零激活**：已前台窗口不做任何 ShowWindow/SetWindowPos，连续动作不扰动焦点，弹层不会被震掉
 - 键盘类动作（press_key / type_text / type_keys / paste_clipboard_file）在目标**非前台时直接拒绝**（防打错窗口），按提示先激活再重试

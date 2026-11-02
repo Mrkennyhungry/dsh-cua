@@ -1581,7 +1581,7 @@ def create_router(eternity) -> APIRouter:
                 except Exception as exc:  # noqa: BLE001
                     out["ocr"] = {"error": f"{type(exc).__name__}: {exc}"[:120]}
 
-            # ④ 浏览器窗口额外采 DOM（Playwright）：UIA/OCR 对浏览器内网页覆盖很差，
+            # ④ 浏览器窗口额外采 DOM（Playwright）：UIA/OCR 对浏览器里的网页覆盖很差，
             #    DOM 才是权威。三个视图合并判断，比任何单一来源都可靠。
             dom_els: list = []
             if req.include_dom:

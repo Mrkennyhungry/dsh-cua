@@ -179,7 +179,7 @@
           "blockers": [],
           "advice": "前台不是目标窗口（当前是 'ChatGPT.exe' 'ChatGPT'），键盘输入会打到它上面。先激活目标窗口，或关掉占位的那个。"
         },
-        "desktop_screenshot": "C:\\Users\\kennyyzhang\\Documents\\deepseek-harness\\default-workspace\\plugins\\dsh-doraemon\\.runtime\\screenshots\\2026-10-29\\desktop_20261029_164402_720788.jpeg",
+        "desktop_screenshot": "<plugin-root>\\.runtime\\screenshots\\2026-10-29\\desktop_20261029_164402_720788.jpeg",
         "foreground_now": {
           "hwnd": 56954684,
           "title": "Doraemon direct verification",
@@ -285,7 +285,7 @@
           "blockers": [],
           "advice": "有窗口压在目标上：'*dsh-markettest-v41flash-20261027.txt - '（Notepad.exe）。先关掉或移开它。"
         },
-        "desktop_screenshot": "C:\\Users\\kennyyzhang\\Documents\\deepseek-harness\\default-workspace\\plugins\\dsh-doraemon\\.runtime\\screenshots\\2026-10-29\\desktop_20261029_164408_292271.jpeg",
+        "desktop_screenshot": "<plugin-root>\\.runtime\\screenshots\\2026-10-29\\desktop_20261029_164408_292271.jpeg",
         "foreground_now": {
           "hwnd": 56954684,
           "title": "Doraemon direct verification",
@@ -398,7 +398,7 @@
           "blockers": [],
           "advice": "有窗口压在目标上：'*dsh-markettest-v41flash-20261027.txt - '（Notepad.exe）。先关掉或移开它。"
         },
-        "desktop_screenshot": "C:\\Users\\kennyyzhang\\Documents\\deepseek-harness\\default-workspace\\plugins\\dsh-doraemon\\.runtime\\screenshots\\2026-10-29\\desktop_20261029_164415_965426.jpeg",
+        "desktop_screenshot": "<plugin-root>\\.runtime\\screenshots\\2026-10-29\\desktop_20261029_164415_965426.jpeg",
         "foreground_now": {
           "hwnd": 56954684,
           "title": "Doraemon direct verification",
@@ -450,7 +450,7 @@
       "passed": true,
       "detail": {
         "pid": 23200,
-        "source_root": "C:\\Users\\kennyyzhang\\Documents\\deepseek-harness\\default-workspace\\plugins\\dsh-doraemon\\kernel\\dsh_desktop",
+        "source_root": "<plugin-root>\\kernel\\dsh_desktop",
         "input_mode": "virtual",
         "input_revision": "7a491467c33ec4a7"
       }

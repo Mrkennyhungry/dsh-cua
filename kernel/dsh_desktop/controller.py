@@ -437,7 +437,7 @@ class AppController:
     def _require_foreground(self, hwnd: int) -> dict | None:
         """Foreground CHECK for keyboard actions — never activates.
 
-        buddy design: activate (switch_to_window_tool) is a standalone step at
+        Focus design: activate (switch_to_window_tool) is a standalone step at
         the START; press/type are pure keybd_event and must not re-activate.
 
         Delegates to game.window.is_effectively_foreground — the single

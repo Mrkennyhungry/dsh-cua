@@ -40,7 +40,6 @@
     "scripts/install-elevated-task.ps1",
     "scripts/run-kernel-high.py",
     "vendor/weights/**/*",
-    "private-knowledge/console-components.json",
     "THIRD_PARTY_NOTICES.txt",
     "docs/**/*"
   ],

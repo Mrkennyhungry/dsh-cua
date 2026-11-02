@@ -2,10 +2,9 @@
 
 Desktop vision (desktop_analyze/UIA) works on browsers too, but DOM-level control
 is far more reliable for login flows, forms and lists: real selectors, no OCR,
-no coordinates. Ported from external automation agent agent_v2 (perceive/web_backend.py +
-act/playwright_act.py) and the web-case-gen skill SOP.
+no coordinates.
 
-Key behaviours inherited from agent_v2:
+Key behaviours:
 - One persistent Chromium context (profile dir under DSH_DESKTOP_HOME/web_profile) —
   logins/cookies survive restarts; visible (headful) so the user can watch and
   take over at any time.
@@ -15,9 +14,9 @@ Key behaviours inherited from agent_v2:
 
 Thread note: Playwright sync objects are thread-bound. The owner thread lazily
 starts the persistent context WITH a remote-debugging port; any OTHER thread
-(e.g. the AI fallback session) attaches to the SAME browser over CDP
-(same architecture as UATA desktop_console) — pages/login state are shared, the
-failure-scene tab survives the handover instead of being killed by a restart.
+(e.g. another agent session) attaches to the SAME browser over CDP —
+pages/login state are shared, and the current tab survives the handover
+instead of being killed by a restart.
 """
 from __future__ import annotations
 
@@ -49,7 +48,7 @@ _browser_minimized = False  # 浏览器窗口是否已最小化（默认全程�
 _cdp_tls = threading.local()  # 每线程一条 CDP 连接（pw/browser/ctx）
 
 
-# ── 页面指纹与新鲜度（宪法 R14；借鉴 jev-ultrafast 的 fingerprint 思想）──────
+# ── 页面指纹与新鲜度 ─────────────────────────────────────────────────────────
 #
 # 每个动作型 web_* 工具的成功结果都携带 page_sig（URL+可见文本头的 hash），
 # eternity 编排层据此检测「连续多次动作页面无变化」的死循环并熔断；
@@ -342,9 +341,9 @@ def _close_thread_cdp() -> None:
 
 
 def _cdp_attach_context(*, ensure_page: bool = True):
-    """CDP 附着到 owner 线程的浏览器（本线程缓存一条连接）。
+    """    CDP 附着到 owner 线程的浏览器（本线程缓存一条连接）。
 
-    对齐 UATA desktop_console 的 CDP attach 架构：playwright sync API 线程
+    playwright sync API 线程
     绑定，跨线程直接复用上下文会崩；CDP 每线程独立连接、页面全共享。
     """
     cached = getattr(_cdp_tls, "ctx", None)
@@ -487,8 +486,8 @@ def cleanup_case_tabs(keep_page=None) -> None:
 
 
 def set_active_page(page) -> None:
-    """钉住 runner 当前操作的页签：AI 兜底会话的 web 工具将优先复用它，
-    从 runner 的现场继续，而非误落到 pages[-1]（可能是空白页签）。
+    """钉住当前操作的页签：后续 web 工具将优先复用它，
+    而非误落到 pages[-1]（可能是空白页签）。
     同时记录 URL：跨线程 CDP 连接的页面对象代理不同，按 URL 匹配。"""
     global _active_page, _active_page_url
     _active_page = page
@@ -504,8 +503,8 @@ def set_active_page(page) -> None:
 def _pick_page(url_contains: str = ""):
     ctx, page = _get_context()
     pages = [p for p in ctx.pages if not p.is_closed()]
-    # 优先 runner 钉住的活跃页签（QclCaseRunner 每次动作后 set_active_page），
-    # 保证 AI 兜底会话从 runner 的当前页签继续，而非 pages[-1] 误入空白页签
+    # 优先钉住的活跃页签（web_open / set_active_page 设置），
+    # 保证后续会话从当前页签继续，而非 pages[-1] 误入空白页签
     if _active_page is not None and _active_page in pages:
         if not url_contains or url_contains in _active_page.url:
             return _active_page
@@ -620,7 +619,7 @@ _SNAPSHOT_JS = "() => {\n" + _SELECTOR_JS + """
   const OVERLAY_HINT = /modal|dialog|drawer|popup|dropdown|popover|select|overlay|mask|lightbox|ant-modal|tc-modal/i;
 
   // Deep collect: document.querySelectorAll does NOT pierce shadow DOM —
-  // Tencent Cloud console (QDReact) renders dialogs inside shadow roots,
+  // Some cloud consoles render dialogs inside shadow roots,
   // which made web_snapshot completely blind to open dialogs (2026-09-07
   // live session: agent clicked 新增账户, dialog opened, snapshot showed
   // zero dialog elements and a wrong truncated:false, so the agent
@@ -883,7 +882,7 @@ def web_snapshot(max_elements: int = 60, include_classes: bool = False) -> dict:
         return result
 
 
-# ── structured failure diagnosis (ported from playwright_act.py) ─────────
+# ── structured failure diagnosis ─────────────────────────────────────────
 
 def _diagnose(page: Any, selector: str) -> str:
     try:

@@ -1,12 +1,12 @@
-"""Knowledge base for the Desktop workbench — external automation agent experience as retrievable context.
+"""Knowledge base for the Desktop workbench — past run experience as retrievable context.
 
 Layout under DSH_DESKTOP_HOME/knowledge/:
     kb/             user-provided static knowledge and task notes
     corrections/    错题本 (mistake notes; draft_ prefix = not yet reviewed)
     success_paths/  成功路径 (replayable step sequences; draft_ = not reviewed)
 
-Retrieval is a lightweight BM25 (Chinese per-char + latin per-word tokenization),
-ported from external automation agent agent_v2/memory/corrections.py. Every session start injects
+Retrieval is a lightweight BM25 (Chinese per-char + latin per-word tokenization).
+Every session start injects
 the top matches as extra context; the agent can also search explicitly via the
 desktop_search_kb tool. Finished sessions are auto-saved as draft success paths
 (agent finished cleanly) or draft corrections (agent failed), for review in the
@@ -19,9 +19,7 @@ from __future__ import annotations
 import json
 import logging
 import math
-import os
 import re
-import shutil
 import time
 from collections import Counter
 from datetime import datetime
@@ -38,13 +36,8 @@ SOURCE_SUCCESS_PATHS = "success_paths"
 SOURCE_INDEX = "index"          # structured key -> value entries (web selectors, desktop controls)
 VALID_SOURCES = (SOURCE_KB, SOURCE_CORRECTIONS, SOURCE_SUCCESS_PATHS, SOURCE_INDEX)
 
-MAX_IMPORT_CASES = 500
-MAX_STEPS_PER_CASE = 30
-MAX_CASE_CHARS = 12_000
 MAX_DOC_CHARS = 6_000      # per-doc cap at retrieval time
 MAX_INDEX_DOCS = 3000      # safety cap on total docs scanned per query
-                           # (kb alone already holds 1000+ imported cases;
-                           #  the shared-repo workflow will only grow it)
 
 _DRAFT_PREFIX = "draft_"
 
@@ -63,14 +56,7 @@ def source_dir(source: str) -> Path:
     return d
 
 
-def _default_external_agent_root() -> Path:
-    env = (os.getenv("DSH_DESKTOP_KNOWLEDGE_IMPORT_ROOT") or "").strip()
-    if env:
-        return Path(env)
-    return Path.home() / ".dsh" / "external-knowledge"
-
-
-# ── Tokenize + BM25 (ported from agent_v2/memory/corrections.py) ─────────
+# ── Tokenize + BM25 ──────────────────────────────────────────────────────
 
 def _tokenize(s: str) -> list[str]:
     s = s.lower()
@@ -126,263 +112,6 @@ def _iter_markdown(source: str) -> Iterable[Path]:
         if count > MAX_INDEX_DOCS:
             break
         yield path
-
-
-# ── JSONC parsing (mirrors harness_bridge/dlp_dataset.py, standalone) ────
-
-def _strip_jsonc_comments(source: str) -> str:
-    out: list[str] = []
-    i, n = 0, len(source)
-    in_str = False
-    esc = False
-    while i < n:
-        ch = source[i]
-        nxt = source[i + 1] if i + 1 < n else ""
-        if in_str:
-            out.append(ch)
-            if esc:
-                esc = False
-            elif ch == "\\":
-                esc = True
-            elif ch == '"':
-                in_str = False
-            i += 1
-            continue
-        if ch == '"':
-            in_str = True
-            out.append(ch)
-            i += 1
-            continue
-        if ch == "/" and nxt == "/":
-            i += 2
-            while i < n and source[i] not in "\r\n":
-                i += 1
-            continue
-        if ch == "/" and nxt == "*":
-            i += 2
-            while i + 1 < n and not (source[i] == "*" and source[i + 1] == "/"):
-                if source[i] in "\r\n":
-                    out.append(source[i])
-                i += 1
-            i += 2
-            continue
-        out.append(ch)
-        i += 1
-    return "".join(out)
-
-
-def _remove_trailing_commas(source: str) -> str:
-    out: list[str] = []
-    i, n = 0, len(source)
-    in_str = False
-    esc = False
-    while i < n:
-        ch = source[i]
-        if in_str:
-            out.append(ch)
-            if esc:
-                esc = False
-            elif ch == "\\":
-                esc = True
-            elif ch == '"':
-                in_str = False
-            i += 1
-            continue
-        if ch == '"':
-            in_str = True
-            out.append(ch)
-            i += 1
-            continue
-        if ch == ",":
-            j = i + 1
-            while j < n and source[j].isspace():
-                j += 1
-            if j < n and source[j] in "]}":
-                i += 1
-                continue
-        out.append(ch)
-        i += 1
-    return "".join(out)
-
-
-def _load_jsonc(source: str) -> Any:
-    return json.loads(_remove_trailing_commas(_strip_jsonc_comments(source)))
-
-
-def _case_to_md(path: Path, rel: Path) -> str | None:
-    """Convert one external automation agent case JSONC into a compact markdown runbook."""
-    try:
-        data = _load_jsonc(path.read_text(encoding="utf-8", errors="replace"))
-    except Exception:
-        return None
-    steps: list[Any] | None = None
-    if isinstance(data, list) and data:
-        steps = data
-    elif isinstance(data, dict) and isinstance(data.get("steps"), list):
-        steps = data["steps"]
-    if not steps:
-        return None
-
-    title = rel.with_suffix("").as_posix()
-    lines = [f"# case: {title}", ""]
-    kept = 0
-    for step in steps:
-        if kept >= MAX_STEPS_PER_CASE:
-            lines.append(f"- …（其余 {len(steps) - kept} 步略）")
-            break
-        if not isinstance(step, dict):
-            continue
-        comment = str(step.get("_comment") or step.get("description") or "").strip()
-        action = step.get("action") if isinstance(step.get("action"), dict) else {}
-        act = str(action.get("action") or step.get("action") or "").strip()
-        detail_parts: list[str] = []
-        for key in ("app", "image", "powershell", "target_window", "text", "keys"):
-            val = action.get(key)
-            if isinstance(val, str) and val.strip():
-                snippet = val.strip().replace("\n", " ")[:120]
-                detail_parts.append(f"{key}={snippet}")
-        for key in ("relative_rx", "relative_ry"):
-            val = action.get(key)
-            if isinstance(val, (int, float)):
-                detail_parts.append(f"{key}={val}")
-        assertion = step.get("assertion")
-        if isinstance(assertion, dict) and assertion.get("assertion") not in (None, "none"):
-            detail_parts.append(f"assert={assertion.get('assertion')}")
-        detail = " ".join(detail_parts)
-        kept += 1
-        if comment and comment.strip("= ").strip():
-            lines.append(f"{kept}. {comment}" + (f"（{detail}）" if detail else ""))
-        elif detail:
-            lines.append(f"{kept}. {act}: {detail}" if act else f"{kept}. {detail}")
-        else:
-            lines.append(f"{kept}. {act or '(unspecified action)'}")
-    md = "\n".join(lines).strip()
-    if len(md) > MAX_CASE_CHARS:
-        md = md[:MAX_CASE_CHARS] + "\n…（截断）"
-    return md + "\n"
-
-
-# Generic knowledge store. Product-specific console catalogs are shipped only
-# in the optional private package variant, never in this base module.
-_CASE_TAXONOMY: list[tuple[tuple[str, ...], str, str]] = []
-_CASE_SKIP_PARTS = {"unused-cases", "_groups", "_drafts"}
-_CASE_PER_BUCKET_LIMIT = 600
-
-def _kb_case_overview() -> str:
-    return "# Task knowledge\n\nKnowledge is grouped by source and task scope.\n"
-
-_KB_OVERVIEW = "# Knowledge base\n\nGeneric task notes, corrections, and verified paths.\n"
-
-
-def import_from_external_agent(
-    external_agent_root: Path | str | None = None,
-    *,
-    include_cases: bool = True,
-    max_cases: int = MAX_IMPORT_CASES,
-) -> dict[str, Any]:
-    """Idempotent import of external automation agent skill/cases knowledge into the workbench KB."""
-    root = Path(external_agent_root) if external_agent_root else _default_external_agent_root()
-    skill_dir = root / "agent_v2" / "skill"
-    stats: dict[str, Any] = {
-        "external_agent_root": str(root),
-        "corrections": 0,
-        "success_paths": 0,
-        "playbooks": 0,
-        "cases": 0,
-        "cases_by_bucket": {},
-        "skipped_cases": 0,
-        "errors": [],
-    }
-    if not root.is_dir():
-        stats["errors"].append(f"external automation agent root not found: {root}")
-        return stats
-
-    # 1. corrections 错题本（含 draft_，一并导入供参考）
-    corr_src = skill_dir / "corrections"
-    if corr_src.is_dir():
-        for f in sorted(corr_src.glob("*.md")):
-            if f.name.startswith("README"):
-                continue
-            try:
-                shutil.copyfile(f, source_dir(SOURCE_CORRECTIONS) / f.name)
-                stats["corrections"] += 1
-            except OSError as exc:
-                stats["errors"].append(f"corrections/{f.name}: {exc}")
-
-    # 2. success_paths 成功路径（只导入已审核的；draft_ 不搬，避免错上加错）
-    sp_src = skill_dir / "success_paths"
-    if sp_src.is_dir():
-        for f in sorted(sp_src.glob("*.md")):
-            if f.name.startswith("README") or f.name.startswith(_DRAFT_PREFIX):
-                continue
-            try:
-                shutil.copyfile(f, source_dir(SOURCE_SUCCESS_PATHS) / f.name)
-                stats["success_paths"] += 1
-            except OSError as exc:
-                stats["errors"].append(f"success_paths/{f.name}: {exc}")
-
-    # 3. Imported reference documents → kb/playbooks/
-    pb_src = skill_dir / "playbooks" / "manual"
-    if pb_src.is_dir():
-        for f in sorted(pb_src.rglob("*.md")):
-            if not f.is_file() or f.name.startswith("README"):
-                continue
-            rel = f.relative_to(pb_src)
-            dest = source_dir(SOURCE_KB) / "playbooks" / rel
-            try:
-                dest.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copyfile(f, dest)
-                stats["playbooks"] += 1
-            except OSError as exc:
-                stats["errors"].append(f"playbooks/{rel}: {exc}")
-
-    # 4. cases → kb/cases/<taxonomy>/*.md（先清空再生成，保持幂等）
-    if include_cases:
-        cases_root = source_dir(SOURCE_KB) / "cases"
-        shutil.rmtree(cases_root, ignore_errors=True)
-        cases_root.mkdir(parents=True, exist_ok=True)
-        (cases_root / "README.md").write_text(_kb_case_overview(), encoding="utf-8")
-        (source_dir(SOURCE_KB) / "README.md").write_text(_KB_OVERVIEW, encoding="utf-8")
-
-        all_src = root / "external_agent" / "cases"
-        bucket_budget = max(_CASE_PER_BUCKET_LIMIT, max_cases // max(len(_CASE_TAXONOMY), 1))
-        for top_dirs, dest_rel, _desc in _CASE_TAXONOMY:
-            bucket_dst = cases_root / dest_rel
-            count = 0
-            for top in top_dirs:
-                src = all_src / top
-                if not src.is_dir():
-                    continue
-                files = [
-                    p for p in src.rglob("*")
-                    if p.is_file()
-                    and p.suffix.lower() in (".jsonc", ".json", ".md")
-                    and not any(part in _CASE_SKIP_PARTS for part in p.relative_to(src).parts)
-                ]
-                files.sort(key=lambda p: (len(p.parts), str(p)))
-                for f in files:
-                    if count >= bucket_budget:
-                        stats["skipped_cases"] += max(0, len(files) - count)
-                        break
-                    rel = f.relative_to(src)
-                    md = (_case_to_md(f, rel) if f.suffix.lower() in (".jsonc", ".json")
-                          else f.read_text(encoding="utf-8", errors="replace"))
-                    if not md:
-                        continue
-                    dest = bucket_dst / top / rel.with_suffix(".md")
-                    try:
-                        dest.parent.mkdir(parents=True, exist_ok=True)
-                        dest.write_text(md, encoding="utf-8")
-                        count += 1
-                    except OSError as exc:
-                        stats["errors"].append(f"cases/{dest_rel}/{rel}: {exc}")
-                if count >= bucket_budget:
-                    break
-            stats["cases_by_bucket"][dest_rel] = count
-            stats["cases"] += count
-
-    logger.info("Knowledge import: %s", {k: v for k, v in stats.items() if k != "errors"})
-    return stats
 
 
 # ── Retrieval ────────────────────────────────────────────────────────────
@@ -461,16 +190,29 @@ def _slugify(title: str, limit: int = 40) -> str:
     return title.strip("_") or "run"
 
 
+_SECRET_KEY_WORDS = (
+    r"API[_-]?KEY|ACCESS[_-]?KEY|PRIVATE[_-]?KEY|TOKEN|SECRET|CREDENTIAL|PASSWORD|PASSWD|PWD|"
+    r"PASSPHRASE|COOKIE|AUTHORIZATION|SESSION[_-]?ID|密码|口令|密钥|令牌"
+)
+# key=value / key: value / "key": "value" — the key name decides, the value is masked.
 _RE_SECRET = re.compile(
-    r"(\w*(?:API_KEY|TOKEN|SECRET|CREDENTIAL)\w*\s*[:：=]\s*)\S+",
+    rf"((?:[\w-]*(?:{_SECRET_KEY_WORDS})[\w-]*)[\"']?\s*[:：=]\s*[\"']?)[^\s\"',;}}]+",
     re.IGNORECASE,
 )
+_RE_BEARER = re.compile(r"(\b(?:Bearer|Basic)\s+)[A-Za-z0-9._~+/=-]{8,}", re.IGNORECASE)
+_RE_KEY_LITERAL = re.compile(r"\b(?:sk|ghp|gho|github_pat|xox[abp])[-_][A-Za-z0-9_-]{16,}\b")
 
 
 def _redact_secrets(text: str) -> str:
-    """知识记录前的脱敏：仅掩蔽 API_KEY/TOKEN/SECRET/CREDENTIAL 等真密钥。
-    控制台测试账密（WEB_ADMIN_*）属内网测试环境共享凭证，明确不脱敏。"""
-    return _RE_SECRET.sub(r"\1***", text or "")
+    """知识记录前的脱敏：掩蔽密钥、Token、密码、Cookie 等凭证值。
+
+    按键名匹配 key=value / key: value / JSON 键值，另外掩蔽 Bearer/Basic
+    认证头和常见的密钥字面量（sk-…、ghp_… 等）。知识库可能被导出或共享，
+    任何账号口令都不应落盘。
+    """
+    text = _RE_BEARER.sub(r"\1***", text or "")
+    text = _RE_SECRET.sub(r"\1***", text)
+    return _RE_KEY_LITERAL.sub("***", text)
 
 
 def record_run(
@@ -620,7 +362,7 @@ def add_correction(title: str, content: str) -> str:
 # ── AI session review (LLM post-mortem → semantic, reusable knowledge) ──
 #
 # Raw coordinates (desktop_click(x=…, y=…)) are useless as cross-scenario
-# experience. Ported from external automation agent agent_v2/analyze.py: after a session ends,
+# experience. After a session ends,
 # the LLM re-reads the full tool trace and writes a semantic review:
 #   - failure → corrections draft (trigger condition / root cause / fix)
 #   - success → success-path draft (generalized step runbook)
@@ -850,24 +592,15 @@ def review_run(
         review_body = re.sub(r"```json\s*.*?```\s*$", "", review_text, flags=re.DOTALL).strip()
 
     # ── 标题与文件名 ──────────────────────────────────────────────
-    # 优先级：复盘 LLM 的 title（业务短标题）> qcl 环境修复会话的
-    # "用例名_环境修复" > 任务文本 slug（兜底，会把提示词开头当标题）。
+    # 优先级：复盘 LLM 的 title（业务短标题）> 任务文本 slug（兜底，会把提示词开头当标题）。
+    # 所有复盘结果都以 draft_ 落盘，人工审核后才进入召回。
     llm_title_raw = ""
     for item in extracted:
         if isinstance(item, dict) and str(item.get("title") or "").strip():
             llm_title_raw = str(item["title"]).strip()[:30]
             break
-    is_env_fix = task.startswith("你是 Desktop 环境修复 agent")
     display_title = llm_title_raw
     name_prefix = _DRAFT_PREFIX
-    if is_env_fix:
-        m_case = re.search(r"【用例】([^\n【]+)", task)
-        case_name = (m_case.group(1).strip() if m_case else "")
-        if not display_title:
-            display_title = f"{case_name}_环境修复" if case_name else "环境修复"
-        # 环境修复经验正是同用例后续兜底最需要召回的——去 draft 前缀立即
-        # 进入 BM25 召回（draft 会被 _iter_markdown 排除在检索之外）
-        name_prefix = ""
     if not display_title:
         display_title = task[:40]
     title = _slugify(display_title, limit=40)

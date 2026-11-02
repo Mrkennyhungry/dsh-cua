@@ -155,7 +155,7 @@ def _looks_like_inapp_popup(fg: int) -> bool:
 def _popup_class_whitelist() -> frozenset[str]:
     extra = os.environ.get("DESKTOP_POPUP_CLASS_WHITELIST", "")
     classes = {
-        "TXMenuWindow",  # Tencent native menu dropdowns (desktop/WeCom)
+        "TXMenuWindow",  # native menu dropdowns (e.g. WeCom client)
         # CEF/Chromium/Electron host surfaces (e.g. desktop's DESKTOP_LOGIN_Monitor):
         # borderless WS_POPUP windows living in SIBLING process trees — they
         # can NEVER satisfy rules 2-4 (no owner chain, no shared ancestry),

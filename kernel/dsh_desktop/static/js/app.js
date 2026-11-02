@@ -104,7 +104,6 @@ function chatApp() {
     kbSearchQ: '',
     kbSearchBusy: false,
     kbSearchHits: null,      // null = not searched yet
-    kbImporting: false,
     kbNewCorrectionOpen: false,
     kbNewTitle: '',
     kbNewContent: '',
@@ -766,27 +765,6 @@ function chatApp() {
       await this.fetchKnowledge();
       this._showKbMessage(failCount ? `已删除 ${okCount} 条，失败 ${failCount} 条` : `已删除 ${okCount} 条`);
       this.kbBulkDeleting = false;
-    },
-
-    async importKnowledge() {
-      this.kbImporting = true;
-      try {
-        const resp = await fetch('/api/knowledge/import', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ include_cases: true })
-        });
-        if (resp.ok) {
-          const stats = await resp.json();
-          await this.fetchKnowledge();
-          this._showKbMessage(t('knowledge.import_done', stats.corrections, stats.success_paths, stats.playbooks, stats.cases, stats.skipped_cases || 0));
-        } else {
-          this._showKbMessage(t('knowledge.import_failed') + ': ' + resp.status);
-        }
-      } catch (e) {
-        this._showKbMessage(t('knowledge.import_failed') + ': ' + e.message);
-      }
-      this.kbImporting = false;
     },
 
     async searchKnowledge() {

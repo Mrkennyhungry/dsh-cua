@@ -2,12 +2,12 @@
 # kernel-state.json carries the bridge bearer token and owner key — never commit it.
 .runtime/
 
-# iOA-console-only knowledge. The public package must not carry customer data.
+# Optional private knowledge catalogs. The public package must not carry customer data.
 private-knowledge-source/
 private-knowledge/
 
 # Local build/refactor scratch
-.workbuddy-refactor-backup/
+.*-refactor-backup/
 *.tgz
 
 # Agent handoff state. NOTE: .handoff/permission-compare/*/weights are directory
@@ -16,8 +16,8 @@ private-knowledge/
 .handoff/
 "*.handoff"/
 
-# WorkBuddy port scratch area (its own copy lives outside this repo)
-workbuddy/
+# Local port scratch area (its own copy lives outside this repo)
+*buddy/
 
 # Test caches
 .pytest_cache/

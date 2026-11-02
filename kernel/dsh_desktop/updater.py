@@ -1,4 +1,4 @@
-"""Check GitHub Releases for newer versions of DesktopCore."""
+"""Check GitHub Releases of this project for newer versions."""
 import json
 import logging
 import urllib.request
@@ -6,7 +6,11 @@ from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
 
-GITHUB_RELEASES_API = "https://api.github.com/repos/gtt116/dsh_desktop/releases/latest"
+GITHUB_REPO = "Mrkennyhungry/dsh-cua"
+GITHUB_RELEASES_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
+# The tray opens html_url with the shell, so only this repository's release
+# pages and assets are accepted from the API response.
+_RELEASE_URL_PREFIX = f"https://github.com/{GITHUB_REPO}/releases/"
 
 
 @dataclass
@@ -17,6 +21,11 @@ class UpdateInfo:
     release_notes: str
     html_url: str      # GitHub release page URL
     download_url: str  # direct zip download URL
+
+
+def _trusted_release_url(value: object) -> str:
+    url = value if isinstance(value, str) else ""
+    return url if url.startswith(_RELEASE_URL_PREFIX) else ""
 
 
 def check_for_update(current_version: str) -> UpdateInfo | None:
@@ -38,18 +47,23 @@ def check_for_update(current_version: str) -> UpdateInfo | None:
         if not latest or not _is_newer(latest, current_version):
             return None
 
+        html_url = _trusted_release_url(data.get("html_url"))
+        if not html_url:
+            logger.debug("Update check ignored a release URL outside %s", _RELEASE_URL_PREFIX)
+            return None
+
         # Find zip asset
         download_url = ""
         for asset in data.get("assets", []):
-            if asset["name"] == "dsh_desktop.zip":
-                download_url = asset["browser_download_url"]
+            if asset.get("name") == "dsh_desktop.zip":
+                download_url = _trusted_release_url(asset.get("browser_download_url"))
                 break
 
         logger.info("Update available: v%s (current: v%s)", latest, current_version)
         return UpdateInfo(
             version=latest,
             release_notes=data.get("body", ""),
-            html_url=data.get("html_url", ""),
+            html_url=html_url,
             download_url=download_url,
         )
     except Exception:
