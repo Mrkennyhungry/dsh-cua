@@ -275,7 +275,8 @@ def record_run(
             lines.insert(1, f"\n## 失败摘要\n{summary}\n")
         dest = source_dir(SOURCE_CORRECTIONS) / f"{_DRAFT_PREFIX}{today}_{ts}_{title}.md"
     try:
-        dest.write_text("\n".join(lines), encoding="utf-8")
+        # Mask at the write: step arguments and error text are written here too.
+        dest.write_text(_redact_secrets("\n".join(lines)), encoding="utf-8")
     except OSError as exc:
         logger.warning("Failed to write run record: %s", exc)
         return None
@@ -599,7 +600,7 @@ def review_run(
         if isinstance(item, dict) and str(item.get("title") or "").strip():
             llm_title_raw = str(item["title"]).strip()[:30]
             break
-    display_title = llm_title_raw
+    display_title = _redact_secrets(llm_title_raw)
     name_prefix = _DRAFT_PREFIX
     if not display_title:
         display_title = task[:40]
@@ -647,7 +648,9 @@ def review_run(
         dest = source_dir(SOURCE_CORRECTIONS) / f"{name_prefix}{today}_{ts}_{title}.md"
 
     try:
-        dest.write_text("\n".join(lines), encoding="utf-8")
+        # Mask at the write: the model's own text is not covered by the earlier
+        # masking of its input.
+        dest.write_text(_redact_secrets("\n".join(lines)), encoding="utf-8")
     except OSError as exc:
         logger.warning("Failed to write AI review: %s", exc)
         raw = record_run(session_id, task, desktop_steps, success=eff_outcome == "succeeded",
