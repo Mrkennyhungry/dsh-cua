@@ -13,18 +13,12 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from ctypes import wintypes
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
 _HOTKEY_PICK = "<ctrl>+<alt>+w"
 _HOTKEY_STOP = "<ctrl>+<alt>+q"
-
-_MF_STRING = 0x0000
-_MF_SEPARATOR = 0x0800
-_MF_GRAYED = 0x0001
-_TPM_RETURNCMD = 0x0100
 
 _ID_PICK = 900
 _ID_UNLOCK = 901
@@ -126,79 +120,98 @@ class Companion:
             logger.warning("companion menu failed: %s", exc)
 
     def _menu(self) -> None:
-        import ctypes
+        """Draw the menu with Tk.
+
+        A Win32 TrackPopupMenu was tried first and never appeared: the mascot is
+        WS_EX_NOACTIVATE (so clicking it never steals focus), and a popup menu
+        requires its owner window to be activated. A Tk toplevel has no such
+        requirement and is what the window picker already uses.
+        """
+        import tkinter as tk
 
         from . import desktop_tools as dt
 
-        user32 = ctypes.windll.user32
-        user32.CreatePopupMenu.restype = wintypes.HMENU
-        user32.AppendMenuW.argtypes = [wintypes.HMENU, wintypes.UINT, ctypes.c_size_t, wintypes.LPCWSTR]
-        user32.TrackPopupMenu.argtypes = [wintypes.HMENU, wintypes.UINT, ctypes.c_int, ctypes.c_int,
-                                          ctypes.c_int, wintypes.HWND, ctypes.c_void_p]
-        user32.DestroyMenu.argtypes = [wintypes.HMENU]
-
-        hwnd = int(getattr(self._overlay, "_hwnd", 0) or 0)
-        menu = user32.CreatePopupMenu()
-        if not menu:
-            return
-        actions: dict[int, tuple] = {}
-        next_id = 1
-
-        windows = [w for w in dt._list_visible_windows()
-                   if str(w.get("title", "")).strip()][:12]
-        user32.AppendMenuW(menu, _MF_STRING | _MF_GRAYED, 0, "选择要操作的窗口")
-        for win in windows:
-            label = f"{str(win.get('title'))[:44]}  ({win.get('exe', '')})"
-            user32.AppendMenuW(menu, _MF_STRING, next_id, label)
-            actions[next_id] = ("window", win)
-            next_id += 1
-        user32.AppendMenuW(menu, _MF_SEPARATOR, 0, None)
-
+        windows = [w for w in dt._list_visible_windows() if str(w.get("title", "")).strip()][:12]
         apps = _installed_apps()
+        entries: list[tuple[str, str, object]] = [("header", "选择要操作的窗口", None)]
+        for win in windows:
+            entries.append(("window", f"{str(win.get('title'))[:38]}  ({win.get('exe', '')})", win))
         if apps:
-            user32.AppendMenuW(menu, _MF_STRING | _MF_GRAYED, 0, "启动应用并锁定")
+            entries.append(("header", "启动应用并锁定", None))
             for app in apps:
-                user32.AppendMenuW(menu, _MF_STRING, next_id, app["name"])
-                actions[next_id] = ("app", app)
-                next_id += 1
-            user32.AppendMenuW(menu, _MF_SEPARATOR, 0, None)
-
-        user32.AppendMenuW(menu, _MF_STRING, _ID_PICK, "点选窗口…  (Ctrl+Alt+W)")
+                entries.append(("app", app["name"], app))
         locked = dt.locked_window_id()
         if locked:
             info = dt.bound_window_info(locked) or {}
-            user32.AppendMenuW(menu, _MF_STRING | _MF_GRAYED, 0,
-                               f"已锁定: {str(info.get('title', ''))[:30]}")
-            user32.AppendMenuW(menu, _MF_STRING, _ID_UNLOCK, "解除锁定")
-        from . import input_gate
-        if input_gate.stop_engaged():
-            user32.AppendMenuW(menu, _MF_STRING, _ID_RESUME, "解除急停")
-        else:
-            user32.AppendMenuW(menu, _MF_STRING, _ID_STOP, "急停  (Ctrl+Alt+Q)")
+            entries.append(("header", f"已锁定: {str(info.get('title', ''))[:26]}", None))
+            entries.append(("action", "解除锁定", _ID_UNLOCK))
+        entries.append(("action", "点选窗口…  (Ctrl+Alt+W)", _ID_PICK))
+        entries.append(("action", "急停  (Ctrl+Alt+Q)", _ID_STOP))
 
-        x, y = self._menu_anchor(hwnd)
-        try:
-            user32.SetForegroundWindow(hwnd)
-        except Exception:
-            pass
-        choice = user32.TrackPopupMenu(menu, _TPM_RETURNCMD, x, y, 0, hwnd, None)
-        user32.DestroyMenu(menu)
-        try:
-            user32.PostMessageW(hwnd, 0x0000, 0, 0)  # WM_NULL, standard menu cleanup
-        except Exception:
-            pass
-        if not choice:
+        anchor = self._menu_anchor()
+
+        def show() -> None:
+            root = tk.Tk()
+            root.overrideredirect(True)
+            root.attributes("-topmost", True)
+            root.configure(bg="#1c1c1e")
+            frame = tk.Frame(root, bg="#1c1c1e", bd=0)
+            frame.pack(fill="both", expand=True, padx=1, pady=1)
+            choice: dict[str, object] = {"value": None}
+
+            def pick(value) -> None:
+                choice["value"] = value
+                root.destroy()
+
+            for kind, label, payload in entries:
+                if kind == "header":
+                    tk.Label(frame, text=label, bg="#1c1c1e", fg="#8e8e93", anchor="w",
+                             font=("Segoe UI", 9), padx=10, pady=3).pack(fill="x")
+                    continue
+                row = tk.Label(frame, text=label, bg="#1c1c1e", fg="#f2f2f7", anchor="w",
+                               font=("Segoe UI", 10), padx=12, pady=6, cursor="hand2")
+                row.pack(fill="x")
+                value = payload if kind == "action" else (kind, payload)
+                row.bind("<Button-1>", lambda _e, v=value: pick(v))
+                row.bind("<Enter>", lambda _e, w=row: w.configure(bg="#2c2c2e"))
+                row.bind("<Leave>", lambda _e, w=row: w.configure(bg="#1c1c1e"))
+            root.bind("<Escape>", lambda _e: root.destroy())
+            root.bind_all("<Escape>", lambda _e: root.destroy())
+            root.bind("<FocusOut>", lambda _e: root.destroy())
+            root.after(30000, root.destroy)  # never leave a stuck panel behind
+            root.update_idletasks()
+            width, height = root.winfo_reqwidth(), root.winfo_reqheight()
+            # Keep the whole panel on screen: docked at the right edge the naive
+            # anchor pushed it hundreds of pixels past the monitor.
+            screen_w = root.winfo_screenwidth()
+            screen_h = root.winfo_screenheight()
+            x = min(max(0, anchor[0]), max(0, screen_w - width - 8))
+            y = min(max(0, anchor[1]), max(0, screen_h - height - 8))
+            root.geometry(f"{width}x{height}+{x}+{y}")
+            for delay in (60, 200, 500):
+                root.after(delay, lambda: (root.lift(), root.attributes("-topmost", True),
+                                           root.focus_force()))
+            root.mainloop()
+            return choice["value"]
+
+        selected = show()
+        if selected is None:
             return
-        self._apply(choice, actions, dt)
+        if isinstance(selected, int):
+            self._apply(selected, {}, dt)
+            return
+        kind, payload = selected
+        self._apply(-1, {"__direct__": (kind, payload)}, dt)
 
-    def _menu_anchor(self, hwnd: int) -> tuple[int, int]:
+    def _menu_anchor(self) -> tuple[int, int]:
         import win32gui
 
+        hwnd = int(getattr(self._overlay, "_hwnd", 0) or 0)
         try:
             left, top, right, bottom = win32gui.GetWindowRect(hwnd)
         except Exception:
             return (200, 200)
-        return (left, max(0, top + (bottom - top) - 40))
+        return (left - 40, bottom - 8)
 
     def _apply(self, choice: int, actions: dict, dt) -> None:
         from . import input_gate
@@ -217,7 +230,10 @@ class Companion:
             input_gate.clear_stop()
             self._say("idle")
             return
-        kind, payload = actions.get(choice, (None, None))
+        if "__direct__" in actions:
+            kind, payload = actions["__direct__"]
+        else:
+            kind, payload = actions.get(choice, (None, None))
         if kind == "window":
             bound = dt.desktop_pick_window(hwnd=int(payload["hwnd"]))
             if bound.get("window_id"):

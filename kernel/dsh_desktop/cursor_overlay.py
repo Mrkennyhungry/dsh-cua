@@ -215,16 +215,30 @@ class CursorOverlay:
             self._action, self._action_until = action, time.monotonic() + duration
             self._visible = True
 
+    def _primary_dock(self) -> tuple[int, int]:
+        """Top-right corner of the primary monitor: a place the user can find.
+
+        _layout() aims at the DSH composer, which depends on whichever window had
+        focus when the kernel started — the mascot then jumped between monitors on
+        every restart, so "click the mascot" had no fixed answer.
+        """
+        from .mascot_theme import WIDTH
+        import win32api
+
+        try:
+            work = win32api.GetMonitorInfo(win32api.MonitorFromPoint((0, 0), 1))["Work"]
+            left, top, right, _bottom = work
+            return (max(left, right - WIDTH - 16), top + 16)
+        except Exception:
+            return (40, 40)
+
     def set_companion(self, enabled: bool, on_click=None) -> None:
         """Keep the mascot visible while idle and make its sprite clickable.
 
         Clicking is what turns it from decoration into a launcher; during a task
         the sprite goes back to click-through so it never eats the user's clicks.
         """
-        try:
-            dock, _origin = self._layout()
-        except Exception:
-            dock = (40, 40)
+        dock = self._primary_dock()
         with self._lock:
             self._companion = bool(enabled)
             self._on_click = on_click if enabled else None
