@@ -39,6 +39,9 @@
     "scripts/reload-cursor-kernel.ps1",
     "scripts/install-elevated-task.ps1",
     "scripts/run-kernel-high.py",
+    "scripts/build-companion-ui.ps1",
+    "companion/*.cs",
+    "companion/*.csproj",
     "vendor/weights/**/*",
     "THIRD_PARTY_NOTICES.txt",
     "docs/**/*"

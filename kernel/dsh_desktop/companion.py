@@ -10,7 +10,11 @@ Hotkeys (global, best effort):
 """
 from __future__ import annotations
 
+import json
 import logging
+import os
+import queue
+import subprocess
 import threading
 import time
 from pathlib import Path
@@ -30,11 +34,12 @@ _SYSTEM_FOLDERS = {"accessibility", "system tools", "windows tools",
                    "windows powershell", "administrative tools"}
 
 
-def _installed_apps(limit: int = 8) -> list[dict]:
-    """Start-menu shortcuts: the same .lnk targets desktop_launch_app accepts.
+def _installed_apps(limit: int = 32) -> list[dict]:
+    """Start-menu shortcuts accepted by desktop_launch_app.
 
-    Sampling one shortcut per folder keeps the menu varied: sorting purely by path
-    filled it with the Accessibility folder before anything the user installed.
+    Take one entry per folder first for variety, then fill the second-level page
+    with the remaining applications. Uninstallers and system utility folders stay
+    out of the one-click launcher.
     """
     roots = [
         Path.home() / "AppData" / "Roaming" / "Microsoft" / "Windows" / "Start Menu" / "Programs",
@@ -42,6 +47,7 @@ def _installed_apps(limit: int = 8) -> list[dict]:
     ]
     seen: set[str] = set()
     per_folder: dict[str, dict] = {}
+    remaining: list[dict] = []
     for root in roots:
         if not root.is_dir():
             continue
@@ -56,8 +62,6 @@ def _installed_apps(limit: int = 8) -> list[dict]:
                 folder = relative.parts[0].lower() if relative.parts else ""
                 if folder in _SYSTEM_FOLDERS:
                     continue
-                # An uninstaller one click away from a mascot is a bad idea: reuse the
-                # same danger check the launcher tool applies.
                 try:
                     from . import desktop_tools as _dt
 
@@ -66,10 +70,20 @@ def _installed_apps(limit: int = 8) -> list[dict]:
                 except Exception:  # noqa: BLE001 - a missing filter only widens the list
                     pass
                 seen.add(name.lower())
-                per_folder.setdefault(folder, {"name": name[:40], "path": str(path)})
+                item = {"name": name[:60], "path": str(path)}
+                if folder not in per_folder:
+                    per_folder[folder] = item
+                else:
+                    remaining.append(item)
         except OSError:
             continue
-    return list(per_folder.values())[:limit]
+    return (list(per_folder.values()) + remaining)[:limit]
+
+
+def _ui_executable() -> Path:
+    """Published Arc picker, kept out of the source package and git history."""
+    return (Path(__file__).resolve().parents[2] / ".runtime" / "companion-ui"
+            / "DshDoraemon.Companion.exe")
 
 
 class Companion:
@@ -77,7 +91,14 @@ class Companion:
         self._eternity = None
         self._overlay = None
         self._hotkeys = None
+        self._mouse_listener = None
+        self._menu_open = False
         self._lock = threading.Lock()
+        self._menu_guard = threading.Lock()
+        self._ui_process = None
+        self._ui_responses: queue.Queue = queue.Queue()
+        self._apps_cache: tuple[float, list[dict]] = (0.0, [])
+        self._windows_cache: tuple[float, list[dict]] = (0.0, [])
 
     # ── lifecycle ────────────────────────────────────────────────────────
     def install(self, eternity) -> None:
@@ -92,6 +113,109 @@ class Companion:
             overlay.set_companion(True, self.open_menu)
             self._overlay = overlay
         self._start_hotkeys()
+        self._start_outside_click_listener()
+        self._start_ui_server()
+        threading.Thread(target=self._prewarm, daemon=True, name="companion-prewarm").start()
+
+    def _start_ui_server(self) -> None:
+        """Start the Arc runtime once; each click then only shows a window."""
+        if self._ui_process is not None and self._ui_process.poll() is None:
+            return
+        executable = _ui_executable()
+        if not executable.is_file():
+            logger.error("Arc companion UI is not built: %s (run scripts/build-companion-ui.ps1)",
+                         executable)
+            return
+        try:
+            self._ui_process = subprocess.Popen(
+                [str(executable), "--server", str(os.getpid())],
+                stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                text=True, encoding="utf-8", errors="replace", bufsize=1,
+                creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+            )
+        except OSError as exc:
+            logger.warning("Arc companion UI failed to start: %s", exc)
+            self._ui_process = None
+            return
+
+        def read_responses() -> None:
+            assert self._ui_process is not None and self._ui_process.stdout is not None
+            for line in self._ui_process.stdout:
+                if line.strip():
+                    self._ui_responses.put(line)
+
+        def read_errors() -> None:
+            assert self._ui_process is not None and self._ui_process.stderr is not None
+            for line in self._ui_process.stderr:
+                if line.strip():
+                    logger.warning("Arc companion UI: %s", line.strip())
+
+        threading.Thread(target=read_responses, daemon=True, name="companion-ui-out").start()
+        threading.Thread(target=read_errors, daemon=True, name="companion-ui-err").start()
+        logger.info("Arc companion UI server started (pid=%s)", self._ui_process.pid)
+
+    def _prewarm(self) -> None:
+        from . import desktop_tools as dt
+
+        try:
+            self._window_items(dt)
+            self._app_items()
+            logger.info("companion picker data prewarmed")
+        except Exception:  # noqa: BLE001 - a cache miss later is still valid
+            logger.debug("companion prewarm failed", exc_info=True)
+
+    def _app_items(self) -> list[dict]:
+        now = time.monotonic()
+        if now - self._apps_cache[0] > 60 or not self._apps_cache[1]:
+            self._apps_cache = (now, _installed_apps())
+        return self._apps_cache[1]
+
+    def _window_items(self, dt) -> list[dict]:
+        now = time.monotonic()
+        if now - self._windows_cache[0] > 1.5 or not self._windows_cache[1]:
+            items = [
+                {"hwnd": int(w["hwnd"]), "title": str(w.get("title", "")),
+                 "exe": str(w.get("exe", "")), "pid": int(w.get("pid") or 0)}
+                for w in dt._list_visible_windows() if str(w.get("title", "")).strip()
+            ][:50]
+            self._windows_cache = (now, items)
+        return self._windows_cache[1]
+
+    def _start_outside_click_listener(self) -> None:
+        """Close the visible Arc page on a click outside it, regardless of focus."""
+        try:
+            from pynput import mouse
+
+            listener = mouse.Listener(on_click=self._on_global_mouse)
+            listener.daemon = True
+            listener.start()
+            self._mouse_listener = listener
+        except Exception as exc:  # noqa: BLE001 - the picker can still use Esc
+            logger.warning("outside-click listener unavailable: %s", exc)
+
+    def _on_global_mouse(self, x: int, y: int, button, pressed: bool) -> None:
+        if not pressed or not self._menu_open:
+            return
+        try:
+            import win32con
+            import win32gui
+
+            visible: list[tuple[int, tuple[int, int, int, int]]] = []
+
+            def collect(hwnd, _):
+                if (win32gui.GetClassName(hwnd).startswith("Avalonia-")
+                        and win32gui.IsWindowVisible(hwnd)):
+                    visible.append((hwnd, win32gui.GetWindowRect(hwnd)))
+                return True
+
+            win32gui.EnumWindows(collect, None)
+            inside = any(left <= x < right and top <= y < bottom
+                         for _, (left, top, right, bottom) in visible)
+            if visible and not inside:
+                for hwnd, _ in visible:
+                    win32gui.PostMessage(hwnd, win32con.WM_CLOSE, 0, 0)
+        except Exception:  # noqa: BLE001 - never let a UI helper break the hook
+            logger.debug("outside-click handling failed", exc_info=True)
 
     def _start_hotkeys(self) -> None:
         try:
@@ -113,95 +237,70 @@ class Companion:
 
     # ── actions ──────────────────────────────────────────────────────────
     def open_menu(self) -> None:
-        """Show the picker menu next to the mascot (called from a worker thread)."""
+        """Show the Arc picker next to the mascot (called from a worker thread)."""
+        if not self._menu_guard.acquire(blocking=False):
+            return
+        # This must happen before any cache work or IPC: the sprite acknowledges
+        # the click immediately even on the first, not-yet-warm invocation.
+        self._say("thinking", 5.0)
+        self._menu_open = True
+        logger.info("companion: picker requested")
         try:
             self._menu()
         except Exception as exc:  # noqa: BLE001 - a broken menu must not kill the overlay
-            logger.warning("companion menu failed: %s", exc)
+            logger.warning("companion menu failed: %s", exc, exc_info=True)
+            self._say("error", 1.5)
+        finally:
+            self._menu_open = False
+            self._menu_guard.release()
 
     def _menu(self) -> None:
-        """Draw the menu with Tk.
-
-        A Win32 TrackPopupMenu was tried first and never appeared: the mascot is
-        WS_EX_NOACTIVATE (so clicking it never steals focus), and a popup menu
-        requires its owner window to be activated. A Tk toplevel has no such
-        requirement and is what the window picker already uses.
-        """
-        import tkinter as tk
-
+        """Send one request to the warm Arc process and apply its JSON response."""
         from . import desktop_tools as dt
+        from . import input_gate
 
-        windows = [w for w in dt._list_visible_windows() if str(w.get("title", "")).strip()][:12]
-        apps = _installed_apps()
-        entries: list[tuple[str, str, object]] = [("header", "选择要操作的窗口", None)]
-        for win in windows:
-            entries.append(("window", f"{str(win.get('title'))[:38]}  ({win.get('exe', '')})", win))
-        if apps:
-            entries.append(("header", "启动应用并锁定", None))
-            for app in apps:
-                entries.append(("app", app["name"], app))
+        self._start_ui_server()
+        process = self._ui_process
+        if process is None or process.poll() is not None or process.stdin is None:
+            logger.warning("Arc companion UI is unavailable")
+            self._say("error", 1.5)
+            return
         locked = dt.locked_window_id()
-        if locked:
-            info = dt.bound_window_info(locked) or {}
-            entries.append(("header", f"已锁定: {str(info.get('title', ''))[:26]}", None))
-            entries.append(("action", "解除锁定", _ID_UNLOCK))
-        entries.append(("action", "点选窗口…  (Ctrl+Alt+W)", _ID_PICK))
-        entries.append(("action", "急停  (Ctrl+Alt+Q)", _ID_STOP))
-
+        locked_info = dt.bound_window_info(locked) if locked else {}
         anchor = self._menu_anchor()
-
-        def show() -> None:
-            root = tk.Tk()
-            root.overrideredirect(True)
-            root.attributes("-topmost", True)
-            root.configure(bg="#1c1c1e")
-            frame = tk.Frame(root, bg="#1c1c1e", bd=0)
-            frame.pack(fill="both", expand=True, padx=1, pady=1)
-            choice: dict[str, object] = {"value": None}
-
-            def pick(value) -> None:
-                choice["value"] = value
-                root.destroy()
-
-            for kind, label, payload in entries:
-                if kind == "header":
-                    tk.Label(frame, text=label, bg="#1c1c1e", fg="#8e8e93", anchor="w",
-                             font=("Segoe UI", 9), padx=10, pady=3).pack(fill="x")
-                    continue
-                row = tk.Label(frame, text=label, bg="#1c1c1e", fg="#f2f2f7", anchor="w",
-                               font=("Segoe UI", 10), padx=12, pady=6, cursor="hand2")
-                row.pack(fill="x")
-                value = payload if kind == "action" else (kind, payload)
-                row.bind("<Button-1>", lambda _e, v=value: pick(v))
-                row.bind("<Enter>", lambda _e, w=row: w.configure(bg="#2c2c2e"))
-                row.bind("<Leave>", lambda _e, w=row: w.configure(bg="#1c1c1e"))
-            root.bind("<Escape>", lambda _e: root.destroy())
-            root.bind_all("<Escape>", lambda _e: root.destroy())
-            root.bind("<FocusOut>", lambda _e: root.destroy())
-            root.after(30000, root.destroy)  # never leave a stuck panel behind
-            root.update_idletasks()
-            width, height = root.winfo_reqwidth(), root.winfo_reqheight()
-            # Keep the whole panel on screen: docked at the right edge the naive
-            # anchor pushed it hundreds of pixels past the monitor.
-            screen_w = root.winfo_screenwidth()
-            screen_h = root.winfo_screenheight()
-            x = min(max(0, anchor[0]), max(0, screen_w - width - 8))
-            y = min(max(0, anchor[1]), max(0, screen_h - height - 8))
-            root.geometry(f"{width}x{height}+{x}+{y}")
-            for delay in (60, 200, 500):
-                root.after(delay, lambda: (root.lift(), root.attributes("-topmost", True),
-                                           root.focus_force()))
-            root.mainloop()
-            return choice["value"]
-
-        selected = show()
-        if selected is None:
+        request = {
+            "anchor_x": anchor[0],
+            "anchor_y": anchor[1],
+            "locked_label": (f"{locked_info.get('title', '')} ({locked_info.get('exe', '')})"
+                             if locked_info else ""),
+            "stopped": input_gate.stop_engaged(),
+            "windows": self._window_items(dt),
+            "apps": self._app_items(),
+        }
+        while not self._ui_responses.empty():
+            self._ui_responses.get_nowait()  # discard a response orphaned by a timeout
+        process.stdin.write(json.dumps(request, ensure_ascii=False) + "\n")
+        process.stdin.flush()
+        try:
+            line = self._ui_responses.get(timeout=45)
+        except queue.Empty:
+            logger.warning("Arc companion UI did not answer in 45s")
+            self._say("error", 1.5)
             return
-        if isinstance(selected, int):
-            self._apply(selected, {}, dt)
-            return
-        kind, payload = selected
-        self._apply(-1, {"__direct__": (kind, payload)}, dt)
+        result = json.loads(line)
+        kind = result.get("kind")
+        if kind == "action":
+            action = {"pick": _ID_PICK, "unlock": _ID_UNLOCK,
+                      "stop": _ID_STOP, "resume": _ID_RESUME}.get(result.get("action"))
+            if action is not None:
+                self._apply(action, {}, dt)
+        elif kind in {"window", "app"}:
+            self._apply(-1, {"__direct__": (kind, result)}, dt)
+        elif kind == "error":
+            logger.warning("Arc companion UI failed: %s", result.get("error"))
+            self._say("error", 1.5)
+        else:
+            self._say("idle", 0.2)
 
     def _menu_anchor(self) -> tuple[int, int]:
         import win32gui
@@ -246,7 +345,8 @@ class Companion:
             started = dt.desktop_launch_app(str(payload["path"]))
             logger.info("companion: launched %s -> %s", payload.get("name"), started.get("success"))
             if started.get("success"):
-                self._bind_launched(payload.get("name", ""), dt)
+                self._bind_launched(payload.get("name")
+                                    or Path(str(payload["path"])).stem, dt)
 
     def _bind_launched(self, name: str, dt) -> None:
         """Wait briefly for the launched app's window, then bind and lock it."""

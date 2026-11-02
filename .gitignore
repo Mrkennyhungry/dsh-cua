@@ -26,6 +26,10 @@ private-knowledge/
 node_modules/
 npm-debug.log*
 
+# .NET build outputs (the Arc companion UI is published into .runtime)
+companion/bin/
+companion/obj/
+
 # Python
 __pycache__/
 *.pyc
