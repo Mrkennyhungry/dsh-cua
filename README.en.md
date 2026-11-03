@@ -40,7 +40,10 @@ Thanks to [LINUX DO](https://linux.do/) for the community space to share and dis
 
 Tools are selected for the task; every step does not have to traverse every layer.
 Desktop coordinate actions use the physical mouse. A docked, click-through
-whale-maid commander provides task feedback; see [commander mode](docs/commander-mode.md).
+whale-maid commander can provide task feedback, but it is **off by default**: enable it
+with `commandFeedback: true` on the `doraemon` entry in the profile's
+`cordis.patch.yml` (its click picker additionally needs
+`scripts/build-companion-ui.ps1`). See [commander mode](docs/commander-mode.md).
 
 ## Requirements and limitations
 

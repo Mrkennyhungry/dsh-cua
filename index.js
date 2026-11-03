@@ -30,10 +30,12 @@ export const Config = Schema.object({
   logDir: Schema.string().default(''),
   apiKeyFile: Schema.string().default(''),
   enableExperimentalPageCache: Schema.boolean().default(false),
-  // The docked commander is task feedback drawn on the desktop. Turning it off keeps
-  // the plugin from posting to /mascot/state at all, which is what a headless or
-  // screen-recording host wants.
-  commandFeedback: Schema.boolean().default(true),
+  // The docked commander is a desktop overlay that stays on top of every window and
+  // reports task state. It is off by default: a fresh install should not put a
+  // decorative character over the user's screen before they ask for one, and its
+  // click picker only works after `scripts/build-companion-ui.ps1` has been run.
+  // Set commandFeedback: true to opt in.
+  commandFeedback: Schema.boolean().default(false),
   // Runtime-only selection mirror for the Client chip; not a user preference.
   companionSelection: Schema.string().default('').volatile(),
 })
@@ -185,11 +187,12 @@ export function apply(ctx, config) {
     },
   })
   const active = new Map()
-  const cursorFeedback = config.commandFeedback === false
-    ? { begin() {}, end() {}, dispose: async () => {} }
-    : installCursorThinking(ctx, bridge)
+  const commandFeedbackEnabled = config.commandFeedback === true
+  const cursorFeedback = commandFeedbackEnabled
+    ? installCursorThinking(ctx, bridge)
+    : { begin() {}, end() {}, dispose: async () => {} }
   const companionSelection = installCompanionSelection(ctx, bridge)
-  if (config.commandFeedback !== false) {
+  if (commandFeedbackEnabled) {
     // The mascot lives in the kernel, so the kernel has to be running for it to
     // dock on screen. One background health call starts it without blocking the
     // plugin load; a failure here only means "no companion yet".

@@ -85,7 +85,7 @@ cd "$env:USERPROFILE\.dsh\profiles\<your-profile>\node_modules\dsh-doraemon"
 - 桌面坐标操作使用真实鼠标；前台焦点、自绘界面和管理员窗口会影响操作，不能保证所有 Windows 软件都可自动化。
 - 插件在本机执行真实操作，不是隔离沙箱。首次使用建议从记事本等简单任务开始；文件删除、搬家等操作应先备份并确认。
 - `effect: "confirmed"` 只说明界面发生了变化。业务是否成功，需要根据窗口内容、下载状态、消息记录等明确证据判断。
-- 当前主分支的任务反馈角色是固定停靠、鼠标穿透的像素鲸鱼女仆；它不是虚拟鼠标。详见 [commander mode](docs/commander-mode.md)。
+- 当前主分支的任务反馈角色是固定停靠、鼠标穿透的像素鲸鱼女仆；它不是虚拟鼠标。**该角色默认关闭**，需要时在 profile 的 `cordis.patch.yml` 里给 `doraemon` 加 `commandFeedback: true`（选择器还需先跑 `scripts/build-companion-ui.ps1`）。详见 [commander mode](docs/commander-mode.md)。
 
 ## 反馈与参与
 

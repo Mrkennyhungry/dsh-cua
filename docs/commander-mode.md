@@ -1,5 +1,28 @@
 # 物理输入与像素指挥员
 
+## 默认关闭
+
+指挥员（屏幕右上角的像素鲸鱼女仆）**默认不启动**：全新安装不应在用户屏幕上层
+凭空多出一个角色，而且它的点击选择器依赖单独构建的 Arc UI
+（`scripts/build-companion-ui.ps1`，需要 .NET 10 SDK），没构建时点击只会动一下、
+不会弹窗。
+
+需要它的任务反馈和窗口作用域选择器时，显式打开。
+
+`dsh.profile.cordis.patch.yml`：
+
+```yaml
+- id: doraemon
+  config:
+    commandFeedback: true
+```
+
+其余配置项都有默认值（端口 8766、`tokenEnv: DSH_DESKTOP_BRIDGE_TOKEN`、
+`autoStart: true`、`keepAlive: true`），只写 `commandFeedback` 不会改变它们。
+
+关掉时插件不会调用 `/companion/start`，也不会上报 `/mascot/state`；
+切回 `false` 并重启 DSH 即可让角色消失。
+
 当前方案使用真实鼠标执行坐标点击、右键、滚动和拖动，鼠标停留在动作结束点。
 之前的虚拟鼠标已停用，`doraemon_cursor` 不再注册，旧 `/cursor` 操作返回停用提示。
 `DSH_DESKTOP_INPUT_MODE=virtual` 不会重新开启旧输入方式。
