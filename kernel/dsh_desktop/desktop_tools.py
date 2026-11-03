@@ -1956,6 +1956,9 @@ def desktop_click_screen(x: int, y: int, clicks: int = 1) -> dict:
                          f"[{left},{top}]-[{right},{bottom}] 内",
                 "hint": "坐标必须是屏幕绝对像素；desktop_analyze(scope=\"desktop\") 的 "
                         "screen_rect 已经带 desktop_origin 偏移，直接用。"}
+    scope = scope_block_point(gx, gy)
+    if scope:
+        return scope
     with controller._input_lock:
         result = controller.input.click_screen(gx, gy, n)
     return {"success": bool(result.get("success", False)),
@@ -3388,14 +3391,27 @@ def _focus_state(hwnd: int) -> dict[str, Any] | None:
 
 
 # ── Window scope lock ────────────────────────────────────────────────────
-# The user picks an application window once. Later windows of that application
-# stay eligible even when they are new top-level HWNDs or live in another process.
-_SCOPE_LOCK = {"window_id": None, "window": {}}
+# A user may authorize several applications/windows. Selecting another entry
+# adds to this set; removing one never clears the others. New HWNDs and popups
+# of an authorized application remain eligible.
+_SCOPE_LOCK = {"windows": {}}
+
+
+def scope_selections() -> list[dict]:
+    with _STATE._lock:
+        return [{"window_id": window_id, **dict(info)}
+                for window_id, info in _SCOPE_LOCK["windows"].items()]
 
 
 def locked_window_id() -> str | None:
+    """First authorized id, retained for older callers and the /scope shape."""
     with _STATE._lock:
-        return _SCOPE_LOCK["window_id"]
+        return next(iter(_SCOPE_LOCK["windows"]), None)
+
+
+def locked_window_ids() -> list[str]:
+    with _STATE._lock:
+        return list(_SCOPE_LOCK["windows"])
 
 
 def lock_window(window_id: str) -> dict:
@@ -3403,28 +3419,27 @@ def lock_window(window_id: str) -> dict:
     if not info:
         return {"success": False, "error": f"window_id 不存在: {window_id}"}
     with _STATE._lock:
-        _SCOPE_LOCK["window_id"] = window_id
-        _SCOPE_LOCK["window"] = {k: info.get(k) for k in ("title", "exe", "pid", "hwnd")}
-    return {"success": True, "locked": window_id, "scope": "application",
-            "window": dict(_SCOPE_LOCK["window"])}
+        _SCOPE_LOCK["windows"][window_id] = {
+            k: info.get(k) for k in ("title", "exe", "pid", "hwnd")}
+    return {"success": True, "locked": window_id, "scope": "applications",
+            "window": {k: info.get(k) for k in ("title", "exe", "pid", "hwnd")},
+            "selections": scope_selections()}
 
 
-def unlock_window() -> dict:
+def unlock_window(window_id: str | None = None) -> dict:
+    """Remove one authorization, or all of them when window_id is omitted."""
     with _STATE._lock:
-        previous = _SCOPE_LOCK["window_id"]
-        _SCOPE_LOCK["window_id"] = None
-        _SCOPE_LOCK["window"] = {}
-    return {"success": True, "unlocked": previous}
+        if window_id is None:
+            removed = list(_SCOPE_LOCK["windows"])
+            _SCOPE_LOCK["windows"].clear()
+        else:
+            removed = [window_id] if _SCOPE_LOCK["windows"].pop(window_id, None) is not None else []
+    return {"success": True, "unlocked": removed[0] if removed else None,
+            "unlocked_windows": removed, "selections": scope_selections()}
 
 
 def _in_locked_application(candidate: dict, locked: dict) -> bool:
-    """Whether candidate belongs to the app selected by the user.
-
-    Matching only the original HWND would refuse save dialogs and newly opened
-    windows. Exe identity covers a new process of the same app; process ancestry
-    and the Win32 owner chain cover renderer windows and owned popups whose exe
-    name is not exposed consistently.
-    """
+    """Whether candidate belongs to one application selected by the user."""
     if not candidate or not locked:
         return False
     candidate_exe = str(candidate.get("exe") or "").strip().lower()
@@ -3451,24 +3466,83 @@ def _in_locked_application(candidate: dict, locked: dict) -> bool:
     return False
 
 
-def scope_block(window_id: str) -> dict | None:
-    """Refusal when window_id belongs to another application, else None."""
-    locked = locked_window_id()
-    if not locked or locked == window_id:
-        return None
-    with _STATE._lock:
-        locked_info = dict(_SCOPE_LOCK["window"])
-    if _in_locked_application(bound_window_info(window_id), locked_info):
-        return None
+def _scope_refusal(entries: list[dict]) -> dict:
+    first = entries[0]
+    names = "、".join(str(entry.get("title") or entry.get("exe") or "未命名窗口")
+                     for entry in entries[:3])
     return {
         "success": False,
-        "error": (f"WINDOW_SCOPE_LOCKED: 当前只允许操作应用 "
-                  f"「{locked_info.get('title','')}」（{locked_info.get('exe','')}）的窗口，"
-                  "包括它之后新开的窗口和弹窗；本次目标属于另一个应用。"
-                  "如需切换，先解除锁定或重新选择窗口。"),
-        "locked_window": {"window_id": locked, **locked_info},
-        "scope": "application",
+        "error": (f"WINDOW_SCOPE_LOCKED: 当前仅限操作 {names}{' 等' if len(entries) > 3 else ''}"
+                  "（包括它们之后新开的窗口和弹窗）；本次目标不在授权范围内。"
+                  "授权只能由用户修改：请点击右上角吉祥物添加窗口/应用，"
+                  "或在输入框的选择标签中取消现有限定。AI 不得自行添加或解除授权。"),
+        "locked_window": first,
+        "locked_windows": entries,
+        "scope": "applications",
     }
+
+
+def scope_launch_refusal(shortcut_path: str) -> dict | None:
+    """Block launching a different application while a user scope is active.
+
+    Launching the already-authorized application remains valid (it may have been
+    closed). The companion's user-driven picker calls desktop_launch_app directly
+    and is intentionally not restricted by this agent-facing bridge guard.
+    """
+    entries = scope_selections()
+    if not entries:
+        return None
+    try:
+        target = str(Path(shortcut_path or "").expanduser())
+        if target.lower().endswith(".lnk"):
+            import win32com.client
+
+            target = str(win32com.client.Dispatch("WScript.Shell")
+                         .CreateShortCut(target).TargetPath or "")
+        exe = Path(target).name.lower()
+        if exe and any(exe == str(entry.get("exe") or "").lower() for entry in entries):
+            return None
+    except Exception:
+        # Failure to prove that this launch belongs to the scope must not widen it.
+        pass
+    return _scope_refusal(entries)
+
+
+def scope_block(window_id: str) -> dict | None:
+    """Refuse a bound window outside every authorized application."""
+    entries = scope_selections()
+    if not entries or any(entry["window_id"] == window_id for entry in entries):
+        return None
+    candidate = bound_window_info(window_id)
+    if any(_in_locked_application(candidate, entry) for entry in entries):
+        return None
+    return _scope_refusal(entries)
+
+
+def scope_block_hwnd(hwnd: int) -> dict | None:
+    """Scope check for absolute-pixel input, whose target has no window_id yet."""
+    entries = scope_selections()
+    if not entries or not hwnd:
+        return None
+    candidate = _window_info(int(hwnd))
+    if any(_in_locked_application(candidate, entry) for entry in entries):
+        return None
+    return _scope_refusal(entries)
+
+
+def scope_block_point(x: int, y: int) -> dict | None:
+    """Resolve the top-level window under an absolute pixel before sending input."""
+    if not scope_selections():
+        return None
+    try:
+        import win32gui
+
+        hwnd = win32gui.WindowFromPoint((int(x), int(y)))
+        hwnd = win32gui.GetAncestor(hwnd, 2) if hwnd else 0  # GA_ROOT
+        return scope_block_hwnd(hwnd)
+    except Exception:
+        # A point we cannot attribute is not proof that it belongs to the scope.
+        return _scope_refusal(scope_selections())
 
 
 def _require_foreground(hwnd: int, *, strict: bool = False) -> dict | None:
@@ -3705,6 +3779,10 @@ def desktop_drag_screen(x1: int, y1: int, x2: int, y2: int, speed: float = 1.0) 
     for name, value in (("x1", x1), ("y1", y1), ("x2", x2), ("y2", y2)):
         if not isinstance(value, int) or value < 0 or value > 20000:
             return {"success": False, "error": f"{name} 必须是屏幕像素整数"}
+    for x, y in ((x1, y1), (x2, y2)):
+        scope = scope_block_point(x, y)
+        if scope:
+            return scope
     # Long drags were taking distance/200 seconds (2500px -> ~13s). For file
     # drags the human-like slowdown buys nothing, so the default target is ~2s.
     distance = ((x2 - x1) ** 2 + (y2 - y1) ** 2) ** 0.5

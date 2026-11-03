@@ -2,10 +2,13 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { installCompanionSelection } from '../companion-state.js'
 
+const a = { window_id: 'win-a', title: '微信', exe: 'Weixin.exe', pid: 23744, hwnd: 67282 }
+const b = { window_id: 'win-b', title: '记事本', exe: 'notepad.exe', pid: 100, hwnd: 9001 }
+
 function fixture() {
   const state = {
     section: { companionSelection: '' }, revision: 1,
-    scope: { locked: false }, mutations: [], requests: [],
+    scope: { locked: false, selections: [] }, mutations: [], requests: [],
   }
   const settings = {
     describe: () => [{ ns: 'doraemon', value: { ...state.section }, revision: state.revision }],
@@ -22,8 +25,15 @@ function fixture() {
     request: async (path, owner, options) => {
       state.requests.push({ path, owner, options })
       if (path === '/scope') return state.scope
+      const match = path.match(/^\/windows\/([^/]+)\/unlock$/)
+      if (match) {
+        const id = decodeURIComponent(match[1])
+        state.scope.selections = state.scope.selections.filter((item) => item.window_id !== id)
+        state.scope.locked = state.scope.selections.length > 0
+        return { success: true }
+      }
       if (path === '/windows/unlock') {
-        state.scope = { locked: false }
+        state.scope = { locked: false, selections: [] }
         return { success: true }
       }
       throw new Error(`unexpected path ${path}`)
@@ -33,42 +43,53 @@ function fixture() {
   return { state, sync }
 }
 
-test('selection synchronizer mirrors a locked window into the composer field', async () => {
+test('selection synchronizer mirrors every authorized window', async () => {
   const { state, sync } = fixture()
-  state.scope = {
-    locked: true, window_id: 'window-7',
-    window: { title: '微信', exe: 'Weixin.exe', pid: 23744, hwnd: 67282 },
-  }
+  state.scope = { locked: true, selections: [a, b] }
   await sync.sync()
   const selected = JSON.parse(state.section.companionSelection)
-  assert.equal(selected.title, '微信')
-  assert.equal(selected.exe, 'Weixin.exe')
-  assert.equal(selected.hwnd, 67282)
+  assert.deepEqual(selected.map((item) => item.window_id), ['win-a', 'win-b'])
+  assert.equal(selected[0].title, '微信')
   await sync.dispose()
 })
 
-test('clearing the chip calls the kernel unlock instead of only hiding text', async () => {
+test('removing one chip unlocks only that selection', async () => {
   const { state, sync } = fixture()
-  state.scope = {
-    locked: true, window_id: 'window-7',
-    window: { title: '微信', exe: 'Weixin.exe', pid: 23744, hwnd: 67282 },
-  }
+  state.scope = { locked: true, selections: [a, b] }
   await sync.sync()
-  state.section.companionSelection = '' // what the Client cancel button writes
+  state.section.companionSelection = JSON.stringify([b])
   await sync.sync()
-  assert.ok(state.requests.some((request) => request.path === '/windows/unlock'))
-  assert.equal(state.section.companionSelection, '')
+  assert.deepEqual(state.requests.filter((r) => r.path.endsWith('/unlock')).map((r) => r.path), ['/windows/win-a/unlock'])
+  assert.deepEqual(JSON.parse(state.section.companionSelection).map((item) => item.window_id), ['win-b'])
+  assert.equal(state.scope.locked, true)
+  await sync.dispose()
+})
+
+test('clearing all chips unlocks every selection', async () => {
+  const { state, sync } = fixture()
+  state.scope = { locked: true, selections: [a, b] }
+  await sync.sync()
+  state.section.companionSelection = ''
+  await sync.sync()
+  assert.equal(state.requests.filter((r) => r.path.endsWith('/unlock')).length, 2)
+  assert.equal(state.section.companionSelection, '[]')
+  assert.equal(state.scope.locked, false)
+  await sync.dispose()
+})
+
+test('legacy single-window scope is mirrored as a one-item array', async () => {
+  const { state, sync } = fixture()
+  state.scope = { locked: true, window_id: a.window_id, window: a }
+  await sync.sync()
+  assert.deepEqual(JSON.parse(state.section.companionSelection).map((item) => item.window_id), ['win-a'])
   await sync.dispose()
 })
 
 test('an initially empty field does not cancel a pre-existing kernel lock', async () => {
   const { state, sync } = fixture()
-  state.scope = {
-    locked: true, window_id: 'window-7',
-    window: { title: '微信', exe: 'Weixin.exe', pid: 1, hwnd: 2 },
-  }
+  state.scope = { locked: true, selections: [a] }
   await sync.sync()
-  assert.equal(state.requests.filter((request) => request.path === '/windows/unlock').length, 0)
+  assert.equal(state.requests.filter((request) => request.path.endsWith('/unlock')).length, 0)
   await sync.dispose()
 })
 

@@ -157,6 +157,19 @@ class CursorOverlay:
                 self._born = now
                 self._action_until = 0
             self._visible = True
+            # Close the click window synchronously, not on the next animation
+            # frame: a task may start between WM_NCHITTEST and WM_LBUTTONUP.
+            self._clickable_now = False
+            hwnd = self._hwnd
+        user32 = getattr(self, "_user32", None)
+        if hwnd and user32:
+            style = user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
+            user32.SetWindowLongW(hwnd, GWL_EXSTYLE, style | WS_EX_TRANSPARENT)
+
+    def companion_interactive(self) -> bool:
+        """Whether the mascot may open a picker at this exact moment."""
+        with self._lock:
+            return bool(self._companion and not self._tasks and not self._capture_depth)
 
     def end_task(self, owner):
         with self._lock:

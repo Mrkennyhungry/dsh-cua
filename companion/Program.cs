@@ -73,6 +73,23 @@ internal static class Program
         }
     }
 
+    public static void FinishBatch(string kind, IReadOnlyList<PickerItem> items)
+    {
+        var result = new Dictionary<string, object?>
+        {
+            ["kind"] = kind == "window" ? "windows" : "apps",
+            ["items"] = items.Select(item => new Dictionary<string, object?>
+            {
+                ["kind"] = item.Kind, ["title"] = item.Title, ["name"] = item.Title,
+                ["hwnd"] = item.Hwnd == 0 ? null : item.Hwnd,
+                ["path"] = string.IsNullOrEmpty(item.Path) ? null : item.Path,
+            }).ToList(),
+        };
+        if (!TryWrite(result)) return;
+        CloseAll();
+        if (!_server) Shutdown();
+    }
+
     public static void Cancel()
     {
         if (!TryWrite(new Dictionary<string, object?> { ["kind"] = "cancel" }))

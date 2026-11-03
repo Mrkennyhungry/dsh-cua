@@ -61,6 +61,59 @@ class ScopeLockTests(unittest.TestCase):
             desktop_tools.lock_window("win-a")
             self.assertIsNone(desktop_tools.scope_block("popup"))
 
+    def test_lock_adds_and_unlock_one_preserves_the_other(self):
+        infos = {
+            "win-a": {"title": "记事本", "exe": "notepad.exe", "hwnd": 10, "pid": 99},
+            "win-b": {"title": "浏览器", "exe": "msedge.exe", "hwnd": 20, "pid": 100},
+            "win-c": {"title": "终端", "exe": "cmd.exe", "hwnd": 30, "pid": 101},
+        }
+        with mock.patch.object(desktop_tools, "bound_window_info",
+                               side_effect=lambda window_id: infos.get(window_id, {})):
+            desktop_tools.lock_window("win-a")
+            desktop_tools.lock_window("win-b")
+            self.assertEqual(desktop_tools.locked_window_ids(), ["win-a", "win-b"])
+            self.assertIsNone(desktop_tools.scope_block("win-b"))
+            result = desktop_tools.unlock_window("win-a")
+            self.assertEqual(result["unlocked"], "win-a")
+            self.assertEqual(desktop_tools.locked_window_ids(), ["win-b"])
+            blocked = desktop_tools.scope_block("win-c")
+        self.assertIn("WINDOW_SCOPE_LOCKED", blocked["error"])
+
+    def test_absolute_pixel_input_cannot_bypass_scope(self):
+        infos = {
+            "win-a": {"title": "记事本", "exe": "notepad.exe", "hwnd": 10, "pid": 99},
+        }
+        with mock.patch.object(desktop_tools, "bound_window_info", return_value=infos["win-a"]), \
+                mock.patch.object(desktop_tools, "_window_info",
+                                  side_effect=lambda hwnd: infos["win-a"] if hwnd == 10 else {
+                                      "title": "浏览器", "exe": "msedge.exe", "hwnd": 20, "pid": 100}), \
+                mock.patch("win32gui.WindowFromPoint", side_effect=lambda point: point[0]), \
+                mock.patch("win32gui.GetAncestor", side_effect=lambda hwnd, _kind: hwnd):
+            desktop_tools.lock_window("win-a")
+            self.assertIsNone(desktop_tools.scope_block_point(10, 100))
+            blocked = desktop_tools.scope_block_point(20, 100)
+        self.assertIn("WINDOW_SCOPE_LOCKED", blocked["error"])
+
+    def test_empty_scope_allows_launch_and_absolute_pixel_input(self):
+        self.assertIsNone(desktop_tools.scope_launch_refusal("C:/Windows/System32/notepad.exe"))
+        self.assertIsNone(desktop_tools.scope_block_point(20, 100))
+
+    def test_launch_scope_is_user_controlled_and_names_current_scope(self):
+        info = {"title": "iOA", "exe": "iOA.exe", "hwnd": 10, "pid": 99}
+        with mock.patch.object(desktop_tools, "bound_window_info", return_value=info):
+            desktop_tools.lock_window("win-ioa")
+        blocked = desktop_tools.scope_launch_refusal("C:/Windows/System32/notepad.exe")
+        self.assertIn("WINDOW_SCOPE_LOCKED", blocked["error"])
+        self.assertIn("iOA", blocked["error"])
+        self.assertIn("右上角吉祥物", blocked["error"])
+        self.assertIn("AI 不得自行添加或解除授权", blocked["error"])
+
+    def test_launch_of_the_already_authorized_application_is_allowed(self):
+        info = {"title": "记事本", "exe": "notepad.exe", "hwnd": 10, "pid": 99}
+        with mock.patch.object(desktop_tools, "bound_window_info", return_value=info):
+            desktop_tools.lock_window("win-notepad")
+        self.assertIsNone(desktop_tools.scope_launch_refusal("C:/Windows/System32/notepad.exe"))
+
     def test_unlock_restores_access(self):
         info = {"window_id": "win-a", "title": "t", "exe": "e", "hwnd": 1, "pid": 2}
         with mock.patch.object(desktop_tools, "bound_window_info", return_value=info):

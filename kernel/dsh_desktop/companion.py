@@ -10,6 +10,8 @@ Hotkeys (global, best effort):
 """
 from __future__ import annotations
 
+import ctypes
+from ctypes import wintypes
 import json
 import logging
 import os
@@ -21,17 +23,66 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-_HOTKEY_PICK = "<ctrl>+<alt>+w"
-_HOTKEY_STOP = "<ctrl>+<alt>+q"
-
 _ID_PICK = 900
 _ID_UNLOCK = 901
 _ID_STOP = 902
 _ID_RESUME = 903
+_ID_CLOSE = 904
 
 
 _SYSTEM_FOLDERS = {"accessibility", "system tools", "windows tools",
                    "windows powershell", "administrative tools"}
+
+
+class _Win32Hotkeys:
+    """Small RegisterHotKey message loop; no global keyboard hook is involved."""
+
+    def __init__(self, actions: dict[str, object]) -> None:
+        self._actions = actions
+        self._thread = None
+        self._thread_id = 0
+        self._stop = False
+
+    def start(self) -> None:
+        self._thread = threading.Thread(target=self._run, daemon=True,
+                                        name="companion-win32-hotkeys")
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop = True
+        if self._thread_id:
+            ctypes.windll.user32.PostThreadMessageW(self._thread_id, 0x0012, 0, 0)  # WM_QUIT
+
+    def _run(self) -> None:
+        user32 = ctypes.windll.user32
+        kernel32 = ctypes.windll.kernel32
+        self._thread_id = kernel32.GetCurrentThreadId()
+        registered: list[int] = []
+        try:
+            # MOD_ALT | MOD_CONTROL | MOD_NOREPEAT
+            modifiers = 0x0001 | 0x0002 | 0x4000
+            keys = list(self._actions)
+            for hotkey_id, char in enumerate(keys, start=1):
+                if not user32.RegisterHotKey(None, hotkey_id, modifiers, ord(char.upper())):
+                    raise ctypes.WinError()
+                registered.append(hotkey_id)
+            message = wintypes.MSG()
+            while not self._stop:
+                result = user32.GetMessageW(ctypes.byref(message), None, 0, 0)
+                if result <= 0:
+                    break
+                if message.message == 0x0312:  # WM_HOTKEY
+                    index = int(message.wParam) - 1
+                    char = keys[index] if 0 <= index < len(keys) else ""
+                    action = self._actions.get(char)
+                    if action is not None:
+                        threading.Thread(target=action, daemon=True,
+                                         name=f"companion-hotkey-{char}").start()
+        except Exception:  # noqa: BLE001 - hotkeys are optional, never kill the kernel
+            logger.warning("Win32 hotkey loop failed", exc_info=True)
+        finally:
+            for hotkey_id in registered:
+                user32.UnregisterHotKey(None, hotkey_id)
 
 
 def _installed_apps(limit: int = 32) -> list[dict]:
@@ -178,6 +229,38 @@ class Companion:
         except Exception:  # noqa: BLE001
             logger.debug("failed to clear companion window lock", exc_info=True)
 
+    def dismiss(self) -> None:
+        """Hide only the mascot; keep its restore hotkey and the kernel alive."""
+        overlay = self._overlay
+        self._menu_open = False
+        if overlay is not None:
+            overlay.set_companion(False)
+            overlay.hide()
+        try:
+            import win32con
+            import win32gui
+
+            def close_picker(hwnd, _):
+                if win32gui.GetClassName(hwnd).startswith("Avalonia-") and win32gui.IsWindowVisible(hwnd):
+                    win32gui.PostMessage(hwnd, win32con.WM_CLOSE, 0, 0)
+                return True
+
+            win32gui.EnumWindows(close_picker, None)
+        except Exception:  # noqa: BLE001 - hiding the mascot must still work
+            logger.debug("failed to close picker while hiding mascot", exc_info=True)
+
+    def toggle_mascot(self) -> None:
+        overlay = self._overlay
+        logger.info("companion: toggle mascot requested")
+        if overlay is None:
+            return
+        # _visible is a task flag and may be False while companion mode still
+        # keeps the window on screen. The companion flag is the real toggle state.
+        if getattr(overlay, "_companion", False):
+            self.dismiss()
+        else:
+            overlay.set_companion(True, self.open_menu)
+
     def _start_ui_server(self) -> None:
         """Start the Arc runtime once; each click then only shows a window."""
         if self._ui_process is not None and self._ui_process.poll() is None:
@@ -280,25 +363,23 @@ class Companion:
 
     def _start_hotkeys(self) -> None:
         try:
-            from pynput import keyboard
-        except Exception as exc:  # noqa: BLE001 - hotkeys are optional
-            logger.warning("global hotkeys unavailable: %s", exc)
-            return
-        try:
-            listener = keyboard.GlobalHotKeys({
-                _HOTKEY_PICK: self.pick_interactively,
-                _HOTKEY_STOP: self.stop_everything,
+            listener = _Win32Hotkeys({
+                "w": self.pick_interactively,
+                "q": self.stop_everything,
+                "m": self.toggle_mascot,
             })
-            listener.daemon = True
             listener.start()
             self._hotkeys = listener
-            logger.info("global hotkeys active: Ctrl+Alt+W pick, Ctrl+Alt+Q stop")
+            logger.info("global hotkeys active: Ctrl+Alt+W pick, Ctrl+Alt+Q stop, Ctrl+Alt+M mascot")
         except Exception as exc:  # noqa: BLE001
             logger.warning("global hotkeys failed to start: %s", exc)
 
     # ── actions ──────────────────────────────────────────────────────────
     def open_menu(self) -> None:
         """Show the Arc picker next to the mascot (called from a worker thread)."""
+        overlay = self._overlay
+        if overlay is None or not overlay.companion_interactive():
+            return
         if not self._menu_guard.acquire(blocking=False):
             return
         # This must happen before any cache work or IPC: the sprite acknowledges
@@ -326,14 +407,13 @@ class Companion:
             logger.warning("Arc companion UI is unavailable")
             self._say("error", 1.5)
             return
-        locked = dt.locked_window_id()
-        locked_info = dt.bound_window_info(locked) if locked else {}
+        selected_count = len(dt.locked_window_ids())
         anchor = self._menu_anchor()
         request = {
             "anchor_x": anchor[0],
             "anchor_y": anchor[1],
-            "locked_label": (f"{locked_info.get('title', '')} ({locked_info.get('exe', '')})"
-                             if locked_info else ""),
+            "locked_label": (f"已授权 {selected_count} 个窗口/应用 · 点击清空"
+                             if selected_count else ""),
             "stopped": input_gate.stop_engaged(),
             "windows": self._window_items(dt),
             "apps": self._app_items(),
@@ -352,11 +432,16 @@ class Companion:
         kind = result.get("kind")
         if kind == "action":
             action = {"pick": _ID_PICK, "unlock": _ID_UNLOCK,
-                      "stop": _ID_STOP, "resume": _ID_RESUME}.get(result.get("action"))
+                      "stop": _ID_STOP, "resume": _ID_RESUME,
+                      "close": _ID_CLOSE}.get(result.get("action"))
             if action is not None:
                 self._apply(action, {}, dt)
         elif kind in {"window", "app"}:
             self._apply(-1, {"__direct__": (kind, result)}, dt)
+        elif kind in {"windows", "apps"}:
+            for item in result.get("items") or []:
+                self._apply(-1, {"__direct__": (kind[:-1], item)}, dt)
+            self._say("done", 0.6)
         elif kind == "error":
             logger.warning("Arc companion UI failed: %s", result.get("error"))
             self._say("error", 1.5)
@@ -390,6 +475,9 @@ class Companion:
             input_gate.clear_stop()
             self._say("idle")
             return
+        if choice == _ID_CLOSE:
+            self.dismiss()
+            return
         if "__direct__" in actions:
             kind, payload = actions["__direct__"]
         else:
@@ -406,6 +494,13 @@ class Companion:
             started = dt.desktop_launch_app(str(payload["path"]))
             logger.info("companion: launched %s -> %s", payload.get("name"), started.get("success"))
             if started.get("success"):
+                tracked = (started.get("tracked_windows") or [{}])[0]
+                if tracked.get("hwnd"):
+                    bound = dt.desktop_pick_window(hwnd=int(tracked["hwnd"]))
+                    if bound.get("window_id"):
+                        dt.lock_window(bound["window_id"])
+                        self._say("done", 0.6)
+                        return
                 self._bind_launched(payload.get("name")
                                     or Path(str(payload["path"])).stem, dt)
 

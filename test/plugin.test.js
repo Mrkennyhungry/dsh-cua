@@ -198,6 +198,52 @@ test('window tools forward normalized coordinates and reject out-of-range input'
   } finally { globalThis.fetch = original }
 })
 
+test('model cannot add or clear window authorization itself', async () => {
+  const original = globalThis.fetch
+  const calls = []
+  const selections = [{ window_id: 'win-ioa', title: 'iOA', exe: 'iOA.exe', hwnd: 10, pid: 99 }]
+  globalThis.fetch = async (url, options) => {
+    calls.push({ url: String(url), options })
+    return Response.json({ locked: true, selections, window_id: 'win-ioa', window: selections[0] })
+  }
+  try {
+    const { tools } = setup()
+    const locked = await tools.get('doraemon_windows').execute(
+      { action: 'lock', window_id: 'win-wecom' }, execution())
+    const unlocked = await tools.get('doraemon_windows').execute(
+      { action: 'unlock', window_id: 'win-ioa' }, execution())
+    for (const result of [locked, unlocked]) {
+      assert.equal(result.success, false)
+      assert.equal(result.effect, 'refused')
+      assert.equal(result.user_action_required, true)
+      assert.match(result.error, /WINDOW_SCOPE_USER_ACTION_REQUIRED/)
+      assert.match(result.error, /iOA/)
+      assert.match(result.error, /右上角吉祥物/)
+    }
+    assert.equal(calls.filter((call) => call.url.endsWith('/lock') || call.url.endsWith('/unlock')).length, 0)
+    const scope = await tools.get('doraemon_windows').execute({ action: 'scope' }, execution())
+    assert.equal(scope.selections[0].title, 'iOA')
+  } finally { globalThis.fetch = original }
+})
+
+test('empty authorization scope leaves normal window operations unrestricted', async () => {
+  const original = globalThis.fetch
+  const calls = []
+  globalThis.fetch = async (url, options) => {
+    calls.push({ url: String(url), options })
+    return Response.json({ success: true, locked: false, selections: [], windows: [] })
+  }
+  try {
+    const { tools } = setup()
+    const listed = await tools.get('doraemon_windows').execute({ action: 'list' }, execution())
+    assert.equal(listed.success, true)
+    assert.ok(calls.some((call) => call.url.endsWith('/windows')))
+    const scope = await tools.get('doraemon_windows').execute({ action: 'scope' }, execution())
+    assert.equal(scope.locked, false)
+    assert.deepEqual(scope.selections, [])
+  } finally { globalThis.fetch = original }
+})
+
 test('owner is bound to stable session.id, not model arguments', () => {
   assert.match(ownerOf(execution()), /^[a-f0-9]{64}$/)
   assert.notEqual(ownerOf(execution('other-session')), ownerOf(execution()))

@@ -802,6 +802,12 @@ def create_router(eternity) -> APIRouter:
     # Results keep the tool's own {"success": false, "error": ...} shape: a
     # rejected action is data the model can read, not an HTTP failure.
     def invoke(fn, *args, **kwargs):
+        # Read and write routes both honor scope. Keeping this only in act()
+        # left activate/close/analyze and several UIA paths as bypasses.
+        if args and isinstance(args[0], str) and args[0].startswith("win-"):
+            scope = desktop_tools.scope_block(args[0])
+            if scope:
+                return scope
         try:
             return fn(*args, **kwargs)
         except Exception as exc:  # noqa: BLE001 - normalised for the client
@@ -1160,8 +1166,12 @@ def create_router(eternity) -> APIRouter:
 
     @router.post("/windows/{window_id}/lock")
     def lock_window(window_id: str):
-        """Kernel-wide lock: every action on another window is refused."""
+        """Add one application/window to the kernel-wide authorized set."""
         return desktop_tools.lock_window(window_id)
+
+    @router.post("/windows/{window_id}/unlock")
+    def unlock_one_window(window_id: str):
+        return desktop_tools.unlock_window(window_id)
 
     @router.post("/windows/unlock")
     def unlock_window():
@@ -1169,12 +1179,12 @@ def create_router(eternity) -> APIRouter:
 
     @router.get("/scope")
     def scope_status():
-        """Which window the kernel is locked to, plus the emergency-stop flag."""
-        locked = desktop_tools.locked_window_id()
-        info = (desktop_tools.bound_window_info(locked) or {}) if locked else {}
-        return {"locked": bool(locked), "window_id": locked,
-                "window": {k: info.get(k) for k in ("title", "exe", "pid", "hwnd")} if info else None,
-                "stopped": input_gate.stop_engaged()}
+        """Authorized applications/windows, plus legacy single-selection fields."""
+        selections = desktop_tools.scope_selections()
+        first = selections[0] if selections else None
+        return {"locked": bool(selections), "window_id": first.get("window_id") if first else None,
+                "window": first, "selections": selections,
+                "scope": "applications", "stopped": input_gate.stop_engaged()}
 
     @router.post("/scope/resume")
     def resume_after_stop():
@@ -1968,6 +1978,9 @@ def create_router(eternity) -> APIRouter:
 
     @router.post("/apps/launch")
     def launch_app(req: AppLaunchRequest, owner: str = Depends(authorize)):
+        scope = desktop_tools.scope_launch_refusal(req.shortcut_path)
+        if scope:
+            return scope
         if req.scoped:
             return invoke(desktop_tools.desktop_launch_app, req.shortcut_path, scoped=True, scope_owner=owner)
         return invoke(desktop_tools.desktop_launch_app, req.shortcut_path, scope_owner=owner)

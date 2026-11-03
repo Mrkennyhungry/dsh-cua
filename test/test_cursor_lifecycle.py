@@ -40,6 +40,20 @@ class CommanderLifecycleTest(unittest.TestCase):
         with patch('psutil.Process',side_effect=__import__('psutil').NoSuchProcess(123)):
             self.c._expire_tasks(time.monotonic()+1)
         self.assertFalse(self.c.visible)
+    def test_task_disables_companion_clicks_before_the_next_frame(self):
+        from unittest.mock import Mock
+        from dsh_desktop.cursor_overlay import GWL_EXSTYLE, WS_EX_TRANSPARENT
+        self.c._primary_dock=lambda:(400,20)
+        self.c.set_companion(True,lambda:None)
+        self.c._clickable_now=True
+        self.c._hwnd=123
+        user32=Mock()
+        user32.GetWindowLongW.return_value=0
+        self.c._user32=user32
+        self.c.begin_task('one')
+        self.assertFalse(self.c._clickable_now)
+        self.assertFalse(self.c.companion_interactive())
+        user32.SetWindowLongW.assert_called_once_with(123,GWL_EXSTYLE,WS_EX_TRANSPARENT)
     def test_capture_guard_restores_after_failure(self):
         with patch('dsh_desktop.cursor_overlay.time.sleep'):
             with self.assertRaises(RuntimeError):

@@ -438,9 +438,9 @@ export function apply(ctx, config) {
 
   register(defineTool({
     name: 'doraemon_windows',
-    description: 'List, bind, activate and unbind desktop windows through the local Doraemon kernel. Bind first (action=bind with an hwnd from action=list, or action=foreground for the current foreground window), then pass the returned window_id to doraemon_analyze / doraemon_uia / doraemon_click / doraemon_type / doraemon_key / doraemon_scroll / doraemon_swipe. action=lock pins the kernel to one bound window: every later action on a different window is refused with WINDOW_SCOPE_LOCKED until action=unlock, which is how a run is kept inside the window the user chose. action=scope reports the lock and the emergency-stop flag.',
+    description: 'List, bind, activate and unbind desktop windows through the local Doraemon kernel. Bind first, then pass window_id to the action tools. action=scope is read-only: an empty selections array means no window restriction, so every window is allowed; a non-empty array is the user-authorized set. Only the user may add or remove authorization through the mascot or composer chips. Never call lock/unlock to expand or clear this set yourself. If the requested target is outside scope, report the current authorized names and ask the user to add it through the mascot or remove the current chips.',
     parameters: {
-      action: { type: 'string', required: true, description: 'list | bound | bind | foreground | activate | unbind | lock | unlock | scope' },
+      action: { type: 'string', required: true, description: 'list | bound | bind | foreground | activate | unbind | scope' },
       hwnd: { type: 'number', description: 'Native window handle for action=bind, as returned by action=list.' },
       label: { type: 'string', description: 'Title or process substring for action=bind or foreground.' },
       window_id: { type: 'string', description: 'Bound window id for action=activate or unbind.' },
@@ -464,16 +464,26 @@ export function apply(ctx, config) {
         })
       }
       if (action === 'scope') return bridge.request('/scope', owner, { signal: exec.signal })
-      if (action === 'unlock') return bridge.request('/windows/unlock', owner, { body: {}, signal: exec.signal })
+      if (action === 'lock' || action === 'unlock') {
+        // Authorization is a user-only decision. Keep these actions refused for
+        // backward compatibility instead of letting a model widen its own scope.
+        let scope = null
+        try { scope = await bridge.request('/scope', owner, { signal: exec.signal }) } catch { /* best effort context */ }
+        const entries = scope?.selections || (scope?.window ? [scope.window] : [])
+        const names = entries.map((entry) => entry.title || entry.exe).filter(Boolean).join('、')
+        return {
+          success: false, effect: 'refused', user_action_required: true, current_scope: scope,
+          error: `WINDOW_SCOPE_USER_ACTION_REQUIRED: 窗口/应用授权只能由用户修改，AI 不得自行添加或解除。${names ? `当前仅限：${names}。` : '当前未限定窗口，正常操作不受窗口限制。'}如需操作其他窗口，请告诉用户点击右上角吉祥物添加，或在输入框的选择标签中取消现有限定。`,
+        }
+      }
       const id = boundWindowId(args.window_id)
-      if (action === 'lock') return bridge.request(`/windows/${id}/lock`, owner, { body: {}, signal: exec.signal })
       if (action === 'unbind') return bridge.request(`/windows/${id}/unbind`, owner, { body: {}, signal: exec.signal })
       if (action === 'activate') {
         const wait = args.wait === undefined ? 1 : Number(args.wait)
         if (!Number.isFinite(wait) || wait < 0 || wait > 10) throw new Error('wait must be between 0 and 10 seconds')
         return bridge.request(`/windows/${id}/activate`, owner, { body: { wait }, signal: exec.signal })
       }
-      throw new Error('Unknown action: use list, bound, bind, foreground, activate or unbind')
+      throw new Error('Unknown action: use list, bound, bind, foreground, activate, unbind or scope')
     },
   }))
 
@@ -830,7 +840,7 @@ export function apply(ctx, config) {
 
   register(defineTool({
     name: 'doraemon_apps',
-    description: 'Find or launch a local application through the kernel. action=find probes processes, windows, shortcuts and uninstall entries. action=launch starts a shortcut or system executable and confirms an attributable new window. If launch_uncertain is returned, inspect the existing windows before deciding what to do; do not blindly retry.',
+    description: 'Find or launch a local application through the kernel. action=find probes processes, windows, shortcuts and uninstall entries. action=launch starts a shortcut or system executable and confirms an attributable new window. With no user window scope, any app may launch. When a scope exists, only an already-authorized app may launch; a different app is refused with instructions for the user to add it through the mascot. If launch_uncertain is returned, inspect the existing windows before deciding what to do; do not blindly retry.',
     parameters: {
       action: { type: 'string', required: true, description: 'find | launch' },
       name: { type: 'string', description: 'App name or process name for action=find.' },
