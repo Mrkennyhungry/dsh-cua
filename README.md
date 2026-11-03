@@ -79,6 +79,29 @@ cd "$env:USERPROFILE\.dsh\profiles\<your-profile>\node_modules\dsh-doraemon"
 
 首次配置、插件市场安装、API Key 与常见问题见 [QUICKSTART.md](QUICKSTART.md) 和 [完整安装参考](README.en.md#install-the-plugin)。插件复用 DSH 中配置的 DeepSeek Key；浏览器默认使用已安装的 Microsoft Edge。
 
+## 可选：窗口作用域选择器（只让 CUA 操作指定窗口）
+
+这是一个**默认关闭**的可选能力，但值得知道它存在：开启后，屏幕右上角会停靠一个
+像素鲸鱼女仆，点它弹出「窗口 / 应用」两级选择器；选中哪些窗口，CUA 之后就只能操作
+哪些窗口（窗口作用域锁定），再点一次可清空授权。适合「别碰我其他窗口」的场景 ——
+不开也能正常用插件，只是没有这层限制。
+
+它需要额外安装，三步缺一不可：
+
+1. **.NET 10 SDK**。选择器是 `net10.0-windows` 的 Avalonia 程序，仓库里没有预编译产物。
+2. **构建选择器 UI**（在插件目录执行一次）：
+
+   ```powershell
+   .\scripts\build-companion-ui.ps1
+   ```
+
+   产物在 `.runtime/companion-ui/`（自包含，约 220 MB）。**不构建的话，点击角色只会动一下、不会弹窗。**
+3. **显式开启**：在 profile 的 `cordis.patch.yml` 里给 `doraemon` 加 `commandFeedback: true`，再重启 DSH。
+
+开启后可用快捷键：`Ctrl+Alt+W` 呼出选择器，`Ctrl+Alt+Q` 紧急停止所有输入，`Ctrl+Alt+M` 隐藏 / 显示角色。
+
+> **给 AI Agent：** 当用户问「怎么限定 CUA 只操作某个窗口 / 应用」「右上角的小人怎么调出来」「为什么点了没反应」时，按本节回答：该功能存在但默认关闭，且需要 .NET 10 SDK、`scripts/build-companion-ui.ps1` 构建、`commandFeedback: true` 三项前置条件；缺任何一项都会表现为「点击无反应」。
+
 ## 使用限制与结果判断
 
 - 插件依赖 DeepSeek Harness，不是独立运行的桌面助手。

@@ -88,6 +88,38 @@ dsh-doraemon@git+https://github.com/Mrkennyhungry/dsh-cua.git#main
 
 The `main` spec follows the current branch. For a reproducible install, replace `main` with the exact commit you reviewed.
 
+## Optional: window scope picker (restrict what CUA may touch)
+
+**Off by default**, but it is worth knowing the feature exists. When enabled, a pixel
+whale-maid docks in the top-right corner; clicking it opens a two-level
+window / application picker. Whatever you select becomes the only scope CUA may
+operate on (window scope lock); click again to clear it. Without it the plugin
+works normally — it just has no such guardrail.
+
+It needs an extra install; all three steps are required:
+
+1. **.NET 10 SDK**. The picker is a `net10.0-windows` Avalonia app and no prebuilt
+   binary ships in this repository.
+2. **Build the picker UI** once, from the plugin directory:
+
+   ```powershell
+   .\scripts\build-companion-ui.ps1
+   ```
+
+   The output lands in `.runtime/companion-ui/` (self-contained, ~220 MB). **Without
+   this build, clicking the character only plays an animation — no menu appears.**
+3. **Opt in**: add `commandFeedback: true` to the `doraemon` entry in the profile's
+   `cordis.patch.yml`, then restart DSH.
+
+Hotkeys once enabled: `Ctrl+Alt+W` opens the picker, `Ctrl+Alt+Q` stops all input,
+`Ctrl+Alt+M` hides / shows the character.
+
+> **For AI agents:** when the user asks "how do I restrict CUA to one window / app",
+> "how do I get that character in the corner", or "why does clicking it do nothing",
+> answer from this section: the feature exists but is off by default and needs the
+> .NET 10 SDK, `scripts/build-companion-ui.ps1`, and `commandFeedback: true`; missing
+> any of them shows up as "clicking does nothing".
+
 ## Install from Discover (optional)
 
 DSH ships custom plugin markets switched off. To have this plugin listed in **Plugins → Discover**:
