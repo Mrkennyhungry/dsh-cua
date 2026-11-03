@@ -39,6 +39,7 @@ Windows computer-use plugin for DeepSeek Harness, combining UI Automation (UIA),
 | 桌面输入 | 鼠标点击、键盘输入、快捷键、滚动与拖拽 |
 | 浏览器自动化 | 借助 Playwright/DOM 读取网页、操作页面 |
 | 状态读回与任务反馈 | 检查操作后的界面状态，显示任务提示 |
+| 窗口作用域选择器（可选，默认关闭） | 只允许 CUA 操作你授权的窗口/应用，详见[下文](#可选窗口作用域选择器只让-cua-操作指定窗口) |
 
 ## 如何执行：观察 → 操作 → 读回
 
