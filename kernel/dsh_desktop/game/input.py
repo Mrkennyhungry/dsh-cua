@@ -18,8 +18,18 @@ def _read_clipboard_text() -> str | None:
     """Current clipboard text, or None when it holds something else (or is busy)."""
     user32 = ctypes.windll.user32
     kernel32 = ctypes.windll.kernel32
+    # On 64-bit Windows an HGLOBAL is a pointer-sized value. Without argtypes
+    # ctypes passes it as a 32-bit C int and a handle above 2**31 raises
+    # "ArgumentError: int too long to convert". _write_clipboard_text sets the
+    # same argtypes, but the process-wide ctypes prototype is only configured
+    # once that function has run: type_text reads the clipboard FIRST, so a
+    # fresh kernel always hit the crash on its first paste. Declare them here
+    # too, and pass the handle as an explicit c_void_p.
+    kernel32.GlobalLock.argtypes = [ctypes.c_void_p]
     kernel32.GlobalLock.restype = ctypes.c_void_p
     kernel32.GlobalUnlock.argtypes = [ctypes.c_void_p]
+    user32.OpenClipboard.argtypes = [ctypes.c_void_p]
+    user32.GetClipboardData.argtypes = [ctypes.c_uint]
     user32.GetClipboardData.restype = ctypes.c_void_p
     if not user32.OpenClipboard(None):
         return None
@@ -27,6 +37,7 @@ def _read_clipboard_text() -> str | None:
         handle = user32.GetClipboardData(_CF_UNICODETEXT)
         if not handle:
             return None
+        handle = ctypes.c_void_p(handle)
         pointer = kernel32.GlobalLock(handle)
         if not pointer:
             return None
@@ -34,7 +45,7 @@ def _read_clipboard_text() -> str | None:
             return ctypes.wstring_at(pointer)
         finally:
             kernel32.GlobalUnlock(handle)
-    except (AttributeError, OSError):
+    except (AttributeError, OSError, OverflowError, ValueError, ctypes.ArgumentError):
         return None
     finally:
         user32.CloseClipboard()

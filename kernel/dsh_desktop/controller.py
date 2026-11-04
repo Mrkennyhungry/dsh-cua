@@ -391,6 +391,12 @@ class AppController:
 
         return result
 
+    # Adapters cap a single inline image at ~5 MB. A 4K PNG is ~7.8 MB and was
+    # silently dropped, leaving the caller with only a warning. Re-encode at
+    # generation time instead of relying on the caller to shrink it.
+    INLINE_IMAGE_MAX_BYTES = 4_500_000
+    INLINE_IMAGE_MAX_DIM = 1920
+
     @tool("Read an image file from disk and return base64 content for vision model analysis. Use with image_path from analyze().")
     def read_image(self, path: str) -> dict:
         """
@@ -403,11 +409,38 @@ class AppController:
             return {"error": f"File not found: {path}"}
 
         image_bytes = p.read_bytes()
-        image_b64 = base64.b64encode(image_bytes).decode()
         suffix = p.suffix.lower().lstrip(".")
         mime = "jpeg" if suffix in ("jpg", "jpeg") else suffix
-        logger.info("read_image: mime=%s, size=%d bytes", mime, len(image_bytes))
 
+        if len(image_bytes) > self.INLINE_IMAGE_MAX_BYTES:
+            # Downscale to a 1920 long edge and encode JPEG. Keep trying a lower
+            # quality rather than ever returning a payload the adapter rejects.
+            frame = cv2.imread(str(p), cv2.IMREAD_UNCHANGED)
+            if frame is None:
+                return {"error": f"IMAGE_DECODE_FAILED: {path}"}
+            # JPEG cannot hold an alpha channel; drop it (or promote grayscale).
+            if frame.ndim == 2:
+                frame = cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR)
+            elif frame.shape[2] == 4:
+                frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2BGR)
+            h, w = frame.shape[:2]
+            if max(h, w) > self.INLINE_IMAGE_MAX_DIM:
+                scale = self.INLINE_IMAGE_MAX_DIM / max(h, w)
+                frame = cv2.resize(frame, (max(1, round(w * scale)), max(1, round(h * scale))))
+            for quality in (85, 70, 55):
+                ok, buf = cv2.imencode(".jpeg", frame,
+                                       [int(cv2.IMWRITE_JPEG_QUALITY), quality])
+                if ok and len(buf) <= self.INLINE_IMAGE_MAX_BYTES:
+                    image_bytes, mime = buf.tobytes(), "jpeg"
+                    break
+            else:
+                return {"error": f"IMAGE_TOO_LARGE: {len(image_bytes)} bytes after re-encode"}
+            logger.info("read_image: re-encoded %d -> %d bytes (mime=%s)",
+                        p.stat().st_size, len(image_bytes), mime)
+        else:
+            logger.info("read_image: mime=%s, size=%d bytes", mime, len(image_bytes))
+
+        image_b64 = base64.b64encode(image_bytes).decode()
         return {
             "_multimodal": True,
             "text_summary": f"{path}",

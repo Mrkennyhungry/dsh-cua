@@ -4170,13 +4170,23 @@ def desktop_capture_window(window_id: str) -> dict:
 
     root = Path(getattr(controller.config.workspace, "screenshot_dir", "") or ".")
     date_dir = root / datetime.now().strftime("%Y-%m-%d")
+    height, width = frame.shape[:2]
+    # A 4K full-screen PNG is ~7.8 MB and gets rejected by adapters that cap
+    # inline images at 5 MB. Bound the long edge and store JPEG instead.
+    MAX_DIM = 1920
+    if max(height, width) > MAX_DIM:
+        scale = MAX_DIM / max(height, width)
+        frame = cv2.resize(frame, (max(1, round(width * scale)), max(1, round(height * scale))))
+    height, width = frame.shape[:2]
     try:
         date_dir.mkdir(parents=True, exist_ok=True)
-        path = date_dir / f"capture_{hwnd}_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}.png"
-        cv2.imwrite(str(path), frame)
+        path = date_dir / f"capture_{hwnd}_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}.jpeg"
+        ok, buf = cv2.imencode(".jpeg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), 85])
+        if not ok:
+            return {"success": False, "error": "SAVE_FAILED: jpeg encode failed"}
+        path.write_bytes(buf.tobytes())
     except Exception as exc:  # noqa: BLE001
         return {"success": False, "error": f"SAVE_FAILED: {exc.__class__.__name__}"}
-    height, width = frame.shape[:2]
     return {"success": True, "window_id": window_id, "image_path": str(path),
             "width": int(width), "height": int(height),
             "captured_with": method, "occluded": occluded, "restored": restored,
