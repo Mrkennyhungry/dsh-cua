@@ -46,7 +46,30 @@
 - `web_click` 在点击已发出但随后读取状态失败时返回 `RESULT_UNKNOWN`，这是**未知**，不是失败也不是成功；正确做法是重新 `web_snapshot` 观察，而不是重试点击。
 - 清理报告 `cleanup_success: false` 时，可能只是"目标窗口没关掉"（例如它弹了保存确认框），**不代表数据损坏**。
 
-## 四、未验证的部分（不要当成已保证）
+## 五、历史版本（0.4.5–0.4.7）内置过遥测
+
+**当前版本（0.4.8 起）不包含遥测。** 但 0.4.5、0.4.6、0.4.7 三个发布 tag 里存在过一个
+`kernel/dsh_desktop/telemetry.py`，需要对历史安装负责地说明：
+
+| 项目 | 事实 |
+|---|---|
+| 目标地址 | `https://telemetry.gaott.top/event`，**第三方域名**，不在本项目的官方基础设施内 |
+| 鉴权 | 硬编码的 `dsh_desktop-write-token-2026`（写令牌公开在源码里，任何人都能向该端点提交事件） |
+| 发送内容 | `install_id`（持久 UUID，存于 `~/install_id`）、事件名、版本、OS/arch、时间戳；部分事件附带 `tool_name`、`success`、`error_type`、`error_detail`（**异常消息前 300 字符**）、`tool_call_count`、`duration_seconds`、`model_provider`、`features` 等 |
+| 不含 | 截图、剪贴板、按键、API Key、会话正文 |
+| 默认状态 | 模块级 `enabled = True`；`config.telemetry_enabled` 默认 `False`，但**只有独立入口 `__main__.py` 会把它写回模块**（`__main__.py:290`）。DSH 插件跑的是 `python -m dsh_desktop.dsh_bridge_cli`，该入口从不赋值，因此**走插件路径时默认是开启的**，配置里的关闭项不生效 |
+| 关闭方式（历史版本） | 只能改代码后自行构建；没有对外暴露的可靠开关 |
+| 移除 | `b3a8c27 refactor: drop the usage telemetry module and all its call sites`，首个干净的发布版是 **0.4.8** |
+
+风险评估：
+
+- **不是后门或远程控制**：单向 HTTPS POST（`urllib`，5 秒超时，后台线程，失败静默），没有任何入站通道，也无法影响本机的桌面操作能力。
+- **主要风险是隐私与信任**：一个能控制整台电脑的插件，默认向第三方上报带持久 `install_id` 的使用元数据；`error_detail` 可能夹带文件路径、窗口标题等片段。
+- **写令牌公开**意味着事件可被伪造/污染，但不构成读取他人数据的通道。
+
+建议：安装 0.4.8 及以上（或直接 `#main`）；历史版本请升级，不要仅依赖配置里的开关。
+
+## 六、未验证的部分（不要当成已保证）
 
 - 高权限（High integrity）启动链路用的是计划任务 + 明文 boot 文件，**这不是安全边界**，只是为了让受控应用与内核同身份，避免 UIPI 拦截。
 - `DSH_DESKTOP_LIVE` 相关的手工验证依赖真实桌面会话，CI 不覆盖。

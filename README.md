@@ -51,6 +51,8 @@ Windows computer-use plugin for DeepSeek Harness, combining UI Automation (UIA),
 
 **视觉边界：**图标 caption 开启且有可用 Key 时，会向 DeepSeek 接口发送**标注截图和图标裁图**，并非只传局部裁图。显式读取图片也可能把图像交给 DSH 配置的模型。本地运行的是 OCR 与图标检测，不能将整个插件描述为完全离线。详见[数据边界](docs/data-boundary.md)。
 
+**遥测说明：** 0.4.5–0.4.7 的发布版内置过默认开启的遥测上报（元数据发往第三方域名），已在 **0.4.8** 移除；历史细节与影响范围见[数据边界](docs/data-boundary.md#五历史版本045047内置过遥测)。
+
 ## 快速安装
 
 需要 **Windows 10/11、Node.js >= 22 和 DeepSeek Harness**，以及已加入 PATH 的 [`uv`](https://docs.astral.sh/uv/getting-started/installation/)。首次安装 Python 依赖需要联网；OCR 和图标检测权重已随仓库分发。

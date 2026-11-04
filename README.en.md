@@ -55,6 +55,9 @@ with `commandFeedback: true` on the `doraemon` entry in the profile's
   handling; do not assume every Windows application is supported.
 - Screenshot and tool output can contain private content. Read the data-boundary
   document before use. `effect: "confirmed"` means UI change, not task completion.
+- Releases **0.4.5–0.4.7** bundled a default-on telemetry uploader that posted
+  usage metadata to a third-party host; it was removed in **0.4.8**. See
+  [data boundary](docs/data-boundary.md#五历史版本045047内置过遥测).
 
 **Install in one line** — paste this into **Plugins → Add plugin** in DSH, restart, then run `scripts\bootstrap.ps1` once:
 
@@ -81,7 +84,7 @@ dsh-doraemon@git+https://github.com/Mrkennyhungry/dsh-cua.git#main
 ```json
 {
   "dependencies": {
-    "dsh-doraemon": "git+https://github.com/Mrkennyhungry/dsh-cua.git#v0.4.7"
+    "dsh-doraemon": "git+https://github.com/Mrkennyhungry/dsh-cua.git#v0.4.8"
   }
 }
 ```
