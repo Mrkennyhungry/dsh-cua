@@ -1,5 +1,14 @@
 # dsh-doraemon v0.4.6
 
+> [!WARNING]
+> **Do not install this release. It ships a telemetry uploader that is on by default
+> on the DSH plugin path.** `kernel/dsh_desktop/telemetry.py` posts usage metadata
+> (persistent install id, version, tool names, error digests) to a third party, and
+> the `telemetry_enabled: false` setting never reaches the plugin's entry point.
+> Fixed by default-off in `b648cd3` and removed entirely in `b3a8c27`; the first
+> clean release is **v0.4.8**. See
+> [data boundary](data-boundary.md#五历史版本045047内置过遥测).
+
 Observation payload and click-coordinate release. The kernel is unchanged in what it
 can do; what changed is what it says, and how much of it.
 

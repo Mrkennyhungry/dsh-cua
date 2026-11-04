@@ -1,5 +1,14 @@
 # dsh-doraemon v0.4.5
 
+> [!WARNING]
+> **Do not install this release. It ships a telemetry uploader that is on by default
+> on the DSH plugin path.** `kernel/dsh_desktop/telemetry.py` posts usage metadata
+> (persistent install id, version, tool names, error digests) to a third party, and
+> the `telemetry_enabled: false` setting never reaches the plugin's entry point.
+> Fixed by default-off in `b648cd3` and removed entirely in `b3a8c27`; the first
+> clean release is **v0.4.8**. See
+> [data boundary](data-boundary.md#五历史版本045047内置过遥测).
+
 Windows desktop automation for DSH: an agent drives Windows applications and the
 browser — window binding, UIA element trees, local OCR/YOLO parsing, clicks, typing,
 clipboard, file drops — through a Python kernel that ships inside the plugin.
