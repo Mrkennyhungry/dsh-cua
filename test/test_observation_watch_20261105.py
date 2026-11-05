@@ -104,6 +104,161 @@ class WatchTests(unittest.TestCase):
     def test_since_without_session_is_actionable(self):
         self.assertIn("WATCH_NOT_RUNNING", watch.registry().since("never", 5, 8)["error"])
 
+    def test_bottom_band_is_a_pure_geometric_crop(self):
+        """No detection, no filtering: colour/position must not affect it."""
+        for bg, fg in [((240, 240, 240), (45, 48, 60)),   # dark pill
+                       ((60, 60, 60), (245, 245, 245))]:  # light pill
+            frame = np.full((600, 1000, 3), bg, np.uint8)
+            cv2.rectangle(frame, (350, 530), (650, 566), fg, -1)
+            band = watch._bottom_band(frame)
+            self.assertIsNotNone(band)
+            self.assertEqual(band.shape[1], 1000)
+            self.assertGreater(band.shape[0], 100)   # ~22% of 600
+            self.assertTrue(np.any(band != bg))
+
+    def test_bottom_right_notification_is_kept_in_the_band(self):
+        # Desktop-level notification outside any bound window: full-desktop
+        # sampling plus a full-width band crop keeps it, with no corner bias.
+        frame = np.full((900, 1600, 3), 235, np.uint8)
+        cv2.rectangle(frame, (1180, 730), (1540, 790), (45, 48, 60), -1)
+        band = watch._bottom_band(frame)
+        self.assertIsNotNone(band)
+        self.assertTrue(np.any(band[:, 1180:1540] < 90))
+
+    def test_session_prefers_full_desktop_capture(self):
+        cap = Mock()
+        cap.capture_desktop.return_value = np.full((90, 160, 3), 200, np.uint8)
+        cap.capture.return_value = np.full((40, 40, 3), 100, np.uint8)
+        session = watch.WatchSession("win-x", 1, cap)
+        frame, scope = session._grab()
+        self.assertEqual(scope, "desktop")
+        self.assertEqual(frame.shape[0], 90)
+        self.assertFalse(cap.capture.called)
+
+    def test_session_falls_back_to_window_capture(self):
+        cap = Mock(spec=["capture"])
+        cap.capture.return_value = np.full((40, 40, 3), 100, np.uint8)
+        session = watch.WatchSession("win-x", 1, cap)
+        frame, scope = session._grab()
+        self.assertEqual(scope, "window")
+        self.assertTrue(cap.capture.called)
+
+    def test_band_texts_uses_the_existing_ocr_and_deduplicates(self):
+        parser = Mock(spec=["parse"])
+        parser.parse.return_value = [
+            {"text": "1 个文件格式不支持，已忽略", "bbox": [10, 10, 400, 40]},
+            {"text": "1 个文件格式不支持，已忽略", "bbox": [10, 12, 400, 42]},
+            {"text": "icon", "bbox": [1, 1, 9, 9]},
+        ]
+        controller = Mock()
+        controller.ui_parser = parser
+        from dsh_desktop import desktop_tools
+        with patch.object(desktop_tools, "_controller", return_value=controller):
+            texts = watch._band_texts(np.zeros((60, 800, 3), np.uint8))
+        self.assertTrue(parser.parse.called)
+        self.assertEqual(texts, ["1 个文件格式不支持，已忽略"])
+
+    def test_ocr_covers_every_distinct_band_in_time_order(self):
+        """No score-based ranking may silently drop a toast frame."""
+        session = watch.WatchSession("win-x", 1, Mock())
+        ocrd = []
+
+        def fake_texts(band):
+            dark_cols = np.where(band[0, :, 0] < 100)[0]
+            ocrd.append(int(dark_cols[0] // 100) if len(dark_cols) else -1)
+            return ["noise"]
+
+        with patch.object(watch, "_band_texts", side_effect=fake_texts):
+            for i in range(6):
+                band = np.full((60, 800, 3), 240, np.uint8)
+                band[:, i * 100:(i + 1) * 100] = 30
+                score = 90.0 if i == 2 else 10.0
+                session.frames.append(watch.Frame(time.time() + i, band, 0.2, score, band))
+            session.since(10, 8, expect=("失败",))
+        self.assertEqual(ocrd, [0, 1, 2, 3, 4, 5], "all distinct bands, time ordered")
+
+    def test_identical_bands_are_ocrd_only_once(self):
+        session = watch.WatchSession("win-x", 1, Mock())
+        band = np.full((60, 800, 3), 240, np.uint8)
+        calls = []
+
+        def fake_texts(b):
+            calls.append(1)
+            return ["same message"]
+
+        with patch.object(watch, "_band_texts", side_effect=fake_texts):
+            for i in range(5):
+                session.frames.append(watch.Frame(time.time() + i, band, 0.2, 40.0, band))
+            session.since(10, 8, expect_all=True)
+        self.assertEqual(len(calls), 1)
+
+    def test_band_texts_never_raises_when_ocr_unavailable(self):
+        from dsh_desktop import desktop_tools
+        with patch.object(desktop_tools, "_controller", return_value=None):
+            self.assertEqual(watch._band_texts(np.zeros((60, 800, 3), np.uint8)), [])
+
+    def test_since_returns_keyword_matches_not_a_verdict(self):
+        from pathlib import Path
+        session = watch.WatchSession("win-x", 1, Mock())
+        band = np.full((60, 800, 3), 240, np.uint8)
+        with patch.object(watch, "_band_texts", return_value=["上传失败，请重试"]):
+            session.frames.append(watch.Frame(time.time(), band, 0.2, 40.0, band))
+            r = session.since(10, 8, expect=("失败",))
+        self.assertEqual(r["text_matches"][0]["text"], "上传失败，请重试")
+        self.assertEqual(r["text_matches"][0]["matched_terms"], ["失败"])
+        # The sampler must NOT claim a popup was detected.
+        self.assertNotIn("toast", r)
+        self.assertNotIn("detected", r)
+        self.assertIn("evidence_image", r)
+        self.addCleanup(Path(r["evidence_image"]).unlink, missing_ok=True)
+
+    def test_keyword_signal_keeps_the_message_and_drops_taskbar_noise(self):
+        candidates = [
+            {"ts": 1.0, "text": "29°C", "global": 0.4, "local": 17.0},
+            {"ts": 1.0, "text": "Q搜索", "global": 0.4, "local": 17.0},
+            {"ts": 2.0, "text": "1 个文件格式不支持，已忽略", "global": 0.9, "local": 93.0},
+            {"ts": 2.0, "text": "2026/11/5 16:37", "global": 0.9, "local": 93.0},
+        ]
+        r = watch.rank_text_candidates(candidates, ("不支持", "忽略", "失败"))
+        self.assertEqual(len(r["matches"]), 1)
+        self.assertIn("不支持", r["matches"][0]["text"])
+        self.assertEqual(r["matches"][0]["matched_terms"], ["不支持", "忽略"])
+        self.assertEqual(r["other_count"], 3)
+        # The unmatched taskbar strings are NOT returned as text.
+        self.assertNotIn("text_candidates", r)
+
+    def test_expect_can_be_overridden_and_still_matches(self):
+        candidates = [{"ts": 1.0, "text": "上传被拦截，请重试", "global": 0.2, "local": 40.0}]
+        r = watch.rank_text_candidates(candidates, ("拦截",))
+        self.assertEqual(len(r["matches"]), 1)
+        self.assertEqual(r["expect"], ["拦截"])
+
+    def test_no_expect_terms_returns_only_a_count(self):
+        r = watch.rank_text_candidates(
+            [{"ts": 1.0, "text": "anything", "global": 0.2, "local": 40.0}], ())
+        self.assertEqual(r["matches"], [])
+        self.assertEqual(r["other_count"], 1)
+
+    def test_since_honours_expect_all(self):
+        session = watch.WatchSession("win-x", 1, Mock())
+        band = np.full((60, 800, 3), 240, np.uint8)
+        with patch.object(watch, "_band_texts", return_value=["29°C"]):
+            session.frames.append(watch.Frame(time.time(), band, 0.2, 40.0, band))
+            short = session.since(10, 8, expect=("失败",))
+            full = session.since(10, 8, expect=("失败",), expect_all=True)
+        self.assertEqual(short["text_other_count"], 1)
+        self.assertNotIn("text_candidates", short)
+        self.assertEqual(full["text_candidates"][0]["text"], "29°C")
+
+    def test_since_deduplicates_the_same_message_across_frames(self):
+        session = watch.WatchSession("win-x", 1, Mock())
+        band = np.full((60, 800, 3), 240, np.uint8)
+        with patch.object(watch, "_band_texts", return_value=["same message"]):
+            for i in range(5):
+                session.frames.append(watch.Frame(time.time() + i, band, 0.2, 40.0, band))
+            r = session.since(10, 8, expect_all=True)
+        self.assertEqual(len(r["text_candidates"]), 1)
+
     def test_two_second_toast_is_recoverable_after_it_vanished(self):
         """Design-01 end-to-end contract.
 
@@ -151,6 +306,28 @@ class WatchTests(unittest.TestCase):
         self.assertIsNotNone(img)
         self.assertLessEqual(max(img.shape[:2]), watch.SHEET_MAX_DIM)
         self.assertLess(path.stat().st_size, 4_500_000)
+
+
+class CompanionOptInTests(unittest.TestCase):
+    """The mascot must stay off unless commandFeedback is explicitly enabled."""
+
+    def test_kernel_startup_does_not_autostart_companion(self):
+        import inspect
+        from dsh_desktop import eternity
+        src = inspect.getsource(eternity.Eternity)
+        self.assertIn("DSH_COMPANION_AUTOSTART", src)
+        # install() must be inside the gated block, not unconditional.
+        gated = src.split("DSH_COMPANION_AUTOSTART", 1)[1]
+        self.assertIn("companion.install", gated[:400])
+
+    def test_autostart_defaults_to_off(self):
+        import os
+        previous = os.environ.pop("DSH_COMPANION_AUTOSTART", None)
+        try:
+            self.assertNotIn("DSH_COMPANION_AUTOSTART", os.environ)
+        finally:
+            if previous is not None:
+                os.environ["DSH_COMPANION_AUTOSTART"] = previous
 
 
 class DiagnosticMarkerTests(unittest.TestCase):

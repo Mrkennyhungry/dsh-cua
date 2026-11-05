@@ -1,0 +1,266 @@
+# watch / toast 观测机制：设计回顾与待决策问题
+
+> 记录时间：2026-11-05
+> 仓库：`C:\Users\kennyyzhang\Documents\deepseek-harness\default-workspace\plugins\dsh-doraemon`
+> 用途：交给多个 AI 评审，征集替代方案。**本文描述的是一轮尚未收敛的设计，不是定稿。**
+> 参考的外部资料（仅作事实参考）：
+> - [vLLM semantic-router · Keyword Signal](https://github.com/vllm-project/semantic-router/blob/d534efc3a089f8a38479322d2ed66be9e0274d1b/website/i18n/zh-Hans/docusaurus-plugin-content-docs/version-v0.3/tutorials/signal/heuristic/keyword.md)
+> - [Okapi BM25](https://en.wikipedia.org/wiki/Okapi_BM25)
+
+---
+
+## 0. 当前仓库状态（务必先读）
+
+| 项目 | 值 |
+|---|---|
+| 已推送 HEAD | `ce69686`（`fix(decide): do not treat unknown-type duplicates as a passive collision`） |
+| 未提交改动 | **6 个文件**：`index.js`、`kernel/dsh_desktop/desktop_tools.py`、`dsh_bridge.py`、`eternity.py`、`watch.py`、`test/test_observation_watch_20261105.py` |
+| 工作区测试 | `229 passed, 1 skipped, 13 subtests`；Python/JS 语法均 OK |
+| 内核进程 | pid `18704`（最后几次改动**之后没有重启**；复现前请执行 `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/reload-cursor-kernel.ps1 -StateDir "$PWD\.runtime\state"` 并触发一次 `doraemon_health`） |
+| 本文本身 | 新增未跟踪文件 |
+| 桌面遗留 | `C:\Users\kennyyzhang\Desktop\dsh-invalid-upload-probe.txt`（测试用不合格文件）、相册管家主窗口仍在运行、`.runtime/desktop_workspace/` 下有几个回放/诊断脚本 |
+
+**结论：下面所有实现都还没提交、没推送。** 评审时请以工作区源码为准，不要只看 HEAD。
+
+---
+
+## 1. 需求（用户原话的归纳）
+
+1. `watch` 定位为**专门的弹窗/瞬时消息监视机制**，不是通用截屏工具。
+2. 弹窗可能出现在：
+   - 应用窗口内部（底部居中 toast，例如「1 个文件格式不支持，已忽略」）；
+   - **整个桌面右下角的系统级通知**，不属于任何绑定窗口；
+   - 颜色不固定：深色胶囊、浅色弹窗都可能存在。
+3. **采集必须走全屏角度**，否则桌面右下角通知永远拍不到。
+4. watch 不是全程常开，是「触发动作 → 观察一段时间 → 读回」。
+5. 弹窗基本是文字式的。不要把一堆帧图丢给模型识图（太费 token / 上下文），应复用内核已有的 OCR，把**文字**交出去。
+6. 但也不该把全屏 OCR 的全部原文交出去。要用「失败 / 被拦截 / 不支持」这类**预期词**做一轮命中处理，只把相关的交给 AI，由 AI 判断哪条是它要等的消息。
+7. 误报不是主要矛盾：**「混进来的里面有符合场景的那条就好」**，宁可多留候选，不要漏。
+8. 需要评估：上下文占用、速度（是否很慢）。
+9. 附带 bug：右上角吉祥物一直闪烁；用户已把 `commandFeedback` 默认关闭，但它仍然出现。
+
+---
+
+## 2. 设计演进（四轮，逐轮被推翻）
+
+### v1：绑定窗口客户区裁剪 + 变化帧拼图
+- 10fps 后台采样，**只抓绑定窗口客户区**（`capture.capture(hwnd, activate=False)`）。
+- 双分留帧：`global>=12`（页面切换）或 `local>=8`（top 1% 格子均值，抓小面积 toast）。48 帧环形缓冲。
+- `since()` 返回时间序拼图 + 双分时间线。
+- **实测**：能抓到 toast（210 帧采样只留 9 帧；`global=0.26 / local=11.0` 那帧就是 toast）。但拼图每帧压到 420 宽，toast 里的字只剩几像素，**读不出来**。
+- **被推翻原因**：文档设计-01 第 2 条踩坑（拼图缩略图里 toast 约 60×10 像素）。
+
+### v2：底部暗块检测 + 原分辨率放大裁剪
+- 加 `_detect_toast()`：底部 22% 区域找 `R,G,B < 90` 暗块，形态学闭运算合并，取 bbox，保留**原分辨率**裁剪，单独出一张放大拼图。
+- **实测**：真机上传不合格 .txt，`toast.detected: true`、5 帧、bbox `[757,1039,1043,1091]`，放大图里**文字清晰可读**：「1 个文件格式不支持，已忽略」，还看到出现/淡出两帧。
+- 但混进了 3 个误检（文件对话框的 `All Files (*.*)`、文件名输入框）。我当时加了一条 `fill>=0.55`（要求深色像素占主导）来收敛。
+- **被用户否决**：过拟合。"其他软件也会出现弹窗，可能就是浅色的" —— `fill` 判据会直接漏掉浅色弹窗。用户明确：**不要收敛，命中的都交给 AI 判断**。
+
+### v3：全屏采集 + OCR 文字候选
+- 用户指出：桌面右下角通知在绑定窗口之外，必须全屏。改为 `capture_desktop()` 优先，窗口裁剪只作 fallback。
+- 关键澄清（本轮最重要的一条）：**watch 的职责只是「不漏地保留候选」，判断「是不是我要的弹窗」是 AI 的事**。采集层不该做任何语义判定。
+- 于是删掉 `_detect_toast()`，改成纯几何的 `_bottom_band()`：每个留帧固定裁一块区域，**零检测、零过滤、零判定**。
+- 复用内核 `UIParser` 对 band 跑 OCR，返回去重后的**文字候选**，图片降级为「OCR 读不清时才看」的兜底证据。
+- **实测发现新坑**：全屏 2160 高，底部 22% 只覆盖 78% 以下；而窗口内 toast 在屏幕约 68%，桌面通知在 85–95%，**两种都漏**。改成 `BOTTOM_BAND_FRACTION = 0.45`（下半屏）后能覆盖，但把 DSH 自己的对话窗口、任务栏、桌面图标全拍进来了，OCR 出 100+ 条无关文字。
+
+### v4（当前 WIP）：Keyword Signal 命中筛选
+- 搜到 vLLM semantic-router 的 **Keyword Signal**：确定性词法匹配 / BM25 / n-gram，作为"学习型信号之前的低延迟第一道筛选"。项目里 `decide.py` 已有 BM25 与 `tokenize()`（CJK 按字 + 英文按词），直接复用思路，不引依赖。
+- 新增 `rank_text_candidates()`：BM25 打分 + **短语精确命中加权**（CJK 按字切分会过宽，所以短语命中给强 bonus）。
+- 内置 `DEFAULT_EXPECT_TERMS`（中英混合：失败/错误/不支持/忽略/拦截/拒绝/无法/异常/警告/超时/… 及 failed/error/unsupported/…）。调用方可用 `expect` 覆盖。
+- 默认只返回 `text_matches`（命中条目：文字+分数+命中词+时间戳+双分），未命中的只返回 `text_other_count`，**不返回全文**以省上下文；`expect_all=true` 才给全部原文。
+
+---
+
+## 3. 当前实现（工作区源码，未提交）
+
+### 3.1 涉及文件
+
+| 文件 | 改动 |
+|---|---|
+| `kernel/dsh_desktop/watch.py` | 核心：全屏采集、`_bottom_band`、`_band_texts`、`_band_fingerprint`、`rank_text_candidates`、`DEFAULT_EXPECT_TERMS`、`_band_strip`、`since()` 输出 |
+| `kernel/dsh_desktop/desktop_tools.py` | `desktop_watch()` 新增 `expect` / `expect_all` 参数 |
+| `kernel/dsh_desktop/dsh_bridge.py` | `WatchRequest` 新增 `expect` / `expect_all`；`/watch` 透传 |
+| `index.js` | `doraemon_watch` 描述与参数更新；`commandFeedback` 门禁（原本 `=== true` 就存在） |
+| `kernel/dsh_desktop/eternity.py` | **修吉祥物 bug**：内核启动时不再无条件 `companion.install(self)`，改为 `DSH_COMPANION_AUTOSTART` 环境变量 opt-in |
+| `test/test_observation_watch_20261105.py` | 覆盖 keyword signal、全屏采集、OCR 去重、companion 门禁等 |
+
+### 3.2 数据流
+
+```
+10fps 全屏 mss 抓帧
+  → _signature 64x36 灰度网格
+  → _scores: global(均值) / local(top 1% 格子均值)
+  → 任一过阈值则留帧（最多 48 帧环形缓冲）
+     ├─ small = _fit(frame, 480)          # 拼图用
+     └─ band  = _bottom_band(frame)       # 下半屏 45%，源分辨率（宽>1600 才缩）
+  → since(seconds, limit, expect, expect_all, ocr_limit)
+     ├─ 时间窗筛选 → 时间序（不按分数排序）
+     ├─ 拼图 image_path（全帧缩略，看整体变化）
+     ├─ band 指纹去重 → 每个不同 band 跑 UIParser.parse() OCR
+     ├─ 文字去重 → candidates[{ts,text,global,local}]
+     ├─ rank_text_candidates(candidates, expect_terms)   # BM25 + 短语
+     │    → text_matches[{ts,text,score,matched_terms,global,local}]
+     │    → text_other_count（未命中条数，不返回全文）
+     └─ evidence_image（所有 band 放大拼图，仅 OCR 不足时看）
+```
+
+### 3.3 关键参数
+
+| 参数 | 当前值 | 说明 |
+|---|---|---|
+| `FPS` | 10 | |
+| `RING_SIZE` | 48 | |
+| `GLOBAL_THRESHOLD` | 12.0 | 页面切换 |
+| `LOCAL_THRESHOLD` | 8.0 | 小面积 toast |
+| `BOTTOM_BAND_FRACTION` | 0.45 | 下半屏；0.22 实测会漏窗口内 toast（68%）和桌面通知 |
+| `BAND_MAX_DIM` | 1600 | 保持中文可读 |
+| `MAX_OCR_BANDS` | 16 | 每次 `since()` 最多 OCR 多少个不同 band |
+| `BM25_K1 / B` | 1.2 / 0.75 | |
+| `EXPECT_THRESHOLD` | 0.12 | 且要求至少一个短语命中 |
+| `DSH_COMPANION_AUTOSTART` | 默认空（关） | 内核侧 companion 逃生口 |
+
+### 3.4 对外契约（`doraemon_watch`）
+
+- `action`: `start | since | stop | status`
+- `since` 参数：`seconds`、`limit`、`expect`（空格/逗号分隔，覆盖内置词表）、`expect_all`、`ocr_limit`（**当前只在 `WatchSession.since()` 上，`registry.since` / `desktop_watch` / `WatchRequest` / `index.js` **尚未透传 `ocr_limit`** —— WIP 不一致点）。
+- `since` 返回：`capture_scope`、`frames`、`sampled`、`total_kept`、`timeline`、`image_path`、`text_matches`、`text_other_count`、`expect_terms`、`text_hint`、`evidence_image`、`evidence_hint`；`expect_all=true` 时额外 `text_candidates`。
+
+---
+
+## 4. 实测数据（真机）
+
+统一用例：相册管家「云空间 → 上传 → 上传图片 → 选一个 .txt → 回车」，应用弹出「1 个文件格式不支持，已忽略」。
+
+| 版本 | `since()` 耗时 | 帧/采样 | 是否命中 toast 文字 | 上下文体积 | 备注 |
+|---|---|---|---|---|---|
+| v1 拼图（420 宽 tile） | ~10ms | 9 / 210 帧 | 图像里能看到 toast，但**文字读不出** | 拼图 ~0.13MB | 触发 v2 |
+| v3 全屏 + `parse()` 全帧 OCR（16 帧） | **51,560 ms** | 16 / 2010 | ✅ `1 个文件格式不支持，已忽略`，score 0.747 | ~8.9KB（含 expect_all 全量） | 太慢 |
+| v3 + `_detect_text` + 帧去重 | **17,842 ms** | 16 / 771 | ❌ 全乱码 `orts ciseplay neith thull CCR toxt` | ~1.8KB | 中文 OCR 崩了 |
+| v3 + 960 宽降采样 | **15,755 ms** | 14 / 109 | ❌ 全乱码 | ~4.8KB（全量） | 缩小后 CJK 不可读 |
+| v3 回退 `parse()` + 0.45 band + 去重 | **25,117 ms** | 16 / 104 | ✅ score 0.7309，`other_count=99` | ~8.9KB（全量）/ ~1.7KB（默认） | 能命中但慢 |
+| v4 + `MAX_OCR_BANDS=8` 按 local 排序 | **21,123 ms** | 14 / 110 | ❌ `matches=[]` | ~1.65KB | **排序把 toast 帧挤出预算** |
+| v4 + 时间序全量 OCR（当前 WIP） | 未真机计时（单元测试通过） | — | 待测 | — | 最后一次改动后**未重启内核** |
+
+**上下文**：`expect_all=false` 时 payload 约 **1.6–1.8KB**；`text_other_count` 约 99–130（即 100+ 条无关 OCR 文字没进上下文。这点是达标的。
+
+**速度**：15–51 秒，**明显偏慢**。瓶颈是每帧一次 `UIParser.parse()`（YOLO + OCR 并行，中文 OCR ~1.5s/帧）。已试过的优化与副作用：
+- 帧指纹去重（32×12 二值感知哈希）→ 有效减少 OCR 次数，但静态帧被合并。
+- 跳过 YOLO 用 `_detect_text` → 中文乱码，回退。
+- 降采样到 960 → 中文乱码，回退。
+- 按 local 分排序取 top-N OCR → **漏掉 toast**（全屏下 DSH 对话窗口自身重绘的 local 分比小 toast 更高）。
+- 按时间取最新 N 帧 → 同样漏 toast。
+
+---
+
+## 5. 已解决的问题
+
+| 问题 | 结论 |
+|---|---|
+| 拼图里 toast 字读不出 | v2 原分辨率裁剪解决过；v4 改走文字路线后不再是主要路径 |
+| 深色/浅色弹窗过拟合 | 用户否决了 `fill>=0.55` 收敛。当前设计**不做颜色/形状判定** |
+| 桌面右下角通知在窗口外 | 改全屏采集（`capture_desktop()` 优先） |
+| 底部 22% 覆盖不到窗口内 toast（68%）和桌面通知（85–95%） | 改 `BOTTOM_BAND_FRACTION=0.45` |
+| 吉祥物一直闪烁、关不掉 | **根因**：`eternity.py` 在内核启动时**无条件** `companion.install(self)`，绕过插件 `commandFeedback === true` 门禁。改为 `DSH_COMPANION_AUTOSTART` 环境变量 opt-in；重启后验证 `cursor.started=false`、启动日志无 companion 行、装饰窗口枚举为空。⚠️ 该修复在工作区未提交。 |
+| `commandFeedback` 默认关但 companion 仍出现 | 同上，插件侧门禁本来是对的，是内核侧漏了门禁。 |
+
+---
+
+## 6. 未解决 / 待决策（**请重点给方案**）
+
+### P0：速度
+`since()` 15–51s，一次工具往返不可接受。候选方向（请评估、也可提别的）：
+- **并行 OCR**：多帧并发跑 OCR（注意 `UIParser` 的 `_inference_lock` 在 DirectML 下串行）。
+- **ROI OCR**：先用双分/差分定位「变化的局部矩形」，只 OCR 那一小块，而不是整个下半屏。
+- **轻量 OCR / 缓存**：模型能否只加载一次并复用？是否可换成更快的中文 OCR 或只跑检测不跑识别之外的部分？
+- **增量 OCR**：相邻帧只 OCR 差异区域。
+- **调用方预算**：`ocr_limit` 已埋在 `WatchSession.since()`，但**尚未透传到 registry / desktop_watch / bridge / index.js**（WIP 不一致）。
+- 是否可以接受「异步 since：先返回已 OCR 的部分，后台继续」？
+
+### P0：命中稳定性
+全屏采集把 DSH 自己的对话窗口、任务栏、桌面图标、文件对话框全拍进来：
+- 100+ 条 OCR 文字里，真正 toast 只占 1–3 条。
+- 任何「按分数/按时间截帧」的尝试都漏过 toast（实测两次 `matches=[]`）。
+- **如何在不引入语义判定的前提下，保证 toast 帧一定被 OCR？** 还是说应该允许一层「弱筛选」（例如按空间位置排除 DSH 主窗口矩形 —— 但那是几何，不是语义）。
+- 或者反过来：OCR 全部帧但用更便宜的 OCR，把「不漏」和「快」同时解决。
+
+### P1：Keyword Signal 的质量
+- 内置词表里 `"文件"、"格式"` 太宽，命中大量无关文字（文件名、MP4 文件、聊天里的「@文件或对话」）。
+- CJK 用 `tokenize()` 按字切分导致过宽；目前靠「短语精确命中」加权，但 `matched_terms` 里仍会带噪声。
+- 是否该用 n-gram / 中文分词 / 小型文本分类器 / log-template retrieval？
+- `expect` 由调用方给，还是应该从「当前任务描述」自动生成？
+- BM25 参数（`k1/b/threshold`）在短文本、CJK、词表固定语料下是否合理？`idf` 用候选集自身做语料，静态任务栏文字会把 idf 拉偏。
+
+### P1：采集范围与去重
+- 下半屏 45% 仍带大量噪声；`BAND_MAX_DIM=1600` 是否为最优？
+- `_band_fingerprint`（32×12 二值哈希）是否会把「不同消息但整体亮度分布相近」的帧误合并？
+- 是否需要「窗口矩形 + 桌面右下角」双 ROI，而不是整块下半屏？
+- 全屏采集下，DSH 自己的 GUI 变化是否应该被排除？如何排除而不违反「不收敛」原则？
+
+### P1：API / 上下文形态
+- 现在同时返回 `image_path`（拼图）、`evidence_image`（band 放大）、`text_matches`、`timeline`；是否太多？
+- `text_other_count` 只给数量，AI 要不要能「翻页」看未命中原文？
+- 是否应该让 `since()` 直接返回一个**结论式摘要**（如 `matched: true, best_text: "..."`），还是严格只给候选、判断全交给 AI？（用户倾向后者）
+- 时间线 `ts` 是相对 session 起点的秒数，是否够用？
+
+### P2：工程一致性 / 其他
+- `ocr_limit` 未透传（见上）。
+- `companion` 的开关有**两处真相源**：插件 `commandFeedback` 与内核 `DSH_COMPANION_AUTOSTART`。是否应该统一成一个？吉祥物「闪烁」是否还有别的原因（如 `window_glow.py` 的 2s 呼吸、`cursor_overlay._loop` 每帧重绘 / 动作姿势反复切换）？用户明确说"闪烁很烦"，需要确认关掉后是否真的完全静止。
+- `desktop_watch` 的 `@tool` 描述、`WatchRequest`、`index.js` 描述三处文案需与最终实现同步。
+- 测试里 `test_observation_watch_20261105.py` 已有 20+ 条，但**缺少真机/集成级的速度与命中回归**（单测都用 mock OCR）。
+
+### 约束（评审方案时请遵守）
+1. 不做「这个是不是弹窗」的语义判定 —— 判断权归 AI。
+2. 不因颜色/形状/位置过滤候选帧（已因此踩过两次坑）。
+3. 全屏采集（桌面右下角通知必须在范围内）。
+4. 输出默认以**文字**为主，图片只作兜底。
+5. 不能让 `since()` 阻塞几十秒。
+6. 内核是 on-demand 子进程；改 Python 后需重启内核才生效。
+
+---
+
+## 7. 复现步骤
+
+```powershell
+cd C:\Users\kennyyzhang\Documents\deepseek-harness\default-workspace\plugins\dsh-doraemon
+
+# 1) 重启内核，加载工作区代码
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/reload-cursor-kernel.ps1 -StateDir "$PWD\.runtime\state"
+# 然后触发一次 doraemon_health
+
+# 2) 造不合格文件
+Set-Content C:\Users\kennyyzhang\Desktop\dsh-invalid-upload-probe.txt 'not an image'
+
+# 3) 绑定相册管家主窗口、启动 watch、走上传流程
+#    （回放脚本：.runtime/desktop_workspace/live_replay.py，或直接调 doraemon_* 工具）
+
+# 4) 读回
+# doraemon_watch(action='since', seconds=60, limit=16, expect='失败 不支持 忽略 拦截 格式')
+```
+
+测试：
+```powershell
+$env:PYTHONPATH="$PWD\kernel"; .\.runtime\venv\Scripts\python.exe -m pytest test/ -q
+```
+
+---
+
+## 8. 相关代码位置（绝对路径）
+
+| 文件 | 关键符号 |
+|---|---|
+| `...\plugins\dsh-doraemon\kernel\dsh_desktop\watch.py` | `WatchSession._grab` / `_run` / `since`、`_bottom_band`、`_band_texts`、`_band_fingerprint`、`rank_text_candidates`、`DEFAULT_EXPECT_TERMS`、`_band_strip` |
+| `...\plugins\dsh-doraemon\kernel\dsh_desktop\desktop_tools.py` | `desktop_watch()`（文件末尾） |
+| `...\plugins\dsh-doraemon\kernel\dsh_desktop\dsh_bridge.py` | `WatchRequest` / `watch_action` / `/companion/start` |
+| `...\plugins\dsh-doraemon\kernel\dsh_desktop\eternity.py` | `companion.install` 门禁 |
+| `...\plugins\dsh-doraemon\kernel\dsh_desktop\ui_parser.py` | `UIParser.parse` / `_detect_text` / `_compress` |
+| `...\plugins\dsh-doraemon\kernel\dsh_desktop\decide.py` | `tokenize` / BM25 打分（复用思路来源） |
+| `...\plugins\dsh-doraemon\index.js` | `doraemon_watch` 工具定义、`commandFeedback` schema |
+| `...\plugins\dsh-doraemon\cursor-state.js` | 吉祥物生命周期 `/mascot/state` |
+| `...\plugins\dsh-doraemon\test\test_observation_watch_20261105.py` | 本轮全部单测 |
+| `...\plugins\dsh-doraemon\docs\wb-cua缺陷记录.md` | 上游缺陷记录与设计-01 原始笔记（在 `C:\Users\kennyyzhang\Documents\deepseek-harness\docs\wb-cua缺陷记录.md`） |
+
+---
+
+## 9. 一句话总结
+
+> 我们需要一个**「全屏采样 → 变化帧保留 → OCR 成文字 → 用预期词做低延迟命中筛选 → 只把命中的文字交给 AI 判断」**的弹窗监视器；目前功能链路通了（真机命中过 toast 原文、上下文压到 ~1.7KB），但**速度 15–51s 太慢、且任何截帧策略都会漏 toast**。请给出兼顾「不漏 / 快 / 省上下文」的方案。

@@ -1141,12 +1141,15 @@ export function apply(ctx, config) {
 
   register(defineTool({
     name: 'doraemon_watch',
-    description: 'Sample the bound window continuously in the background (10fps) and keep only changed frames in a 48-frame ring buffer. Use it to catch transient toast messages, menus or loading states that live 2–3s and vanish before a single screenshot can be requested. action=start begins sampling, since(seconds=N) returns a time-ordered contact sheet plus dual change scores, stop ends it. Frames are returned in TIME order, never ranked by score: a toast has a small local score but is exactly what you need. Still screens keep no frames and cost no tokens.',
+    description: 'Monitor the WHOLE DESKTOP for transient message popups (toasts, error banners, system notifications). action=start begins 10fps sampling into a 48-frame ring buffer; since(seconds=N) returns results; stop ends it. It diffs consecutive frames and runs the kernel OCR only on the CHANGED rectangles (a toast is a ~150x50 crop, not a half-screen band), falling back to the lower-half band when no diff is available, then applies a Keyword Signal (BM25 + exact phrase) filter so you receive ONLY text matching what you are waiting for, not the whole screen. Pass expect with your own keywords, e.g. "失败 不支持 被拦截"; otherwise a built-in Chinese/English error+success word list is used. text_matches holds the matched strings with scores and timestamps; text_other_count tells you how many unmatched strings were dropped (their text is NOT returned, saving context). Set expect_all=true to get every OCR string, or look at evidence_image only when text is unreadable. The sampler makes no popup judgement: YOU decide which match is the message. Frames are TIME ordered, never ranked by score: a toast has a small global but high local score. Still screens keep no frames and cost no tokens.',
     parameters: {
       window_id: windowIdParameter,
       action: { type: 'string', enum: ['start', 'since', 'stop', 'status'], description: 'start | since | stop | status (default status).' },
       seconds: { type: 'number', description: 'since: how many seconds back to read, 0.5–300 (default 20).' },
-      limit: { type: 'number', description: 'since: max frames in the contact sheet, 1–16 (default 8). Later frames win when truncated.' },
+      limit: { type: 'number', description: 'since: max frames, 1–16 (default 8). Later frames win when truncated.' },
+      expect: { type: 'string', description: 'since: space/comma separated keywords describing the message you wait for, e.g. "失败 不支持 被拦截". Overrides the built-in word list.' },
+      expect_all: { type: 'boolean', description: 'since: return every OCR string instead of only keyword matches (costs more context). Default false.' },
+      ocr_limit: { type: 'number', description: 'since: max OCR passes, 1-48 (default 16). Only a latency knob: changed regions are OCRd first, never ranked by score.' },
     },
     output,
     async execute(args, exec) {
@@ -1158,6 +1161,9 @@ export function apply(ctx, config) {
           window_id: id, action,
           seconds: args.seconds === undefined ? 20 : Number(args.seconds),
           limit: args.limit === undefined ? 8 : Number(args.limit),
+          expect: String(args.expect ?? ''),
+          expect_all: args.expect_all === true,
+          ocr_limit: args.ocr_limit === undefined ? 16 : Number(args.ocr_limit),
         },
         signal: exec.signal, timeoutMs: 60_000,
       })

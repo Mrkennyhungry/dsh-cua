@@ -5889,7 +5889,9 @@ def desktop_cleanup_windows_by_exe(exe_keyword: str = "", keep: int = 0,
       "action=start|stop|since|status。since 返回时间窗内帧的拼图与双分变化分，"
       "按时间顺序而非分数排序；静止时不产生图片、不消耗 token。")
 def desktop_watch(window_id: str = "", action: str = "status",
-                  seconds: float = 20.0, limit: int = 8) -> dict:
+                  seconds: float = 20.0, limit: int = 8,
+                  expect: str = "", expect_all: bool = False,
+                  ocr_limit: int = 16) -> dict:
     from .watch import registry
     action = str(action or "status").strip().lower()
     if action == "status" and not window_id:
@@ -5914,5 +5916,8 @@ def desktop_watch(window_id: str = "", action: str = "status",
         return {"success": True, "action": "stop", **registry().stop(window_id)}
     seconds = max(0.5, min(float(seconds), 300.0))
     limit = max(1, min(int(limit), 16))
+    terms = tuple(t.strip() for t in str(expect or "").replace(",", " ").split()
+                  if t.strip()) or None
     return {"success": True, "action": "since",
-            **registry().since(window_id, seconds, limit)}
+            **registry().since(window_id, seconds, limit, terms, bool(expect_all),
+                              max(1, min(int(ocr_limit), 48)))}

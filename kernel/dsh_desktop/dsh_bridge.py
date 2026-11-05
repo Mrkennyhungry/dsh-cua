@@ -376,6 +376,9 @@ class WatchRequest(BaseModel):
     action: str = Field(default="status", pattern="^(start|stop|since|status)$")
     seconds: float = Field(default=20.0, ge=0.5, le=300.0)
     limit: int = Field(default=8, ge=1, le=16)
+    expect: str = Field(default="", max_length=500)
+    expect_all: bool = False
+    ocr_limit: int = 16
 
 
 class WaitStableRequest(BaseModel):
@@ -1951,7 +1954,8 @@ def create_router(eternity) -> APIRouter:
     @router.post("/watch")
     def watch_action(req: WatchRequest):
         return invoke(desktop_tools.desktop_watch, req.window_id, req.action,
-                      req.seconds, req.limit)
+                      req.seconds, req.limit, req.expect, req.expect_all,
+                      req.ocr_limit)
 
     @router.post("/windows/{window_id}/wait-stable")
     def window_wait_stable(window_id: str, req: WaitStableRequest):

@@ -565,13 +565,19 @@ class Eternity:
             agent_tools.register_agent_tools()
             self._disable_agent_dangerous_tools()
             self._registered = True
-        # Companion mode: the mascot stays docked, clickable, and owns the
-        # global hotkeys. Never let a UI failure break kernel startup.
-        try:
-            from . import companion
-            companion.install(self)
-        except Exception:
-            logger.warning("companion mode unavailable", exc_info=True)
+        # Companion mode is OPT-IN. The plugin gates it on commandFeedback ===
+        # true and calls /companion/start explicitly. Installing it here
+        # unconditionally resurrected the mascot even when the user had turned
+        # the feature off (and caused the constant on-screen flicker).
+        # DSH_COMPANION_AUTOSTART is only for standalone kernel deployments
+        # with no DSH client to send the start request.
+        if os.environ.get("DSH_COMPANION_AUTOSTART", "").strip().lower() in (
+                "1", "true", "yes", "on"):
+            try:
+                from . import companion
+                companion.install(self)
+            except Exception:
+                logger.warning("companion mode unavailable", exc_info=True)
 
     def _seed_workbench_skills(self) -> None:
         """Use the manifest-aware synchronizer for updates and user deletions."""
