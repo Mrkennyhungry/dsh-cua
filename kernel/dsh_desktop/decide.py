@@ -327,8 +327,15 @@ def decide(goal: str, elements: list[dict], *, top_k: int = 5,
     actionable = {"button", "splitbutton", "menuitem", "tabitem", "checkbox",
                   "radiobutton", "combobox", "listitem", "treeitem", "slider",
                   "spinner", "thumb", "hyperlink"}
+    exact_types = [str(r.get("type", "")).strip().lower() for r in exact]
+    # Only refuse when we have POSITIVE evidence the duplicates are passive
+    # labels. On a lazily-loaded Electron page the element table can be pure
+    # OCR (type == ""), e.g. two 云空间 rows: sidebar link and page title.
+    # Treating "unknown type" as passive refused legitimate navigation.
+    known_passive = any(t in PASSIVE_TYPES for t in exact_types)
     collision = (len(exact) > 1
-                 and not any(str(r.get("type", "")).lower() in actionable for r in exact))
+                 and known_passive
+                 and not any(t in actionable for t in exact_types))
     if (singleton and confidence < min_confidence) or collision:
         return Decision(None, confidence, scored[:top_k], "low_confidence",
                         score=best["score"], gap=gap, ambiguous=True)

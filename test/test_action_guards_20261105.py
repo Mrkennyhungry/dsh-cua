@@ -41,6 +41,28 @@ class DecideGoalTests(unittest.TestCase):
         d = decide.decide("最大化", self.rows([("最小化", "Button", [10, 10, 80, 30])]))
         self.assertIsNone(d.id)
 
+    def test_download_collision_is_still_refused(self):
+        # Live QQGallery: three 下载 Text rows, no actionable control.
+        d = decide.decide("下载", self.rows([
+            ("下载", "Text", [1, 1, 9, 9]),
+            ("下载", "Text", [2, 2, 9, 9]),
+            ("下载", "Text", [3, 3, 9, 9]),
+            ("下载 下载", "Hyperlink", [4, 4, 9, 9]),
+        ]))
+        self.assertIsNone(d.id)
+        self.assertEqual(d.reason, "low_confidence")
+
+    def test_unknown_type_duplicates_are_not_refused(self):
+        # Regression found on the cloud page: UIA was empty (lazy Electron), so
+        # the table was pure OCR with type="". Two 云空间 rows (sidebar + page
+        # title) must not be mistaken for a passive-label collision.
+        d = decide.decide("云空间", self.rows([
+            ("云空间", "", [100, 100, 180, 130]),
+            ("云空间", "", [100, 350, 180, 380]),
+            ("加密空间", "", [100, 600, 180, 630]),
+        ]))
+        self.assertIsNotNone(d.id)
+
 
 class LaunchRootTests(unittest.TestCase):
     """BUG-16 (D: drive) and BUG-17 (drive-root double separator)."""
