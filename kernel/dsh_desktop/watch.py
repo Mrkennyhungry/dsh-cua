@@ -455,8 +455,15 @@ class WatchSession:
         return frame, "window"
 
     def _grab_window(self):
+        """整窗 PrintWindow 通道。
+
+        不能用 self._capture.capture()：它默认走 mss 屏幕抓取，对 WinUI /
+        DirectComposition 应用同样是盲的，只有 mss 失败才回落 PrintWindow——
+        拿盲图去和盲图比，永远判不出盲。这里强制走 PrintWindow。
+        """
         try:
-            frame = self._capture.capture(self.hwnd, activate=False)
+            from .desktop_tools import _print_window_frame
+            frame = _print_window_frame(self.hwnd)
         except Exception:  # noqa: BLE001 - 辅助通道，失败就当没有
             return None
         return frame if frame is not None and getattr(frame, "size", 0) else None
@@ -464,25 +471,36 @@ class WatchSession:
     def _detect_blind(self, desktop, window) -> bool:
         """桌面抓取是否漏掉了这个窗口的合成内容。
 
-        判据是几何的、不看语义：桌面里窗口那块区域几乎没方差（一片纯色），
-        而 PrintWindow 拍到的同一块有明显内容，且两者差异很大。三者同时成立
-        才算"盲"——避免把"窗口本来就是白底"误判成盲。
+        比较的是**客户区**：桌面帧按 ClientToScreen 裁，窗口帧按客户区偏移裁。
+        两边同基准才可比（整窗含标题栏，客户区才是内容区）。
+        判据是几何的、不看语义：桌面里那块几乎没方差（一片纯色），PrintWindow
+        拍到的同一块有明显内容，且两者差异大。三者同时成立才算"盲"。
         """
         if desktop is None or window is None:
             return False
         try:
             import win32gui
-            left, top, right, bottom = win32gui.GetWindowRect(self.hwnd)
+            wl, wt, _, _ = win32gui.GetWindowRect(self.hwnd)
+            cl, ct = win32gui.ClientToScreen(self.hwnd, (0, 0))
+            cr, cb = win32gui.ClientToScreen(
+                self.hwnd, win32gui.GetClientRect(self.hwnd)[2:])
             h, w = desktop.shape[:2]
-            left, top = max(0, left), max(0, top)
-            right, bottom = min(w, right), min(h, bottom)
-            if right - left < 40 or bottom - top < 40:
+            sl, st = max(0, cl), max(0, ct)
+            sr, sb = min(w, cr), min(h, cb)
+            if sr - sl < 40 or sb - st < 40:
                 return False
-            crop = desktop[top:bottom, left:right]
-            crop = cv2.resize(crop, (window.shape[1], window.shape[0]),
-                              interpolation=cv2.INTER_AREA)
-            a = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY).astype(np.float32)
-            b = cv2.cvtColor(window, cv2.COLOR_BGR2GRAY).astype(np.float32)
+            crop = desktop[st:sb, sl:sr]
+            # 同一块区域在整窗帧里的位置（客户区相对窗口左上角）
+            ox, oy = cl - wl, ct - wt
+            win_crop = window[oy:oy + (sb - st), ox:ox + (sr - sl)]
+            if win_crop.size == 0:
+                return False
+            common = (min(crop.shape[1], win_crop.shape[1]),
+                      min(crop.shape[0], win_crop.shape[0]))
+            if common[0] < 40 or common[1] < 40:
+                return False
+            a = cv2.cvtColor(crop[:common[1], :common[0]], cv2.COLOR_BGR2GRAY).astype(np.float32)
+            b = cv2.cvtColor(win_crop[:common[1], :common[0]], cv2.COLOR_BGR2GRAY).astype(np.float32)
             diff = float(np.abs(a - b).mean())
             return (diff > BLIND_DIFF
                     and float(b.var()) > BLIND_VAR_RATIO * max(float(a.var()), 1.0))

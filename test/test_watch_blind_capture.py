@@ -38,16 +38,27 @@ def _session(capture=None) -> watch.WatchSession:
 
 
 def test_blind_when_desktop_is_flat_but_window_has_content():
+    """桌面客户区一片白、PrintWindow 里却有字 —— 这就是 WinUI 记事本的情形。"""
     session = _session()
-    with patch("win32gui.GetWindowRect", return_value=(0, 0, 400, 300)):
-        assert session._detect_blind(_blank(), _with_text()) is True
+    window = _blank()                      # 整窗：客户区外框也是白的
+    for i in range(6):
+        window[70 + i * 20:80 + i * 20, 38:338] = 20   # 客户区里的文字
+    with patch("win32gui.GetWindowRect", return_value=(100, 100, 500, 400)), \
+         patch("win32gui.ClientToScreen", side_effect=[(108, 131), (492, 392)]), \
+         patch("win32gui.GetClientRect", return_value=(0, 0, 384, 261)):
+        assert session._detect_blind(_blank(800, 600), window) is True
 
 
 def test_not_blind_when_desktop_matches_the_window():
     session = _session()
-    window = _with_text()
-    with patch("win32gui.GetWindowRect", return_value=(0, 0, 400, 300)):
-        assert session._detect_blind(window.copy(), window) is False
+    desktop = _blank(800, 600)
+    desktop[131:392, 108:492] = _with_text(384, 261)
+    window = _blank()
+    window[31:31 + 261, 8:8 + 384] = _with_text(384, 261)
+    with patch("win32gui.GetWindowRect", return_value=(100, 100, 500, 400)), \
+         patch("win32gui.ClientToScreen", side_effect=[(108, 131), (492, 392)]), \
+         patch("win32gui.GetClientRect", return_value=(0, 0, 384, 261)):
+        assert session._detect_blind(desktop, window) is False
 
 
 def test_blind_detection_never_raises_on_bad_input():
