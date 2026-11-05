@@ -73,6 +73,7 @@ class Frame:
     local_score: float
     bottom_band: np.ndarray | None = None         # source-resolution bottom band
     rois: list = None                             # changed crops, source resolution
+    roi_area_frac: float = 0.0                    # 变化面积占屏比，>30% 视为整页重绘
 
 
 def _signature(frame: np.ndarray) -> np.ndarray:
@@ -170,7 +171,7 @@ def rank_text_candidates(candidates: list[dict], expect: tuple[str, ...],
             "expect": list(terms)}
 
 
-def _band_texts(band: np.ndarray | None) -> list[str]:
+def _band_texts(band: np.ndarray | None, text_only: bool = False) -> list[str]:
     """Run the kernel's existing OCR on one bottom band.
 
     Returns just the strings: the caller (model) decides whether any of them
@@ -193,7 +194,12 @@ def _band_texts(band: np.ndarray | None) -> list[str]:
         # produced garbage for CJK ("1个文件格式不支持" -> "orts ciseplay...").
         # Speed comes from the frame de-duplication in since(), not from
         # shrinking the image.
-        if hasattr(parser, "parse"):
+        if text_only and hasattr(parser, "_detect_text"):
+            # 变化区域是纯文字，YOLO 图标检测纯属浪费（实测占一半耗时）。
+            # 注意：_detect_text 只在**原分辨率 ROI 拼合图**上使用；
+            # 对降采样后的整幅 band 用它会读出乱码（v3 实测）。
+            items = parser._detect_text(band) or []
+        elif hasattr(parser, "parse"):
             items = parser.parse(band) or []
         else:
             return []
@@ -290,6 +296,35 @@ def _diff_rois(prev: np.ndarray | None, curr: np.ndarray | None) -> list:
     return [crop for _, crop in found[:ROI_MAX_PER_FRAME]]
 
 
+def _roi_sheet(rois: list, max_width: int = 1200, pad: int = 12):
+    """Stack one frame's changed crops into a single image, for ONE OCR call.
+
+    Per-call overhead, not pixel area, is what makes OCR expensive: 37 separate
+    ROI calls measured slower than 16 band calls. Stacking keeps the
+    "only what changed" benefit while paying the fixed cost once per frame.
+    White separators stop OCR from merging two unrelated regions into one line.
+    """
+    tiles = []
+    for roi in rois or []:
+        if roi is None or getattr(roi, "size", 0) == 0:
+            continue
+        if roi.shape[1] > max_width:
+            scale = max_width / roi.shape[1]
+            roi = cv2.resize(roi, (max_width, max(1, round(roi.shape[0] * scale))),
+                             interpolation=cv2.INTER_AREA)
+        tiles.append(roi)
+    if not tiles:
+        return None
+    width = max(t.shape[1] for t in tiles)
+    height = sum(t.shape[0] for t in tiles) + pad * (len(tiles) + 1)
+    sheet = np.full((height, width, 3), 255, np.uint8)
+    y = pad
+    for tile in tiles:
+        sheet[y:y + tile.shape[0], :tile.shape[1]] = tile
+        y += tile.shape[0] + pad
+    return sheet
+
+
 class WatchSession:
     def __init__(self, window_id: str, hwnd: int, capture) -> None:
         self.window_id = window_id
@@ -362,8 +397,10 @@ class WatchSession:
                         # previous retained one), so the rectangles describe
                         # what just appeared, not everything that drifted.
                         rois = _diff_rois(self._prev_frame, frame)
+                        frac = (sum(r.shape[0] * r.shape[1] for r in rois)
+                                / float(frame.shape[0] * frame.shape[1])) if rois else 0.0
                         with self._lock:
-                            self.frames.append(Frame(time.time(), small, g, l, band, rois))
+                            self.frames.append(Frame(time.time(), small, g, l, band, rois, frac))
                             self.kept += 1
                     self._prev_frame = frame
             except Exception as exc:  # noqa: BLE001 - a sampler must never kill the kernel
@@ -405,10 +442,17 @@ class WatchSession:
         # no usable diff (resolution change, first frame) falls back to its
         # band, so this can never see less than the previous implementation.
         targets: list[tuple] = []
+        skipped_repaint = 0
         for f in selected:
             if f.rois:
-                for roi in f.rois:
-                    targets.append((f, roi, "roi"))
+                # 整页重绘：满屏都是新文字，那不是"瞬时提示"，OCR 它又贵又没价值。
+                # 帧照留、照进拼图，只是不花一次模型调用。纯几何判据。
+                if f.roi_area_frac > ROI_MAX_SCREEN_FRAC:
+                    skipped_repaint += 1
+                    continue
+                sheet = _roi_sheet(f.rois)
+                if sheet is not None:
+                    targets.append((f, sheet, "roi_sheet"))
             elif f.bottom_band is not None:
                 targets.append((f, f.bottom_band, "band"))
         unique_targets: list[tuple] = []
@@ -422,14 +466,19 @@ class WatchSession:
         budget = max(1, min(int(ocr_limit), MAX_OCR_BANDS))
         # ROIs first if a budget ever bites: they are the actual change points.
         # Never re-rank by score (that dropped the toast twice already).
-        ordered = ([t for t in unique_targets if t[2] == "roi"]
-                   + [t for t in unique_targets if t[2] != "roi"])
+        ordered = ([t for t in unique_targets if t[2] == "roi_sheet"]
+                   + [t for t in unique_targets if t[2] != "roi_sheet"])
         chosen = ordered[:budget]
         result["ocr"] = {"targets": len(unique_targets), "runs": len(chosen),
-                         "roi_targets": sum(1 for t in unique_targets if t[2] == "roi"),
+                         "roi_targets": sum(1 for t in unique_targets if t[2] == "roi_sheet"),
+                         "skipped_repaint": skipped_repaint,
                          "truncated": len(ordered) > len(chosen)}
         for f, img, kind in chosen:
-            for text in _band_texts(img):
+            # 只在拼合图路径上传 text_only，band 路径保持原调用签名，
+            # 这样既有调用方/测试桩不需要跟着改。
+            texts = (_band_texts(img, text_only=True) if kind == "roi_sheet"
+                     else _band_texts(img))
+            for text in texts:
                 key = text.strip().lower()
                 if not key or key in seen:
                     continue
