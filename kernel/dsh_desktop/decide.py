@@ -316,7 +316,20 @@ def decide(goal: str, elements: list[dict], *, top_k: int = 5,
     if best["score"] < min_score:
         return Decision(None, confidence, scored[:top_k], "below threshold",
                         score=best["score"], gap=gap)
-    if confidence < min_confidence:
+    # BUG-19, refined on real QQGallery data: a blanket confidence gate also
+    # refused 云空间 (Hyperlink) because 加密空间 shares a character. The reliable
+    # signal is an EXACT-TEXT COLLISION: several elements literally named by the
+    # goal, none of them an actionable control. That is the "下载 nav Text vs
+    # nameless toolbar Button" case. A unique exact match, even on a Hyperlink,
+    # is the intended navigation target and must stay clickable.
+    goal_exact = normalise(goal)
+    exact = [row for row in scored if normalise(row["text"]) == goal_exact]
+    actionable = {"button", "splitbutton", "menuitem", "tabitem", "checkbox",
+                  "radiobutton", "combobox", "listitem", "treeitem", "slider",
+                  "spinner", "thumb", "hyperlink"}
+    collision = (len(exact) > 1
+                 and not any(str(r.get("type", "")).lower() in actionable for r in exact))
+    if (singleton and confidence < min_confidence) or collision:
         return Decision(None, confidence, scored[:top_k], "low_confidence",
                         score=best["score"], gap=gap, ambiguous=True)
     # A pick that barely beats the runner-up is where the wrong answers live; the

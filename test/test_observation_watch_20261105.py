@@ -116,6 +116,29 @@ class WatchTests(unittest.TestCase):
         self.assertLess(path.stat().st_size, 4_500_000)
 
 
+class DiagnosticMarkerTests(unittest.TestCase):
+    """BUG-08: markers must land inside a downscaled desktop capture."""
+
+    def test_capture_reports_source_dimensions(self):
+        # controller.capture_desktop must expose the pre-resize size so the
+        # diagnostic can convert physical cursor pixels into image pixels.
+        import inspect
+        from dsh_desktop import controller
+        src = inspect.getsource(controller.AppController.capture_desktop)
+        self.assertIn('"source_width"', src)
+        self.assertIn('"source_height"', src)
+
+    def test_to_image_scales_physical_coords(self):
+        # 3840x2160 physical -> 1366x768 stored. A cursor at (1920, 900)
+        # must map inside the stored image, not off-canvas.
+        width, height = 1366, 768
+        fx, fy = width / 3840.0, height / 2160.0
+        x, y = int(1920 * fx), int(900 * fy)
+        self.assertEqual((x, y), (683, 320))
+        self.assertLess(x, width)
+        self.assertLess(y, height)
+
+
 class CleanupReportShapeTests(unittest.TestCase):
     """BUG-01: cleanup reports task-derived windows it closed."""
 

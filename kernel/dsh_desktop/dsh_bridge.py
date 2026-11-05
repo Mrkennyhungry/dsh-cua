@@ -631,18 +631,40 @@ def _ineffective_diagnostic(window_id: str, args: tuple, streak: int) -> dict:
         return {"error": "diagnostic frame unreadable", "streak": streak,
                 "image_path": path}
     height, width = frame.shape[:2]
-    scale = 1.0
+    # The desktop capture is ALREADY downscaled by screenshot_max_dim (1366 on
+    # this host). Markers use physical screen pixels, so convert through the
+    # capture's real ratio; otherwise they land off-canvas and get cropped.
+    src_w = float(shot.get("source_width") or 0) or float(width)
+    src_h = float(shot.get("source_height") or 0) or float(height)
+    factor_x, factor_y = width / src_w, height / src_h
+    # mss monitors[0] is the virtual screen; its origin can be negative on a
+    # multi-monitor setup, while GetCursorPos is already in that space.
+    try:
+        import mss
+        mon = mss.mss().monitors[0]
+        origin_x, origin_y = int(mon["left"]), int(mon["top"])
+    except Exception:
+        origin_x, origin_y = 0, 0
     if max(height, width) > 1920:
-        scale = 1920 / max(height, width)
-        frame = cv2.resize(frame, (int(width * scale), int(height * scale)))
+        down = 1920 / max(height, width)
+        frame = cv2.resize(frame, (int(width * down), int(height * down)))
+        factor_x *= down
+        factor_y *= down
+        width, height = frame.shape[1], frame.shape[0]
+
+    def to_image(px: float, py: float) -> tuple[int, int]:
+        x = int((px - origin_x) * factor_x)
+        y = int((py - origin_y) * factor_y)
+        return min(max(0, x), width - 1), min(max(0, y), height - 1)
 
     point = wintypes.POINT()
     ctypes.windll.user32.GetCursorPos(ctypes.byref(point))
-    actual = (int(point.x * scale), int(point.y * scale))
+    actual = to_image(point.x, point.y)
     cv2.drawMarker(frame, actual, (0, 0, 255), cv2.MARKER_CROSS, 24, 3)
 
     expected = None
     offset = None
+    expected_screen = None
     try:
         info = desktop_tools.bound_window_info(window_id) or {}
         hwnd = int(info.get("hwnd") or 0)
@@ -650,10 +672,11 @@ def _ineffective_diagnostic(window_id: str, args: tuple, streak: int) -> dict:
             nx, ny = float(args[1]), float(args[2])
             if 0 <= nx <= 1000 and 0 <= ny <= 1000:
                 cr = win32gui.GetClientRect(hwnd)
-                sx, sy = win32gui.ClientToScreen(hwnd, (0, 0))
-                ex = sx + nx / 1000 * (cr[2] - cr[0])
-                ey = sy + ny / 1000 * (cr[3] - cr[1])
-                expected = (round(ex * scale), round(ey * scale))
+                client_x, client_y = win32gui.ClientToScreen(hwnd, (0, 0))
+                ex = client_x + nx / 1000 * (cr[2] - cr[0])
+                ey = client_y + ny / 1000 * (cr[3] - cr[1])
+                expected_screen = [round(ex), round(ey)]
+                expected = to_image(ex, ey)
                 offset = [round(ex - point.x), round(ey - point.y)]
                 cv2.circle(frame, expected, 18, (255, 0, 0), 3)
                 cv2.line(frame, expected, actual, (0, 255, 255), 2)
@@ -665,10 +688,10 @@ def _ineffective_diagnostic(window_id: str, args: tuple, streak: int) -> dict:
     out = out_dir / f"diagnostic_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}.jpeg"
     cv2.imwrite(str(out), frame, [int(cv2.IMWRITE_JPEG_QUALITY), 82])
     return {"image_path": str(out), "streak": streak,
-            "expected_screen": [round(e / scale) for e in expected] if expected else None,
+            "expected_screen": expected_screen,
             "actual_cursor": [point.x, point.y],
             "offset_px": offset,
-            "scale": round(scale, 3),
+            "scale": round(min(factor_x, factor_y), 3),
             "legend": "blue circle = intended point; red cross = GetCursorPos; yellow line = offset"}
 
 

@@ -365,6 +365,11 @@ class AppController:
         result = {
             "width": compressed.shape[1],
             "height": compressed.shape[0],
+            # Physical-pixel size of the source frame. Callers that draw markers
+            # using GetCursorPos / screen coordinates need this to convert them
+            # into the compressed image's coordinate space.
+            "source_width": int(w),
+            "source_height": int(h),
             IMAGE_PATH_KEY: path,
             "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
         }
