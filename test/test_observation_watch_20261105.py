@@ -247,7 +247,11 @@ class WatchTests(unittest.TestCase):
             short = session.since(10, 8, expect=("失败",))
             full = session.since(10, 8, expect=("失败",), expect_all=True)
         self.assertEqual(short["text_other_count"], 1)
-        self.assertNotIn("text_candidates", short)
+        # 行为变更（67255ca）：候选 ≤20 条时**也**返回全部候选，
+        # 不再只给命中项——否则「已复制到剪贴板」这类不含预期词的提示会被藏掉。
+        # expect_all 仍然是"候选很多时强制全量"的开关。
+        self.assertEqual(short["text_candidates_scope"], "all")
+        self.assertEqual(short["text_candidates"][0]["text"], "29°C")
         self.assertEqual(full["text_candidates"][0]["text"], "29°C")
 
     def test_since_deduplicates_the_same_message_across_frames(self):
