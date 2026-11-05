@@ -262,13 +262,17 @@ def _bottom_band(frame: np.ndarray) -> np.ndarray | None:
     return band
 
 
-def _diff_rois(prev: np.ndarray | None, curr: np.ndarray | None) -> list:
+def _diff_rois(prev: np.ndarray | None, curr: np.ndarray | None,
+               ignore: tuple[int, int, int, int] | None = None) -> list:
     """Crops of `curr` that actually changed versus `prev`, at source resolution.
 
     This is a GEOMETRIC operation, not a semantic one: it never asks "is this a
     popup", it only asks "which pixels are different". That keeps it inside the
     no-semantic-judgement constraint while removing the need to OCR a whole
     half-screen band for every retained frame.
+
+    `ignore` 是屏幕坐标矩形 (left, top, right, bottom)：桌宠会自己眨眼、换姿势，
+    连拍时它不该产生候选。传进来就整块从 mask 里抹掉。
     """
     if prev is None or curr is None or prev.size == 0 or curr.size == 0:
         return []
@@ -282,6 +286,12 @@ def _diff_rois(prev: np.ndarray | None, curr: np.ndarray | None) -> list:
         diff = cv2.absdiff(a, b)
         gray = cv2.cvtColor(diff, cv2.COLOR_BGR2GRAY)
         mask = (gray > 25).astype(np.uint8) * 255
+        if ignore:
+            il, it, ir, ib = ignore
+            x0, y0 = max(0, il // 2), max(0, it // 2)
+            x1, y1 = min(small[0], ir // 2 + 1), min(small[1], ib // 2 + 1)
+            if x1 > x0 and y1 > y0:
+                mask[y0:y1, x0:x1] = 0
         # Merge the letters of a message into one rectangle instead of dozens.
         mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE,
                                 cv2.getStructuringElement(cv2.MORPH_RECT, (15, 5)))
@@ -445,14 +455,34 @@ class WatchSession:
         bottom-right corner, which lives outside any bound window's client
         rect. Sampling only that window would never see it. Fall back to the
         window crop only when a desktop grab is unavailable.
+
+        连拍必须关掉光标守卫：capture_guard 每帧都要隐藏桌宠、睡 32ms、再显示，
+        10fps 就是每秒闪十次。改为不隐藏，由 _decoration_rect() 把桌宠矩形从
+        diff 里遮掉。
         """
         desktop = getattr(self._capture, "capture_desktop", None)
         if callable(desktop):
-            frame = desktop()
+            try:
+                frame = desktop(guard_cursor=False)
+            except TypeError:          # 旧内核没有这个参数
+                frame = desktop()
             if frame is not None and getattr(frame, "size", 0):
                 return frame, "desktop"
         frame = self._capture.capture(self.hwnd, activate=False)
         return frame, "window"
+
+    def _decoration_rect(self):
+        """桌宠当前占的屏幕矩形；不可见时返回 None。"""
+        try:
+            import win32gui
+            from .cursor_overlay import peek_cursor_overlay
+            overlay = peek_cursor_overlay()
+            hwnd = int(getattr(overlay, "_hwnd", 0) or 0) if overlay else 0
+            if not hwnd or not win32gui.IsWindowVisible(hwnd):
+                return None
+            return win32gui.GetWindowRect(hwnd)
+        except Exception:  # noqa: BLE001 - 遮罩失败就按没桌宠处理
+            return None
 
     def _grab_window(self):
         """整窗 PrintWindow 通道。
@@ -549,7 +579,11 @@ class WatchSession:
                         # Diff against the previous SAMPLED frame (not the
                         # previous retained one), so the rectangles describe
                         # what just appeared, not everything that drifted.
-                        rois = self._blind_rois(frame, _diff_rois(self._prev_frame, frame))
+                        # 桌宠会眨眼/换姿势，但它是装饰，不该产生 OCR 候选。
+                        # 采样时不再隐藏它（那样要每秒闪十次），改成整块遮掉。
+                        ignore = self._decoration_rect()
+                        rois = self._blind_rois(
+                            frame, _diff_rois(self._prev_frame, frame, ignore))
                         frac = (sum(r.shape[0] * r.shape[1] for r in rois)
                                 / float(frame.shape[0] * frame.shape[1])) if rois else 0.0
                         with self._lock:

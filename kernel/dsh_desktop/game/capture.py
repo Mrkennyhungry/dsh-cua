@@ -94,10 +94,16 @@ class CaptureService:
             logger.error("PrintWindow capture failed for hwnd=%d: %s", hwnd, e)
             return None
 
-    def capture_desktop(self) -> np.ndarray | None:
-        """Capture the entire desktop (all monitors combined)."""
+    def capture_desktop(self, *, guard_cursor: bool = True) -> np.ndarray | None:
+        """Capture the entire desktop (all monitors combined).
+
+        guard_cursor=False 时不隐藏桌宠再截图。连拍（watch 10fps）必须走这条
+        路：守卫每次都要 ShowWindow 隐藏 + 睡 32ms + 重新显示，10fps 就是每秒
+        闪十次。省下来的隐藏由调用方自己把精灵所在矩形从 diff 里遮掉。
+        """
         try:
-            with _cursor_guard(), mss.mss() as sct:
+            guard = _cursor_guard() if guard_cursor else nullcontext()
+            with guard, mss.mss() as sct:
                 monitor = sct.monitors[0]  # [0] = virtual screen spanning all monitors
                 raw = sct.grab(monitor)
             return cv2.cvtColor(np.array(raw), cv2.COLOR_BGRA2BGR)

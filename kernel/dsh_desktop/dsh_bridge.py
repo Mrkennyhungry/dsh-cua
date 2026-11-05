@@ -815,6 +815,7 @@ def create_router(eternity) -> APIRouter:
                   "cursor": ({"visible": desktop_tools._CURSOR.visible,
                               "target": desktop_tools._CURSOR._target,
                               "action": desktop_tools._CURSOR._resolved_action(time.monotonic()),
+                              "guard_hides": getattr(desktop_tools._CURSOR, "guard_hides", 0),
                               "error": desktop_tools._CURSOR.error}
                              if desktop_tools._CURSOR is not None else {"visible": False, "started": False}),
                 "ledger": ledger.summary(5)}

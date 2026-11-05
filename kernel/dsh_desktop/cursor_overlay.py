@@ -92,6 +92,9 @@ class CursorOverlay:
         self._action, self._action_until = "idle", 0.0
         self._tasks = set()
         self._capture_depth = 0
+        # 诊断用：截图守卫一共把精灵藏起来多少次。连拍（watch 10fps）会让它
+        # 每秒涨 10 次，正是"疯狂闪烁"的来源；/health 暴露这个计数。
+        self.guard_hides = 0
         self._leases = {}
         self._born = 0.0
         self._origin = None
@@ -132,6 +135,7 @@ class CursorOverlay:
     def capture_guard(self):
         with self._lock:
             self._capture_depth += 1
+            self.guard_hides += 1
         try:
             if self._hwnd:
                 ctypes.windll.user32.ShowWindow(self._hwnd, SW_HIDE)

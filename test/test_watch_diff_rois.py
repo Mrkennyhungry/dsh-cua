@@ -88,6 +88,20 @@ def test_frame_rois_default_is_none_for_backward_compat():
     assert frame.rois is None
 
 
+def test_ignore_rect_masks_the_docked_mascot():
+    """桌宠自己眨眼不该产生候选：它所在矩形要被整块遮掉。"""
+    before = _blank()
+    after = before.copy()
+    after[10:60, 500:700] = 30            # 桌宠位置的变化（应被遮掉）
+    after[520:560, 250:550] = 40          # 同时有一条真 toast
+
+    with_ignore = watch._diff_rois(before, after, (500, 10, 700, 60))
+    assert len(with_ignore) == 1, f"只应剩下 toast 那一块，实际 {len(with_ignore)}"
+
+    without_ignore = watch._diff_rois(before, after)
+    assert len(without_ignore) == 2, "不遮的话两块都该被看到"
+
+
 def test_safety_valve_keeps_smallest_regions():
     """超过 ROI_MAX_PER_FRAME 时保留**小面积**矩形：大的多半是页面churn。"""
     before = _blank(1200, 900)
