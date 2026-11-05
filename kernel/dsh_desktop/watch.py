@@ -519,6 +519,25 @@ def _fit(frame: np.ndarray, max_dim: int) -> np.ndarray:
     return cv2.resize(frame, (max(1, round(w * scale)), max(1, round(h * scale))))
 
 
+WATCH_KEEP_PER_KIND = 12
+
+
+def _prune_artifacts(out, keep: int = WATCH_KEEP_PER_KIND) -> None:
+    """watch 的磁盘产物必须有界。
+
+    since_*/band_* 每张都带微秒时间戳，不清理就会无限累积（一次 since 两张）。
+    只清理由本模块生成的这两类文件，目录里的其他内容一律不动。
+    """
+    try:
+        for prefix in ("since_", "band_"):
+            files = sorted(out.glob(f"{prefix}*.jpeg"),
+                           key=lambda p: p.stat().st_mtime, reverse=True)
+            for old in files[keep:]:
+                old.unlink(missing_ok=True)
+    except Exception:  # noqa: BLE001 - 清理失败不能影响出图
+        pass
+
+
 def _output_dir() -> "Path":
     """Keep watch artifacts inside the kernel workspace, never a protected
     profile directory. Tests and hosts can override with DSH_WATCH_DIR."""
@@ -563,6 +582,7 @@ def _contact_sheet(frames: list[Frame]) -> str:
     out = _output_dir()
     path = out / f"since_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}.jpeg"
     cv2.imwrite(str(path), sheet, [int(cv2.IMWRITE_JPEG_QUALITY), JPEG_QUALITY])
+    _prune_artifacts(out)
     return str(path)
 
 
@@ -601,6 +621,7 @@ def _band_strip(frames: list[Frame]) -> str:
     out = _output_dir()
     path = out / f"band_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}.jpeg"
     cv2.imwrite(str(path), sheet, [int(cv2.IMWRITE_JPEG_QUALITY), 90])
+    _prune_artifacts(out)
     return str(path)
 
 
