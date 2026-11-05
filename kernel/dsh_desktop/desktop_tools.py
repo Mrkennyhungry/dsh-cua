@@ -148,6 +148,7 @@ def cleanup_session_footprint(
         "success": True, "closed_browser": False, "closed_apps": [],
         "failed_apps": [], "unbound_windows": 0, "closed_explorers": 0,
         "closed_windows": [], "kept_windows": [], "remaining_new_windows": [],
+        "closed_opened_windows": [],
     }
     keep_keys = {str(key) for key in (keep_window_keys or []) if str(key)}
     baseline_keys = {
@@ -262,6 +263,65 @@ def cleanup_session_footprint(
             _STATE._launched_windows = remaining
         except Exception as exc:  # noqa: BLE001
             logger.debug("cleanup: close owned windows failed: %s", exc)
+    # 2b. BUG-01: windows the APPLICATION opened during the task (an image
+    # viewer, a second-level dialog) were never in _launched_windows, so they
+    # survived cleanup. Close only what we can prove: appeared after the task
+    # baseline, belongs to a process we bound/launched, has a real title, and is
+    # not one of our own decoration windows.
+    if close_launched_apps and baseline_windows:
+        try:
+            import win32con
+            import win32gui
+            from .decorations import is_decoration_window
+            ownership = ownership_snapshot()
+            known_pids = (set(ownership.get("launched_pids") or {})
+                          | set(ownership.get("bound_pids") or set()))
+            baseline_hwnds = set()
+            for item in baseline_windows or []:
+                try:
+                    baseline_hwnds.add(int(str(item.get("window_key", "")).split(":")[0]))
+                    if item.get("hwnd"):
+                        baseline_hwnds.add(int(item["hwnd"]))
+                except (ValueError, TypeError):
+                    continue
+            keep_hwnds = set()
+            for key in keep_keys:
+                try:
+                    keep_hwnds.add(int(str(key).split(":")[0]))
+                except (ValueError, TypeError):
+                    continue
+
+            def _close_task_window(hwnd: int, _param: Any) -> None:
+                if not win32gui.IsWindowVisible(hwnd) or hwnd in baseline_hwnds:
+                    return
+                if hwnd in keep_hwnds or is_decoration_window(hwnd):
+                    return
+                title = (win32gui.GetWindowText(hwnd) or "").strip()
+                if not title:
+                    return
+                try:
+                    _, pid = win32process.GetWindowThreadProcessId(hwnd)
+                except Exception:
+                    return
+                if int(pid) not in known_pids:
+                    return
+                key = _current_window_key(hwnd)
+                if not key:
+                    return
+                try:
+                    win32gui.PostMessage(hwnd, win32con.WM_CLOSE, 0, 0)
+                    deadline = time.monotonic() + timeout_per_app
+                    while time.monotonic() < deadline and win32gui.IsWindow(hwnd):
+                        time.sleep(0.1)
+                    if not win32gui.IsWindow(hwnd):
+                        report["closed_opened_windows"].append(key)
+                        report["closed_windows"].append({"window_key": key, "title": title[:60]})
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug("cleanup: close task window failed: %s", exc)
+
+            win32gui.EnumWindows(_close_task_window, None)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("cleanup: task window sweep failed: %s", exc)
     # 3. Window bindings
     if unbind_windows:
         with _STATE._lock:
@@ -1530,6 +1590,44 @@ def _element_is_addressable(element: dict) -> bool:
     return named(element.get("text")) or named(element.get("caption"))
 
 
+def _mask_foreign_windows(frame, hwnd: int, crop_rect):
+    """BUG-09: whiten parse-frame cells whose GA_ROOT is not the target window.
+
+    Uses the ROOT window, not the pid: a same-process file dialog must be masked
+    too (it is a different top-level window the caller has not bound). Sampling
+    a 16px grid keeps this cheap on a 4K frame.
+    """
+    import win32gui
+    import numpy as np
+    height, width = frame.shape[:2]
+    # crop_rect (desktop scope) is (screen_left, screen_top, width, height).
+    # For window scope the frame is exactly the client rect crop.
+    if crop_rect:
+        ox, oy = int(crop_rect[0]), int(crop_rect[1])
+    else:
+        pt = win32gui.ClientToScreen(hwnd, (0, 0))
+        ox, oy = int(pt[0]), int(pt[1])
+    step = 16
+    out = frame.copy()
+    covers: dict[int, str] = {}
+    masked = 0
+    total = 0
+    for y in range(0, height, step):
+        for x in range(0, width, step):
+            total += 1
+            sx, sy = ox + x, oy + y
+            hit = win32gui.WindowFromPoint((sx, sy))
+            root = int(win32gui.GetAncestor(hit, 2)) if hit else 0
+            if root and root != int(hwnd):
+                covers[root] = win32gui.GetWindowText(root)[:60]
+                y2, x2 = min(y + step, height), min(x + step, width)
+                out[y:y2, x:x2] = 255
+                masked += 1
+    return out, {"masked_ratio": round(masked / total, 4) if total else 0.0,
+                 "covers": [{"hwnd": k, "title": v} for k, v in list(covers.items())[:8]],
+                 "note": "解析帧中非目标窗口的格子已涂白；要操作它们请先 bind 对应 hwnd。"}
+
+
 def _overlapping_windows(hwnd: int, client_rect, limit: int = 3) -> list[dict[str, Any]]:
     """Visible top-level windows stacked above `hwnd` that cover its client area.
 
@@ -1575,6 +1673,7 @@ def desktop_analyze(
     caption_icons: bool = False, annotate: bool = True,
     scope: str = "window", recover_black: bool = False, region: str = "auto",
     only_actionable: bool = False, max_elements: int = 0,
+    include_uia: bool = True, mask_foreign: bool = False,
 ) -> dict:
     """
     Args:
@@ -1664,6 +1763,16 @@ def desktop_analyze(
                          "或传 recover_black=true 允许本次激活重截。"),
                 "scope": scope, "timing_ms": timing_ms}
     h, w = frame.shape[:2]
+    # BUG-09: a window-scope capture is a SCREEN CROP, so a foreign window on
+    # top gets OCR'd into the element list. Default stays off (the existing
+    # occlusion report is the honest signal); callers that want a clean element
+    # list can opt in. Only the parse frame is masked, never the saved evidence.
+    foreign_info: dict[str, Any] = {"masked_ratio": 0.0, "covers": []}
+    if mask_foreign and scope == "window":
+        try:
+            frame, foreign_info = _mask_foreign_windows(frame, hwnd, crop_rect)
+        except Exception as exc:  # noqa: BLE001
+            foreign_info["error"] = f"{type(exc).__name__}: {exc}"
     stage_started = time.perf_counter()
     try:
         if engine in ("local", "local-deepseek"):
@@ -1682,8 +1791,44 @@ def desktop_analyze(
         timing_ms["total"] = round((time.perf_counter() - total_started) * 1000)
         return {**parsed, "timing_ms": timing_ms}
     elements = parsed["elements"]
+    # BUG-03: the observation link used to be pure OCR/YOLO while the decision
+    # link was UIA-first, so icon buttons came back as "icon"/"?" here but had
+    # real names in element_table. Merge UIA into the same element list with the
+    # shared filter policy. activate=False keeps this a *vision* observation:
+    # forcing foreground here collapses CEF dropdowns (2026-09-07 regression).
+    uia_info: dict[str, Any] = {"enabled": False, "controls": 0,
+                                "named": 0, "replaced_ocr": 0}
+    if include_uia and scope == "window":
+        uia_started = time.perf_counter()
+        try:
+            named = _uia_named_items(window_id, activate=False)
+            uia_info.update({"enabled": True, "controls": len(named), "named": len(named)})
+            if named:
+                # UIA wins over visual elements in the same region. Only drop
+                # short labels: a large UIA container box must not erase an
+                # unrelated paragraph of OCR body text inside it.
+                merged = list(named)
+                for element in elements:
+                    box = element.get("bbox") or []
+                    label = str(element.get("text") or "").strip()
+                    if len(box) != 4 or len(label) > 12:
+                        merged.append(element)
+                        continue
+                    cx, cy = (box[0] + box[2]) / 2, (box[1] + box[3]) / 2
+                    covered = any(r["bbox"][0] <= cx <= r["bbox"][2]
+                                  and r["bbox"][1] <= cy <= r["bbox"][3] for r in named)
+                    if covered:
+                        uia_info["replaced_ocr"] += 1
+                    else:
+                        merged.append(element)
+                elements = merged
+        except Exception as exc:  # noqa: BLE001 - UIA is an enhancement, never a gate
+            uia_info["error"] = f"{type(exc).__name__}: {exc}"
+        timing_ms["uia"] = round((time.perf_counter() - uia_started) * 1000)
     result: dict[str, Any] = {
         "window_id": window_id,
+        "uia": uia_info,
+        "foreign_windows": foreign_info if mask_foreign else None,
         "engine": engine,
         "caption_enabled": caption,
         "ui_elements": elements,
@@ -4180,6 +4325,54 @@ def desktop_uia_state(window_id: str, name: str = "") -> dict:
 @tool("构建当前窗口的元素表（UIA 优先；UIA 稀疏时回落 OCR 并与 UIA 合并），供本地决策层选元素用。"
       "返回 [{id, text, type, bbox}]：type 只有 UIA 档才有。caption=true 时会给图标加语义标注，"
       "这让没有名字的图标按钮（关闭/最小化这类）也能按名字被选中。")
+def _uia_named_items(window_id: str, *, activate: bool = True) -> list[dict]:
+    """One UIA->element-table conversion shared by analyze and the decision path.
+
+    Both the observation link (desktop_analyze) and the decision link
+    (desktop_element_table) used to build their own UIA rows with different
+    filters, which is how "UIA first" held only for decisions. Keep the filter
+    policy in one place: name >= 2 chars, no placeholders, no containers,
+    area <= 400000, Button preferred over a same-named Image.
+    """
+    from .decide import PLACEHOLDERS
+    container_types = {"pane", "group", "document", "custom", "titlebar", "window"}
+    try:
+        tree = _desktop_uia_tree_once(window_id, max_depth=9, max_nodes=400,
+                                      activate=activate)
+    except Exception:
+        return []
+    rows: list[dict] = []
+    for control in tree.get("controls", []):
+        name = str(control.get("name") or "").strip()
+        ctype = str(control.get("control_type") or "").strip()
+        box = control.get("bbox")
+        if len(name) < 2 or name.lower() in PLACEHOLDERS:
+            continue
+        if ctype.lower() in container_types:
+            continue
+        if not isinstance(box, (list, tuple)) or len(box) != 4:
+            continue
+        area = max(0, box[2] - box[0]) * max(0, box[3] - box[1])
+        if area <= 0 or area > 400_000:
+            continue
+        ibox = [int(v) for v in box]
+        rows.append({"id": len(rows), "text": name[:80], "type": ctype,
+                     "bbox": ibox, "source": "uia",
+                     "click_x": (ibox[0] + ibox[2]) // 2,
+                     "click_y": (ibox[1] + ibox[3]) // 2,
+                     "click_unit": "normalized_0_1000"})
+    # Same-named Button/Image: keep the Button (it is the actionable one).
+    by_name: dict[str, int] = {}
+    for row in rows:
+        key = row["text"].strip().lower()
+        prior = by_name.get(key)
+        if prior is None:
+            by_name[key] = row["id"]
+        elif row["type"].lower() == "button" and rows[prior]["type"].lower() != "button":
+            rows[prior] = row
+    return rows
+
+
 def desktop_element_table(window_id: str, source: str = "auto", fresh: bool = False,
                       caption: bool = False) -> dict:
     from .decide import PLACEHOLDERS  # same placeholder policy as the benchmark
@@ -4202,18 +4395,8 @@ def desktop_element_table(window_id: str, source: str = "auto", fresh: bool = Fa
         return 0 < area <= 400_000
 
     def from_uia() -> list[dict]:
-        try:
-            tree = _desktop_uia_tree_once(window_id, max_depth=9, max_nodes=400)
-        except Exception:  # noqa: BLE001
-            return []
-        rows = []
-        for control in tree.get("controls", []):
-            text, box = control.get("name"), control.get("bbox")
-            if not valid(text, box):
-                continue
-            rows.append({"id": len(rows), "text": str(text)[:80],
-                         "type": str(control.get("control_type") or ""), "bbox": [int(v) for v in box]})
-        return rows
+        # Shared filter policy with the observation link (BUG-03).
+        return _uia_named_items(window_id)
 
     def from_ocr() -> list[dict]:
         analysis = desktop_analyze(window_id, caption=caption, annotate=False)
@@ -4892,7 +5075,8 @@ def _uia_walk(
 
 
 
-def _desktop_uia_tree_once(window_id: str, max_depth: int = 7, max_nodes: int = 300) -> dict:
+def _desktop_uia_tree_once(window_id: str, max_depth: int = 7, max_nodes: int = 300,
+                           activate: bool = True) -> dict:
 
     controller = _controller()
     if controller is None:
@@ -4910,10 +5094,12 @@ def _desktop_uia_tree_once(window_id: str, max_depth: int = 7, max_nodes: int = 
     # MenuItem（文件/编辑/查看）"。这是评审指出的 max_nodes 钳制问题。
     max_nodes = max(20, min(int(max_nodes), 1500))
     # collect-type: lazy Electron UIA needs foreground, but skip when a
-    # same-app popup already effectively has it (don't collapse it)
-    if not _is_effectively_foreground(hwnd):
+    # same-app popup already effectively has it (don't collapse it).
+    # activate=False is used by desktop_analyze: a *vision* observation must
+    # never steal focus, or it collapses CEF dropdowns (2026-09-07 regression).
+    if activate and not _is_effectively_foreground(hwnd):
         controller._force_foreground(hwnd)
-    time.sleep(0.15)
+        time.sleep(0.15)
     try:
         from pywinauto import Desktop
         # Normalize against the CLIENT region — the same basis as
@@ -5693,3 +5879,40 @@ def desktop_cleanup_windows_by_exe(exe_keyword: str = "", keep: int = 0,
         "note": ("只关闭本任务登记且身份匹配的窗口；遇到保存确认框保留现场，"
                  "由调用方决定是否保存。"),
     }
+
+
+# ── Design-01: always-on watch / on-demand `since` ───────────────────────
+
+
+@tool("后台持续采样窗口画面（10fps，只保留变化的帧，48 帧环形缓冲）。"
+      "用于捕捉 2-3 秒就消失的瞬时提示（toast）、菜单、加载态。"
+      "action=start|stop|since|status。since 返回时间窗内帧的拼图与双分变化分，"
+      "按时间顺序而非分数排序；静止时不产生图片、不消耗 token。")
+def desktop_watch(window_id: str = "", action: str = "status",
+                  seconds: float = 20.0, limit: int = 8) -> dict:
+    from .watch import registry
+    action = str(action or "status").strip().lower()
+    if action == "status" and not window_id:
+        return {"success": True, "action": "status", "sessions": []}
+    if action not in ("start", "stop", "since", "status"):
+        return {"success": False, "error": "action 仅支持 start/stop/since/status"}
+    if action == "status":
+        return {"success": True, "action": "status",
+                **registry().status(window_id)}
+    controller = _controller()
+    if controller is None:
+        return {"error": "DESKTOP_NOT_READY: AppController 尚未初始化"}
+    with _STATE._lock:
+        info = _STATE._windows.get(window_id)
+    if info is None:
+        return {"success": False, "error": f"window_id 不存在: {window_id}"}
+    hwnd = int(info["hwnd"])
+    if action == "start":
+        return {"success": True, "action": "start",
+                **registry().start(window_id, hwnd, controller.capture)}
+    if action == "stop":
+        return {"success": True, "action": "stop", **registry().stop(window_id)}
+    seconds = max(0.5, min(float(seconds), 300.0))
+    limit = max(1, min(int(limit), 16))
+    return {"success": True, "action": "since",
+            **registry().since(window_id, seconds, limit)}

@@ -179,6 +179,8 @@ class AnalyzeRequest(BaseModel):
     # 只裁元素列表，不裁截图：被别的窗口压住时，截图里仍然能看到它们（并回 occlusion）。
     only_actionable: bool = False
     max_elements: int = Field(default=0, ge=0, le=2000)
+    include_uia: bool = True
+    mask_foreign: bool = False
 
 
 class CaptureBound(BaseModel):
@@ -366,6 +368,14 @@ class CleanupRequest(BaseModel):
     close_launched_apps: bool = True
     keep_window_keys: list[str] = Field(default_factory=list, max_length=100)
     keep_browser: bool = False
+
+
+class WatchRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    window_id: str = Field(default="", max_length=128)
+    action: str = Field(default="status", pattern="^(start|stop|since|status)$")
+    seconds: float = Field(default=20.0, ge=0.5, le=300.0)
+    limit: int = Field(default=8, ge=1, le=16)
 
 
 class WaitStableRequest(BaseModel):
@@ -595,6 +605,71 @@ _LAST_SIGNATURE: dict[str, tuple[float, list | None]] = {}
 # repaint confirms; a couple of cells never does.
 _PIXEL_CONFIRM_CELLS = 15
 _PIXEL_CONFIRM_MEAN = 2.0
+
+
+def _ineffective_diagnostic(window_id: str, args: tuple, streak: int) -> dict:
+    """Full-screen annotated evidence after repeated no-op actions (BUG-08).
+
+    The parse frame of one window hides occluders, so use the whole desktop.
+    Bounded to a 1920 long edge JPEG: a 4K PNG is ~7.8 MB and exceeds the
+    adapter's inline image limit.
+    """
+    import cv2
+    import numpy as np
+    import win32gui
+    import ctypes
+    from ctypes import wintypes
+    from pathlib import Path
+    from datetime import datetime
+
+    shot = desktop_tools.desktop_capture_desktop(analyze=False)
+    if not shot.get("success"):
+        return {"error": shot.get("error") or "capture failed", "streak": streak}
+    path = shot.get("image_path") or shot.get("path")
+    frame = cv2.imread(str(path)) if path else None
+    if frame is None:
+        return {"error": "diagnostic frame unreadable", "streak": streak,
+                "image_path": path}
+    height, width = frame.shape[:2]
+    scale = 1.0
+    if max(height, width) > 1920:
+        scale = 1920 / max(height, width)
+        frame = cv2.resize(frame, (int(width * scale), int(height * scale)))
+
+    point = wintypes.POINT()
+    ctypes.windll.user32.GetCursorPos(ctypes.byref(point))
+    actual = (int(point.x * scale), int(point.y * scale))
+    cv2.drawMarker(frame, actual, (0, 0, 255), cv2.MARKER_CROSS, 24, 3)
+
+    expected = None
+    offset = None
+    try:
+        info = desktop_tools.bound_window_info(window_id) or {}
+        hwnd = int(info.get("hwnd") or 0)
+        if hwnd and len(args) >= 3:
+            nx, ny = float(args[1]), float(args[2])
+            if 0 <= nx <= 1000 and 0 <= ny <= 1000:
+                cr = win32gui.GetClientRect(hwnd)
+                sx, sy = win32gui.ClientToScreen(hwnd, (0, 0))
+                ex = sx + nx / 1000 * (cr[2] - cr[0])
+                ey = sy + ny / 1000 * (cr[3] - cr[1])
+                expected = (round(ex * scale), round(ey * scale))
+                offset = [round(ex - point.x), round(ey - point.y)]
+                cv2.circle(frame, expected, 18, (255, 0, 0), 3)
+                cv2.line(frame, expected, actual, (0, 255, 255), 2)
+                cv2.putText(frame, f"offset {offset}", (expected[0] + 22, expected[1] - 12),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 200, 220), 2)
+    except Exception:
+        pass
+    out_dir = Path(path).parent
+    out = out_dir / f"diagnostic_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}.jpeg"
+    cv2.imwrite(str(out), frame, [int(cv2.IMWRITE_JPEG_QUALITY), 82])
+    return {"image_path": str(out), "streak": streak,
+            "expected_screen": [round(e / scale) for e in expected] if expected else None,
+            "actual_cursor": [point.x, point.y],
+            "offset_px": offset,
+            "scale": round(scale, 3),
+            "legend": "blue circle = intended point; red cross = GetCursorPos; yellow line = offset"}
 
 
 def _pixel_change_confirms(change: dict | None) -> bool:
@@ -862,6 +937,9 @@ def create_router(eternity) -> APIRouter:
     # Last observed UIA state per (window, control): lets a readback detect change
     # without paying for a second walk before every action.
     uia_state: dict[tuple[str, str], dict] = {}
+    # BUG-08: consecutive actions with no visible effect. Two in a row triggers
+    # a full-screen diagnostic with the expected point and the real cursor.
+    ineffective_streak: dict[str, int] = {}
 
     def readback(window_id: str, name: str) -> dict:
         try:
@@ -1164,6 +1242,24 @@ def create_router(eternity) -> APIRouter:
             payload["capture_id"] = capture_id
         if escalation:
             payload["escalation"] = escalation
+        # BUG-08: two consecutive ineffective actions get an annotated full-screen
+        # shot. Blue circle = intended click point, red cross = real cursor,
+        # yellow line + label = pixel offset. This is what distinguishes "wrong
+        # coordinates" from "the click never reached the app".
+        ineffective = (payload.get("success", True) is not False
+                       and effect == "suspected_noop")
+        if ineffective:
+            ineffective_streak[window_id] = ineffective_streak.get(window_id, 0) + 1
+        else:
+            ineffective_streak[window_id] = 0
+        payload["ineffective_streak"] = ineffective_streak[window_id]
+        if ineffective and ineffective_streak[window_id] >= 2:
+            try:
+                payload["diagnostic"] = _ineffective_diagnostic(
+                    window_id, args, ineffective_streak[window_id])
+            except Exception as exc:  # noqa: BLE001 - diagnostics never block
+                payload["diagnostic_warning"] = f"{type(exc).__name__}: {exc}"
+                ineffective_streak[window_id] = 0
         try:
             info = desktop_tools.bound_window_info(window_id)
             if info:  # only real bound windows belong in the capability ledger
@@ -1258,7 +1354,8 @@ def create_router(eternity) -> APIRouter:
         result = invoke(desktop_tools.desktop_analyze, window_id, engine=req.engine, caption=req.caption,
                         caption_icons=req.caption_icons, annotate=req.annotate,
                         scope=req.scope, recover_black=req.recover_black, region=req.region,
-                        only_actionable=req.only_actionable, max_elements=req.max_elements)
+                        only_actionable=req.only_actionable, max_elements=req.max_elements,
+                        include_uia=req.include_uia, mask_foreign=req.mask_foreign)
         result = _compact_observation(result)
         if isinstance(result, dict) and not result.get("error"):
             capture_id = uuid.uuid4().hex
@@ -1827,6 +1924,11 @@ def create_router(eternity) -> APIRouter:
         out["duration_ms"] = int((time.time() - started) * 1000)
         return out
 
+
+    @router.post("/watch")
+    def watch_action(req: WatchRequest):
+        return invoke(desktop_tools.desktop_watch, req.window_id, req.action,
+                      req.seconds, req.limit)
 
     @router.post("/windows/{window_id}/wait-stable")
     def window_wait_stable(window_id: str, req: WaitStableRequest):

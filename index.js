@@ -503,6 +503,8 @@ export function apply(ctx, config) {
       recover_black: { type: 'boolean', description: 'When the capture is near-black (minimized window), allow one activating retry. Off by default because activating can collapse a CEF dropdown.' },
       only_actionable: { type: 'boolean', description: 'Trim the ELEMENT LIST only, never the screenshot: drops elements whose text and caption are both placeholders ("icon", "未知"), which cannot be clicked by name. Windows covering the target stay visible in the picture.' },
       max_elements: { type: 'number', description: 'Cap the element list (0 = keep all, default). Reading order is preserved.' },
+      include_uia: { type: 'boolean', description: 'Merge named UIA controls into the element list (default true) so icon buttons get real names/types instead of "icon". UIA is read without activating the window. Set false for pure OCR/YOLO.' },
+      mask_foreign: { type: 'boolean', description: 'Whiten parts of the PARSE frame belonging to other top-level windows so their text does not enter the element list (default false: occlusion is reported instead). Use when a foreign window covers the target. The saved evidence screenshot is never masked.' },
     },
     output,
     async execute(args, exec) {
@@ -517,6 +519,8 @@ export function apply(ctx, config) {
           annotate: args.annotate !== false, scope, region,
           recover_black: args.recover_black === true,
           only_actionable: args.only_actionable === true, max_elements: maxElements,
+          include_uia: args.include_uia !== false,
+          mask_foreign: args.mask_foreign === true,
         },
         signal: exec.signal, timeoutMs: 60_000,
       })
@@ -1131,6 +1135,31 @@ export function apply(ctx, config) {
         body: { quiet_ms, timeout_ms, threshold, max_changed_cells, interval_ms },
         signal: exec.signal,
         timeoutMs: timeout_ms + 20000,
+      })
+    },
+  }))
+
+  register(defineTool({
+    name: 'doraemon_watch',
+    description: 'Sample the bound window continuously in the background (10fps) and keep only changed frames in a 48-frame ring buffer. Use it to catch transient toast messages, menus or loading states that live 2–3s and vanish before a single screenshot can be requested. action=start begins sampling, since(seconds=N) returns a time-ordered contact sheet plus dual change scores, stop ends it. Frames are returned in TIME order, never ranked by score: a toast has a small local score but is exactly what you need. Still screens keep no frames and cost no tokens.',
+    parameters: {
+      window_id: windowIdParameter,
+      action: { type: 'string', enum: ['start', 'since', 'stop', 'status'], description: 'start | since | stop | status (default status).' },
+      seconds: { type: 'number', description: 'since: how many seconds back to read, 0.5–300 (default 20).' },
+      limit: { type: 'number', description: 'since: max frames in the contact sheet, 1–16 (default 8). Later frames win when truncated.' },
+    },
+    output,
+    async execute(args, exec) {
+      const action = String(args.action ?? 'status')
+      if (!['start', 'since', 'stop', 'status'].includes(action)) throw new Error('action must be start|since|stop|status')
+      const id = action === 'status' && !args.window_id ? '' : boundWindowId(args.window_id)
+      return bridge.request('/watch', ownerOf(exec), {
+        body: {
+          window_id: id, action,
+          seconds: args.seconds === undefined ? 20 : Number(args.seconds),
+          limit: args.limit === undefined ? 8 : Number(args.limit),
+        },
+        signal: exec.signal, timeoutMs: 60_000,
       })
     },
   }))
