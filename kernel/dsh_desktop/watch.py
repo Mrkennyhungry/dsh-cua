@@ -55,10 +55,12 @@ MAX_OCR_BANDS = 16
 # also why frames had to be "chosen" (by score or recency) — which then dropped
 # the toast. Diffing consecutive frames instead tells us exactly WHICH
 # rectangles changed, so we OCR those small crops instead of a 1600x970 band.
-# Every changed rectangle is kept: nothing is ranked or selected, so recall no
-# longer depends on a frame surviving a budget. Static chrome (taskbar, desktop
-# icons, other apps' text) produces no rectangle and therefore never reaches
-# OCR at all, which is what removes the 100+ irrelevant strings.
+# Changed rectangles are never ranked by score, so recall no longer depends on a
+# frame "looking important". Static chrome (taskbar, desktop icons, other apps'
+# text) produces no rectangle and therefore never reaches OCR at all, which is
+# what removes the 100+ irrelevant strings. The single tie-break is the
+# ROI_MAX_PER_FRAME safety valve, and it keeps the SMALLEST rectangles: a page
+# repaint is large, a toast is small. Same principle as _select_targets.
 ROI_MIN_AREA = 400            # physical px; below this is cursor/noise
 ROI_MAX_SCREEN_FRAC = 0.30    # a rect this large is a page repaint, not a popup
 ROI_MAX_PER_FRAME = 6         # safety valve only; normally 1-3
@@ -292,7 +294,10 @@ def _diff_rois(prev: np.ndarray | None, curr: np.ndarray | None) -> list:
         if x1 - x0 < 8 or y1 - y0 < 8:
             continue
         found.append((area, curr[y0:y1, x0:x1].copy()))
-    found.sort(key=lambda item: -item[0])
+    # 安全阀只在异常帧（6 个以上独立变化矩形）上触发。这一刀要**小面积优先**：
+    # 降序会让一次页面churn 的大矩形先占满名额，把真正的 toast 切掉，正好与
+    # "小面积 = 局部提示" 的判据相反。与 _select_targets 用同一条原则。
+    found.sort(key=lambda item: item[0])
     return [crop for _, crop in found[:ROI_MAX_PER_FRAME]]
 
 
@@ -333,6 +338,19 @@ def _select_targets(targets: list, budget: int) -> tuple[list, bool]:
         chosen = list(small) + _even_sample(rest, budget - len(small))
     chosen.sort(key=lambda item: item[0].ts)   # 返回仍按时间序
     return chosen, True
+
+
+def _select_frames(frames: list, limit: int) -> tuple[list, bool]:
+    """帧级上限也走同一套几何选择，而不是"取最新 N 帧"。
+
+    `limit` 的职责是**给模型看多少帧**（时间线、拼图），不该顺手决定
+    "哪几帧有机会被 OCR"。旧实现 `selected[-limit:]` 会在预算逻辑之前把
+    窗口早期的小面积 toast 整帧丢掉——那正是 _select_targets 想避免的
+    "存在预算 → 必须选目标 → 选错就漏"。
+    """
+    kept, truncated = _select_targets(
+        [(f, None, "frame") for f in frames], max(1, int(limit)))
+    return [item[0] for item in kept], truncated
 
 
 def _roi_sheet(rois: list, max_width: int = 1200, pad: int = 12):
@@ -451,22 +469,29 @@ class WatchSession:
               ocr_limit: int = MAX_OCR_BANDS) -> dict:
         cutoff = time.time() - max(0.1, float(seconds))
         with self._lock:
-            selected = [f for f in self.frames if f.ts >= cutoff]
+            window = [f for f in self.frames if f.ts >= cutoff]
         # Always time-ordered. Never sort by score (design decision).
-        truncated = len(selected) > limit
-        selected = selected[-limit:] if truncated else selected
+        # limit 只限制"给模型看多少帧"，不能决定"哪几帧有机会被 OCR"：
+        # 直接取最新 N 帧会把窗口早期的小面积 toast 整帧丢掉。
+        selected, truncated = _select_frames(window, limit)
         rows = [{"ts": round(f.ts - self.started_at, 2),
                  "global": round(f.global_score, 2),
                  "local": round(f.local_score, 2)} for f in selected]
         result: dict = {
             "success": True, "window_id": self.window_id,
             "capture_scope": self.scope,
-            "frames": len(selected), "total_kept": self.kept,
+            "frames": len(selected), "frames_in_window": len(window),
+            "total_kept": self.kept,
             "sampled": self.sampled, "truncated": truncated,
             "timeline": rows,
             "legend": ("Frames are time-ordered; global>=12 catches page switches, "
                        "local>=8 catches small toasts. Do not rank by score."),
         }
+        if truncated:
+            result["frames_warning"] = (
+                f"窗口内 {len(window)} 帧，时间线只展示 {len(selected)} 帧"
+                "（小面积变化优先 + 时间均匀抽样）。怀疑漏掉提示时，"
+                "请缩短 seconds 或调大 limit 复核。")
         if selected:
             result["image_path"] = _contact_sheet(selected)
         # Text-first: OCR every retained frame's bottom band, deduplicate, and
@@ -502,15 +527,23 @@ class WatchSession:
                 continue
             seen_bands.add(fp)
             unique_targets.append((f, img, kind))
-        budget = max(1, min(int(ocr_limit), MAX_OCR_BANDS))
+        # ocr_limit=0 是合法的「只看画面、不跑 OCR」，不能被夹成 1。
+        budget = max(0, min(int(ocr_limit), MAX_OCR_BANDS))
         # ROIs first if a budget ever bites: they are the actual change points.
         # Never re-rank by score (that dropped the toast twice already).
-        chosen, truncated = _select_targets(unique_targets, budget)
+        chosen, ocr_truncated = _select_targets(unique_targets, budget)
+        if budget == 0:
+            # 0 是调用方主动关掉 OCR，不是"预算不够所以切掉了目标"，
+            # 别让 truncated=True 把模型引向"再调大 ocr_limit"的错误结论。
+            ocr_truncated = False
         result["ocr"] = {"targets": len(unique_targets), "runs": len(chosen),
                          "roi_targets": sum(1 for t in unique_targets if t[2] == "roi_sheet"),
                          "skipped_repaint": skipped_repaint,
-                         "truncated": truncated}
-        if truncated:
+                         "truncated": ocr_truncated}
+        if budget == 0:
+            result["ocr"]["warning"] = (
+                "ocr_limit=0：本次不跑 OCR，只返回时间线、拼图与证据图。")
+        elif ocr_truncated:
             result["ocr"]["warning"] = (
                 "本次目标数超过 ocr_limit，已按「小面积变化优先 + 时间均匀抽样」取舍；"
                 "若未命中预期消息，请用更大的 ocr_limit 或更短的 seconds 复核。")

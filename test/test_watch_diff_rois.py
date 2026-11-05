@@ -88,5 +88,24 @@ def test_frame_rois_default_is_none_for_backward_compat():
     assert frame.rois is None
 
 
+def test_safety_valve_keeps_smallest_regions():
+    """超过 ROI_MAX_PER_FRAME 时保留**小面积**矩形：大的多半是页面churn。"""
+    before = _blank(1200, 900)
+    after = before.copy()
+    # 8 个大块（每个都远低于 30% 屏，但都远大于 toast）
+    for i in range(8):
+        x = 40 + (i % 4) * 290
+        y = 40 + (i // 4) * 300
+        after[y:y + 250, x:x + 260] = 120
+    # 一条小面积 toast（面积最小，最像真提示）
+    after[820:860, 200:400] = 40
+
+    rois = watch._diff_rois(before, after)
+
+    assert len(rois) == watch.ROI_MAX_PER_FRAME, "安全阀仍然要有界"
+    assert any((roi == 40).any() for roi in rois), \
+        "触发安全阀时 toast（面积最小）必须留下，不能被大块挤掉"
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-q"]))

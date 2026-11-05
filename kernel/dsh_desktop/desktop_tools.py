@@ -5920,4 +5920,4 @@ def desktop_watch(window_id: str = "", action: str = "status",
                   if t.strip()) or None
     return {"success": True, "action": "since",
             **registry().since(window_id, seconds, limit, terms, bool(expect_all),
-                              max(1, min(int(ocr_limit), 48)))}
+                              max(0, min(int(ocr_limit), 48)))}

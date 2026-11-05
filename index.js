@@ -1146,10 +1146,10 @@ export function apply(ctx, config) {
       window_id: windowIdParameter,
       action: { type: 'string', enum: ['start', 'since', 'stop', 'status'], description: 'start | since | stop | status (default status).' },
       seconds: { type: 'number', description: 'since: how many seconds back to read, 0.5–300 (default 20).' },
-      limit: { type: 'number', description: 'since: max frames, 1–16 (default 8). Later frames win when truncated.' },
+      limit: { type: 'number', description: 'since: max frames to show, 1-16 (default 8). Picked by small-change-first + even time sampling, not simply the newest.' },
       expect: { type: 'string', description: 'since: space/comma separated keywords describing the message you wait for, e.g. "失败 不支持 被拦截". Overrides the built-in word list.' },
       expect_all: { type: 'boolean', description: 'since: return every OCR string instead of only keyword matches (costs more context). Default false.' },
-      ocr_limit: { type: 'number', description: 'since: max OCR passes, 1-48 (default 16). Only a latency knob: changed regions are OCRd first, never ranked by score.' },
+      ocr_limit: { type: 'number', description: 'since: max OCR passes, 0-48 (default 16). 0 returns frames/images without OCR. Only a latency knob: changed regions are OCRd first, never ranked by score.' },
     },
     output,
     async execute(args, exec) {
