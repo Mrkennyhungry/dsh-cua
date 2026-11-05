@@ -104,6 +104,43 @@ class WatchTests(unittest.TestCase):
     def test_since_without_session_is_actionable(self):
         self.assertIn("WATCH_NOT_RUNNING", watch.registry().since("never", 5, 8)["error"])
 
+    def test_two_second_toast_is_recoverable_after_it_vanished(self):
+        """Design-01 end-to-end contract.
+
+        A toast appears at t=1s and disappears at t=3s. since() at t=6s must
+        still return BOTH boundary frames, in time order, kept by the LOCAL
+        score alone (a global mean would dilute the small bar away). This is
+        the failure mode the design note measured as 0.12-0.31 global vs
+        10-25 local.
+        """
+        session = watch.WatchSession("win-toast", 1, Mock())
+        t0 = time.time()
+
+        def frame(toast: bool) -> np.ndarray:
+            img = np.full((400, 700, 3), 235, np.uint8)
+            cv2.rectangle(img, (40, 30), (300, 80), (90, 90, 90), -1)
+            if toast:
+                cv2.rectangle(img, (120, 340), (580, 380), (55, 58, 70), -1)
+            return img
+
+        prev = None
+        for rel, toast in [(0.0, False), (0.5, False), (1.0, True),
+                           (1.5, True), (2.5, True), (3.0, False), (3.5, False)]:
+            sig = watch._signature(frame(toast))
+            g, l = watch._scores(prev, sig)
+            prev = sig
+            if g >= watch.GLOBAL_THRESHOLD or l >= watch.LOCAL_THRESHOLD:
+                session.frames.append(watch.Frame(t0 + rel, frame(toast), g, l))
+
+        r = session.since(10, 8)
+        self.assertGreaterEqual(r["frames"], 2)
+        self.assertTrue(any(row["local"] >= watch.LOCAL_THRESHOLD
+                            and row["global"] < watch.GLOBAL_THRESHOLD
+                            for row in r["timeline"]),
+                        "a toast must be retainable by the local score alone")
+        ts = [row["ts"] for row in r["timeline"]]
+        self.assertEqual(ts, sorted(ts), "frames must stay time-ordered")
+
     def test_contact_sheet_is_bounded_jpeg(self):
         from pathlib import Path
         frames = [watch.Frame(1.0 + i, np.full((300, 400, 3), i * 20, np.uint8), 0.2, 12.0)
