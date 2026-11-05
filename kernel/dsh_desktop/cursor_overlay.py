@@ -31,6 +31,11 @@ MARGIN = 0
 SUPERSAMPLE = 4
 EASING = 0.3
 FRAME_SECONDS = 0.016
+# 精灵是成对的 (睁眼, 闭眼)。原来按 int(monotonic()*4)%4 每 250ms 换一张，
+# 看上去就是每秒眨四次眼——用户反馈"疯狂闪烁"。人眨眼约 0.2-0.4 Hz，
+# 这里改成每 BLINK_PERIOD 秒眨一次，闭眼只保持 BLINK_DURATION 秒。
+BLINK_PERIOD = 4.0
+BLINK_DURATION = 0.14
 
 _INSTANCE = None
 _INSTANCE_LOCK = threading.Lock()
@@ -453,7 +458,10 @@ class CursorOverlay:
                     target = (self._origin[0]+(target[0]-self._origin[0])*t,
                               self._origin[1]+(target[1]-self._origin[1])*t)
             from .mascot_theme import render
-            frame = int(time.monotonic() * 4) % 4
+            # 0 = 睁眼, 1 = 闭眼。单帧动作（scroll/drag/observe/done）len(pair)==1，
+            # render() 里的 frame % len(indices) 会把它归一成 0，不受影响。
+            blink = (time.monotonic() % BLINK_PERIOD) < BLINK_DURATION
+            frame = 1 if blink else 0
             render_key = (action, frame, greeting)
             # Re-rendering at 60 fps costs CPU for nothing: the sprite only
             # changes when the action/frame/palette does.

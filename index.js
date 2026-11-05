@@ -1141,7 +1141,7 @@ export function apply(ctx, config) {
 
   register(defineTool({
     name: 'doraemon_watch',
-    description: 'Monitor the WHOLE DESKTOP for transient message popups (toasts, error banners, system notifications). action=start begins 10fps sampling into a 48-frame ring buffer; since(seconds=N) returns results; stop ends it. It diffs consecutive frames and runs the kernel OCR only on the CHANGED rectangles (a toast is a ~150x50 crop, not a half-screen band), falling back to the lower-half band when no diff is available, then applies a Keyword Signal (BM25 + exact phrase) filter so you receive ONLY text matching what you are waiting for, not the whole screen. Pass expect with your own keywords, e.g. "失败 不支持 被拦截"; otherwise a built-in Chinese/English error+success word list is used. text_matches holds the matched strings with scores and timestamps; text_other_count tells you how many unmatched strings were dropped (their text is NOT returned, saving context). Set expect_all=true to get every OCR string, or look at evidence_image only when text is unreadable. The sampler makes no popup judgement: YOU decide which match is the message. Frames are TIME ordered, never ranked by score: a toast has a small global but high local score. Still screens keep no frames and cost no tokens.',
+    description: 'Use ONLY when a specific step is expected to raise a transient message that itself decides the next move (a toast that vanishes in 2-3s, e.g. "upload failed", "file format unsupported"). Do NOT use it for ordinary observation: to look at the UI use doraemon_analyze / doraemon_capture / doraemon_uia; to wait for the UI to settle use doraemon_wait_stable. action=start begins 10fps sampling into a 48-frame ring buffer; since(seconds=N) returns results; stop ends it. ALWAYS stop when the step is done — a watch left running samples forever (ttl, default 120s, auto-stops the sampler but keeps the frames already collected). It diffs consecutive frames and runs the kernel OCR only on the CHANGED rectangles (a toast is a ~150x50 crop, not a half-screen band), falling back to the lower-half band when no diff is available, then applies a Keyword Signal (BM25 + exact phrase) filter so you receive ONLY text matching what you are waiting for, not the whole screen. Pass expect with your own keywords, e.g. "失败 不支持 被拦截"; otherwise a built-in Chinese/English error+success word list is used. text_matches holds the matched strings with scores and timestamps; text_other_count tells you how many unmatched strings were dropped (their text is NOT returned, saving context). Set expect_all=true to get every OCR string, or look at evidence_image only when text is unreadable. The sampler makes no popup judgement: YOU decide which match is the message. Frames are TIME ordered, never ranked by score: a toast has a small global but high local score. Still screens keep no frames and cost no tokens.',
     parameters: {
       window_id: windowIdParameter,
       action: { type: 'string', enum: ['start', 'since', 'stop', 'status'], description: 'start | since | stop | status (default status).' },
@@ -1150,6 +1150,7 @@ export function apply(ctx, config) {
       expect: { type: 'string', description: 'since: space/comma separated keywords describing the message you wait for, e.g. "失败 不支持 被拦截". Overrides the built-in word list.' },
       expect_all: { type: 'boolean', description: 'since: return every OCR string instead of only keyword matches (costs more context). Default false.' },
       ocr_limit: { type: 'number', description: 'since: max OCR passes, 0-48 (default 16). 0 returns frames/images without OCR. Only a latency knob: changed regions are OCRd first, never ranked by score.' },
+      ttl: { type: 'number', description: 'start: how long sampling may live, 5-600 (default 120). On expiry the sampler stops but frames already collected stay readable via since.' },
     },
     output,
     async execute(args, exec) {
@@ -1164,6 +1165,7 @@ export function apply(ctx, config) {
           expect: String(args.expect ?? ''),
           expect_all: args.expect_all === true,
           ocr_limit: args.ocr_limit === undefined ? 16 : Number(args.ocr_limit),
+          ttl: args.ttl === undefined ? 120 : Number(args.ttl),
         },
         signal: exec.signal, timeoutMs: 60_000,
       })

@@ -5884,14 +5884,17 @@ def desktop_cleanup_windows_by_exe(exe_keyword: str = "", keep: int = 0,
 # ── Design-01: always-on watch / on-demand `since` ───────────────────────
 
 
-@tool("后台持续采样窗口画面（10fps，只保留变化的帧，48 帧环形缓冲）。"
-      "用于捕捉 2-3 秒就消失的瞬时提示（toast）、菜单、加载态。"
+@tool("只在「某一步预期会冒出一条瞬时提示，且这条提示本身就是下一步的判断依据」时"
+      "才用（例如提交后等 2-3 秒就消失的 toast）。常规观察不要用它："
+      "看界面用 desktop_analyze / desktop_capture / desktop_uia；等界面稳定用 "
+      "desktop_wait_stable；读固定区域用 desktop_capture + OCR。"
+      "start 之后必须 stop，别让它常驻采样（ttl 到点会自动停采样并保留已采帧）。"
       "action=start|stop|since|status。since 返回时间窗内帧的拼图与双分变化分，"
       "按时间顺序而非分数排序；静止时不产生图片、不消耗 token。")
 def desktop_watch(window_id: str = "", action: str = "status",
                   seconds: float = 20.0, limit: int = 8,
                   expect: str = "", expect_all: bool = False,
-                  ocr_limit: int = 16) -> dict:
+                  ocr_limit: int = 16, ttl: int = 120) -> dict:
     from .watch import registry
     action = str(action or "status").strip().lower()
     if action == "status" and not window_id:
@@ -5910,8 +5913,9 @@ def desktop_watch(window_id: str = "", action: str = "status",
         return {"success": False, "error": f"window_id 不存在: {window_id}"}
     hwnd = int(info["hwnd"])
     if action == "start":
+        ttl_s = max(5, min(int(ttl), 600))
         return {"success": True, "action": "start",
-                **registry().start(window_id, hwnd, controller.capture)}
+                **registry().start(window_id, hwnd, controller.capture, ttl_s)}
     if action == "stop":
         return {"success": True, "action": "stop", **registry().stop(window_id)}
     seconds = max(0.5, min(float(seconds), 300.0))

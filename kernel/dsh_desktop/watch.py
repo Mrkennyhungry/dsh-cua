@@ -31,6 +31,15 @@ SHEET_MAX_DIM = 1920
 SHEET_COLS = 4
 JPEG_QUALITY = 82
 
+# GDI 桌面抓取拍不到 WinUI / DirectComposition 应用的合成层内容：窗口在，
+# 窗口里的字是空的（Win11 记事本实测：编辑区全白，PrintWindow 却清清楚楚）。
+# 检测到这种情况就额外抓一次窗口，把窗口内的变化矩形并进 rois —— 窗口内的
+# toast 能读到，桌面级通知也照旧，两条通道都保留。
+BLIND_DIFF = 22.0            # 灰度平均差超过它，怀疑桌面抓取漏了内容
+BLIND_VAR_RATIO = 3.0        # 并且窗口自己明显更有"料"（方差比）
+BLIND_PROBE_INTERVAL = 100   # 每 N 个采样帧复核一次（换窗口/换主题后不会永久判断错）
+WATCH_DEFAULT_TTL = 120.0    # 采样最长存活时间；到点停止采样但保留已采到的帧
+
 # A message popup is TEXT. Handing every retained frame to the model as an
 # image would burn context; run the kernel's existing OCR on the bottom band
 # of each retained frame instead and return deduplicated TEXT candidates. The
@@ -383,7 +392,8 @@ def _roi_sheet(rois: list, max_width: int = 1200, pad: int = 12):
 
 
 class WatchSession:
-    def __init__(self, window_id: str, hwnd: int, capture) -> None:
+    def __init__(self, window_id: str, hwnd: int, capture,
+                 ttl: float | None = None) -> None:
         self.window_id = window_id
         self.hwnd = hwnd
         self._capture = capture
@@ -398,6 +408,17 @@ class WatchSession:
         self.started_at = time.time()
         self.error: str | None = None
         self.scope: str = "window"
+        # 采样有寿命：start 之后没人 stop 是最常见的浪费。到点只停线程，
+        # 环形缓冲保留，since 仍然读得到已经采到的那段时间。
+        self.ttl: float | None = float(ttl) if ttl else None
+        self._deadline = (time.monotonic() + self.ttl) if self.ttl else None
+        self.expired = False
+        self._blind: bool | None = None
+        self._prev_window: np.ndarray | None = None
+
+    @property
+    def blind(self) -> bool:
+        return bool(self._blind)
 
     @property
     def active(self) -> bool:
@@ -433,9 +454,66 @@ class WatchSession:
         frame = self._capture.capture(self.hwnd, activate=False)
         return frame, "window"
 
+    def _grab_window(self):
+        try:
+            frame = self._capture.capture(self.hwnd, activate=False)
+        except Exception:  # noqa: BLE001 - 辅助通道，失败就当没有
+            return None
+        return frame if frame is not None and getattr(frame, "size", 0) else None
+
+    def _detect_blind(self, desktop, window) -> bool:
+        """桌面抓取是否漏掉了这个窗口的合成内容。
+
+        判据是几何的、不看语义：桌面里窗口那块区域几乎没方差（一片纯色），
+        而 PrintWindow 拍到的同一块有明显内容，且两者差异很大。三者同时成立
+        才算"盲"——避免把"窗口本来就是白底"误判成盲。
+        """
+        if desktop is None or window is None:
+            return False
+        try:
+            import win32gui
+            left, top, right, bottom = win32gui.GetWindowRect(self.hwnd)
+            h, w = desktop.shape[:2]
+            left, top = max(0, left), max(0, top)
+            right, bottom = min(w, right), min(h, bottom)
+            if right - left < 40 or bottom - top < 40:
+                return False
+            crop = desktop[top:bottom, left:right]
+            crop = cv2.resize(crop, (window.shape[1], window.shape[0]),
+                              interpolation=cv2.INTER_AREA)
+            a = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY).astype(np.float32)
+            b = cv2.cvtColor(window, cv2.COLOR_BGR2GRAY).astype(np.float32)
+            diff = float(np.abs(a - b).mean())
+            return (diff > BLIND_DIFF
+                    and float(b.var()) > BLIND_VAR_RATIO * max(float(a.var()), 1.0))
+        except Exception:  # noqa: BLE001 - 探测失败就按"不盲"处理，保持旧行为
+            return False
+
+    def _blind_rois(self, frame, rois: list) -> list:
+        """盲抓取时补一条窗口通道：窗口内的变化矩形并进 rois。
+
+        非盲会话只在探测帧上付一次 PrintWindow（每 BLIND_PROBE_INTERVAL 帧），
+        不会把每帧成本翻倍。
+        """
+        if self._blind is None or self.sampled % BLIND_PROBE_INTERVAL == 0:
+            win = self._grab_window()
+            self._blind = self._detect_blind(frame, win)
+            self._prev_window = win
+            return rois
+        if not self._blind:
+            return rois
+        win = self._grab_window()
+        extra = _diff_rois(self._prev_window, win)
+        self._prev_window = win
+        return (rois + extra) if extra else rois
+
     def _run(self) -> None:
         interval = 1.0 / FPS
         while not self._stop.is_set():
+            if self._deadline is not None and time.monotonic() >= self._deadline:
+                # 停止采样，保留已采到的帧：since 仍然读得到那段时间。
+                self.expired = True
+                break
             t0 = time.monotonic()
             try:
                 frame, scope = self._grab()
@@ -453,7 +531,7 @@ class WatchSession:
                         # Diff against the previous SAMPLED frame (not the
                         # previous retained one), so the rectangles describe
                         # what just appeared, not everything that drifted.
-                        rois = _diff_rois(self._prev_frame, frame)
+                        rois = self._blind_rois(frame, _diff_rois(self._prev_frame, frame))
                         frac = (sum(r.shape[0] * r.shape[1] for r in rois)
                                 / float(frame.shape[0] * frame.shape[1])) if rois else 0.0
                         with self._lock:
@@ -483,6 +561,8 @@ class WatchSession:
             "frames": len(selected), "frames_in_window": len(window),
             "total_kept": self.kept,
             "sampled": self.sampled, "truncated": truncated,
+            "capture_scope": self.scope, "capture_blind": self.blind,
+            "expired": self.expired,
             "timeline": rows,
             "legend": ("Frames are time-ordered; global>=12 catches page switches, "
                        "local>=8 catches small toasts. Do not rank by score."),
@@ -712,16 +792,17 @@ class WatchRegistry:
         self._sessions: dict[str, WatchSession] = {}
         self._lock = threading.Lock()
 
-    def start(self, window_id: str, hwnd: int, capture) -> dict:
+    def start(self, window_id: str, hwnd: int, capture,
+              ttl: float | None = None) -> dict:
         with self._lock:
             old = self._sessions.pop(window_id, None)
             if old:
                 old.stop()
-            session = WatchSession(window_id, hwnd, capture)
+            session = WatchSession(window_id, hwnd, capture, ttl)
             self._sessions[window_id] = session
             session.start()
         return {"success": True, "window_id": window_id, "active": True,
-                "fps": FPS, "ring_size": RING_SIZE,
+                "fps": FPS, "ring_size": RING_SIZE, "ttl": session.ttl,
                 "thresholds": {"global": GLOBAL_THRESHOLD, "local": LOCAL_THRESHOLD}}
 
     def stop(self, window_id: str) -> dict:
@@ -749,6 +830,8 @@ class WatchRegistry:
             return {"active": False}
         return {"active": session.active, "sampled": session.sampled,
                 "kept": session.kept, "buffered": len(session.frames),
+                "expired": session.expired, "ttl": session.ttl,
+                "capture_blind": session.blind,
                 "error": session.error}
 
 

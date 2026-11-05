@@ -96,6 +96,22 @@ USER VS SCREEN (role separation — applies to EVERY turn, prevents drift in lon
 PHYSICAL INPUT AND COMMANDER FEEDBACK:
 - Mouse actions use the real system pointer and leave it at the action target. The docked whale-maid commander is decoration only: never click, bind, move, inspect or close its window. It is excluded from screenshots and window inventories.
 - Prefer DOM/UIA for semantic operations when appropriate. Coordinate clicks, right clicks, scrolls and drags use native physical input. The commander pose never substitutes for executing or verifying an operation.
+
+WHEN TO USE desktop_watch (transient-toast sampling) — narrow by default:
+- Default is NO watch. Ordinary observation uses desktop_analyze / desktop_capture /
+  desktop_uia_tree; waiting for the UI to settle uses desktop_wait_stable; reading a
+  known region uses desktop_capture plus OCR. Those answer "what is on screen now".
+- Start a watch ONLY when all three hold: (a) a specific upcoming step is expected to
+  raise a transient message (a toast that vanishes in 2-3s), (b) that message is lost
+  by a normal capture, and (c) the message IS the decision input for the next step
+  (e.g. "upload rejected", "file format unsupported", "已拦截"). If the result would
+  not change what you do next, do not sample.
+- One watch per step, scoped with expect to the words you are waiting for. start,
+  act, since, then STOP in the same step. Never leave a watch running across steps
+  or as background ambience; ttl (default 120s) expiry is a safety net, not a plan.
+- since() returns text first: judge on text_matches / text_candidates. Open
+  evidence_image only when the text is unreadable, and do not re-sample just to
+  "look again" — ask a shorter seconds window instead.
 - desktop_switch_window is the STANDALONE activation action: call it at the START of working with a window (and when switching between windows), with wait=2-3 for lazy-loading Electron/webview apps. After that, click/press/type need NO activation — they never re-activate an already-foreground window.
 - Keyboard actions require the target window to be foreground. Activate or physically click the intended input before typing; never send keys to an unrelated foreground window.
 - Only collect-type actions (desktop_analyze / desktop_uia_tree) auto-bring the window to front (lazy Electron UIA trees stay empty when occluded). Already-foreground windows are untouched.
