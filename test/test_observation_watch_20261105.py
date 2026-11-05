@@ -152,6 +152,51 @@ class CleanupReportShapeTests(unittest.TestCase):
         self.assertIn("closed_opened_windows", r)
         self.assertEqual(r["closed_opened_windows"], [])
 
+    def test_task_derived_window_is_closed_and_reported(self):
+        """Live QQGallery case: double-clicking a thumbnail opened a same-pid
+        "图片查看器" window that was never in _launched_windows. Cleanup must
+        close it and name it in closed_opened_windows."""
+        import win32con
+        import win32gui
+
+        baseline = [{"window_key": "100:999:1", "hwnd": 100}]  # pre-existing
+        viewer_hwnd = 777001                                    # task-derived
+        calls: list[int] = []
+
+        def fake_enum(cb, _param):
+            cb(viewer_hwnd, None)
+
+        def fake_visible(hwnd):
+            return hwnd == viewer_hwnd
+
+        def fake_post(hwnd, msg, wparam, lparam):
+            calls.append(hwnd)
+
+        fake_gui = Mock()
+        fake_gui.IsWindowVisible.side_effect = fake_visible
+        fake_gui.GetWindowText.return_value = "图片查看器 - 腾讯相册管家"
+        fake_gui.GetClassName.return_value = "Chrome_WidgetWin_1"
+        fake_gui.EnumWindows.side_effect = fake_enum
+        fake_gui.PostMessage.side_effect = fake_post
+        fake_gui.IsWindow.side_effect = lambda h: h not in calls
+        fake_gui.GetAncestor.return_value = viewer_hwnd
+        fake_gui.WindowFromPoint.return_value = viewer_hwnd
+
+        with patch.object(desktop_tools, "ownership_snapshot",
+                          return_value={"launched_pids": {}, "bound_pids": {23404}}), \
+             patch.object(desktop_tools, "_current_window_key",
+                          return_value="777001:23404:1"), \
+             patch.object(desktop_tools, "win32process") as proc, \
+             patch.dict("sys.modules", {"win32gui": fake_gui, "win32con": win32con}), \
+             patch.object(desktop_tools, "_STATE"):
+            proc.GetWindowThreadProcessId.return_value = (0, 23404)
+            r = desktop_tools.cleanup_session_footprint(
+                close_browser=False, close_launched_apps=True, unbind_windows=False,
+                baseline_windows=baseline, timeout_per_app=0.1)
+        self.assertEqual(calls, [viewer_hwnd])
+        self.assertEqual(len(r["closed_opened_windows"]), 1)
+        self.assertIn("图片查看器", str(r["closed_windows"]))
+
 
 if __name__ == "__main__":
     unittest.main()
