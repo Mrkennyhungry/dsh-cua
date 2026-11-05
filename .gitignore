@@ -19,8 +19,11 @@ private-knowledge/
 # Local port scratch area (its own copy lives outside this repo)
 *buddy/
 
-# Test caches
+# Test caches. pytest's basetemp can land in the repo root as pytest-of-<user>/
+# when a test requests tmp_path with a cwd-relative basetemp — never commit those.
 .pytest_cache/
+pytest-of-*/
+
 
 # Node
 node_modules/
