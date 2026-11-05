@@ -538,9 +538,17 @@ class WatchSession:
             "text_matches 是 OCR 文字中命中预期词的条目（BM25 + 短语匹配），"
             "按分数排序；text_other_count 是未命中的条数，默认不返回其全文以省上下文。"
             "请据此判断是否出现了你要等的那条消息；没有就明确说没出现。"
-            "预期词可用 expect 覆盖，需要全部原文时设 expect_all=true。")
-        if expect_all:
+            "预期词可用 expect 覆盖，需要全部原文时设 expect_all=true。"
+            "候选≤20 条时 text_candidates 会**全部**给出（含未命中项），"
+            "所以非预期但重要的提示也能被看到；超过时才只给命中项 + 数量。")
+        # 候选不多时**全部给出**，而不是只给命中项。
+        # 词表只该用于「多的时候怎么取舍」，不该变成「少的时候也藏起非命中文字」：
+        # 一条「已复制到剪贴板」不含任何错误词，但它可能正是调用方要等的消息。
+        if expect_all or len(candidates) <= 20:
             result["text_candidates"] = candidates
+            result["text_candidates_scope"] = "all"
+        else:
+            result["text_candidates_scope"] = "matches_only"
         # Images are a FALLBACK only, for when OCR is unreadable or ambiguous.
         band_frames = [f for f in selected if f.bottom_band is not None]
         if band_frames:
