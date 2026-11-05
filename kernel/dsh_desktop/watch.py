@@ -296,6 +296,45 @@ def _diff_rois(prev: np.ndarray | None, curr: np.ndarray | None) -> list:
     return [crop for _, crop in found[:ROI_MAX_PER_FRAME]]
 
 
+def _even_sample(items: list, n: int) -> list:
+    """按时间均匀抽样，保证整个时间窗都被覆盖（而不是只留最早或最新）。"""
+    if n <= 0:
+        return []
+    if len(items) <= n:
+        return list(items)
+    if n == 1:
+        return [items[-1]]           # 只留一个时留最新的
+    # 用 (len-1)/(n-1) 而不是 len/n：否则 int() 向下取整会让**最后一帧**
+    # 永远选不中（实测 20 选 5 只到第 16 帧），而最新帧往往正是结果帧。
+    step = (len(items) - 1) / (n - 1)
+    return [items[round(i * step)] for i in range(n)]
+
+
+def _select_targets(targets: list, budget: int) -> tuple[list, bool]:
+    """预算不足时怎么选，才不会再把 toast 挤掉。
+
+    之前三种做法都漏过：按 local 分排序、取最新 N 帧、取最早 N 个 ROI。
+    共同根因是"存在预算 → 必须选目标 → 选错就漏"。
+
+    本版用两条**几何**规则代替排序：
+    1. **小面积变化帧优先**（变化面积 ≤5% 屏）。toast 是局部小条，
+       而 DSH 自身窗口重绘/页面切换面积很大——按面积取小，正好保护 toast。
+       注意这不是按 global/local 分数排序：分数衡量"变得多剧烈"，
+       面积衡量"变了多大一块"，后者才与"是不是局部提示"相关。
+    2. 其余名额**按时间均匀抽样**，保证早晚帧都有机会进 OCR。
+    """
+    if len(targets) <= budget:
+        return list(targets), False
+    small = [t for t in targets if getattr(t[0], "roi_area_frac", 0.0) <= 0.05]
+    rest = [t for t in targets if getattr(t[0], "roi_area_frac", 0.0) > 0.05]
+    if len(small) >= budget:
+        chosen = _even_sample(small, budget)
+    else:
+        chosen = list(small) + _even_sample(rest, budget - len(small))
+    chosen.sort(key=lambda item: item[0].ts)   # 返回仍按时间序
+    return chosen, True
+
+
 def _roi_sheet(rois: list, max_width: int = 1200, pad: int = 12):
     """Stack one frame's changed crops into a single image, for ONE OCR call.
 
@@ -466,13 +505,15 @@ class WatchSession:
         budget = max(1, min(int(ocr_limit), MAX_OCR_BANDS))
         # ROIs first if a budget ever bites: they are the actual change points.
         # Never re-rank by score (that dropped the toast twice already).
-        ordered = ([t for t in unique_targets if t[2] == "roi_sheet"]
-                   + [t for t in unique_targets if t[2] != "roi_sheet"])
-        chosen = ordered[:budget]
+        chosen, truncated = _select_targets(unique_targets, budget)
         result["ocr"] = {"targets": len(unique_targets), "runs": len(chosen),
                          "roi_targets": sum(1 for t in unique_targets if t[2] == "roi_sheet"),
                          "skipped_repaint": skipped_repaint,
-                         "truncated": len(ordered) > len(chosen)}
+                         "truncated": truncated}
+        if truncated:
+            result["ocr"]["warning"] = (
+                "本次目标数超过 ocr_limit，已按「小面积变化优先 + 时间均匀抽样」取舍；"
+                "若未命中预期消息，请用更大的 ocr_limit 或更短的 seconds 复核。")
         for f, img, kind in chosen:
             # 只在拼合图路径上传 text_only，band 路径保持原调用签名，
             # 这样既有调用方/测试桩不需要跟着改。
