@@ -1151,11 +1151,20 @@ def desktop_switch_window(window_id: str, wait: float = 1.0) -> dict:
         # 截图/OCR/坐标点击只需要可见且置顶，不必是前台；如实返回 foreground=False。
         if win32gui.IsWindowVisible(hwnd) and not win32gui.IsIconic(hwnd):
             rect = win32gui.GetWindowRect(hwnd)
+            cr = win32gui.GetClientRect(hwnd)
+            cx, cy = win32gui.ClientToScreen(hwnd, ((cr[2] - cr[0]) // 2, (cr[3] - cr[1]) // 2))
+            hit = win32gui.WindowFromPoint((cx, cy))
+            root = win32gui.GetAncestor(hit, 2) if hit else 0
+            hittable = int(root) == int(hwnd) or int(hit) == int(hwnd)
             return {"success": True, "window_id": window_id, "foreground": False,
+                    "hittable": hittable,
+                    "warning": None if hittable else "WINDOW_NOT_HITTABLE",
                     "rect": {"left": rect[0], "top": rect[1],
                              "width": rect[2] - rect[0], "height": rect[3] - rect[1]},
-                    "note": "窗口已恢复可见但未取得前台；"
-                            "可继续截图/OCR/坐标点击，键入前可能仍需前台。"}
+                    "note": ("WINDOW_NOT_HITTABLE: 客户区中心点落在别的窗口上，"
+                             "应用可能最小化到托盘，请重新打开它。" if not hittable else
+                             "窗口已恢复可见但未取得前台；"
+                             "可继续截图/OCR/坐标点击，键入前可能仍需前台。")}
         return {"success": False,
                 "error": "激活前台失败（已尝试 AttachThreadInput + SwitchToThisWindow）"}
     wait = max(0.0, min(float(wait), 10.0))
@@ -1163,18 +1172,36 @@ def desktop_switch_window(window_id: str, wait: float = 1.0) -> dict:
         time.sleep(wait)
     fg = win32gui.GetForegroundWindow()
     rect = None
+    # BUG-05: an app minimized to the tray can report visible=True and even
+    # foreground=True while its client-area centre hit-tests to the desktop.
+    # Say so explicitly, otherwise every later click looks like "app ignored me".
+    hittable, hit_detail = None, None
     try:
         left, top, right, bottom = win32gui.GetWindowRect(hwnd)
         rect = {"left": left, "top": top, "width": right - left, "height": bottom - top}
-    except Exception:
-        pass
+        cr = win32gui.GetClientRect(hwnd)
+        cx, cy = win32gui.ClientToScreen(hwnd, ((cr[2] - cr[0]) // 2, (cr[3] - cr[1]) // 2))
+        hit = win32gui.WindowFromPoint((cx, cy))
+        root = win32gui.GetAncestor(hit, 2) if hit else 0
+        hittable = int(root) == int(hwnd) or int(hit) == int(hwnd)
+        hit_detail = {"point": [cx, cy], "root_hwnd": int(root),
+                      "root_title": win32gui.GetWindowText(root)[:60] if root else None}
+    except Exception as exc:  # noqa: BLE001
+        hit_detail = {"error": type(exc).__name__}
+    note = "窗口已前台。后续动作不再激活；懒加载应用如控件不全，先 desktop_analyze 观察。"
+    if hittable is False:
+        note = ("WINDOW_NOT_HITTABLE: 该窗口虽可见/前台，但客户区中心点落在别的窗口上，"
+                "多半是最小化到托盘或只剩隐藏壳。请从托盘重新打开应用再操作。")
     return {
         "success": True,
         "window_id": window_id,
         "foreground": fg == hwnd,
+        "hittable": hittable,
+        "hit_test": hit_detail,
         "label": info.get("label", ""),
         "rect": rect,
-        "note": "窗口已前台。后续动作不再激活；懒加载应用如控件不全，先 desktop_analyze 观察。",
+        "warning": None if hittable is not False else "WINDOW_NOT_HITTABLE",
+        "note": note,
     }
 
 
@@ -1376,21 +1403,63 @@ _OBS_TTL_SECONDS = 120
 _OBS_MAX_WINDOWS = 32
 
 
-def _remember_observation(window_id: str, elements: list[dict], scope: str = "window") -> None:
+def _client_geometry(hwnd: int) -> tuple[int, int, int, int] | None:
+    """Client rect in screen pixels, for detecting a moved/resized window."""
+    try:
+        left, top, right, bottom = win32gui.GetClientRect(hwnd)
+        sx, sy = win32gui.ClientToScreen(hwnd, (0, 0))
+        return (int(sx), int(sy), int(right - left), int(bottom - top))
+    except Exception:
+        return None
+
+
+def _remember_observation(window_id: str, elements: list[dict], scope: str = "window",
+                          hwnd: int = 0) -> None:
     if scope != "window":
         _LAST_OBS.pop(window_id, None)
         return
     boxes: list[tuple[float, float, float, float, str]] = []
     for element in elements:
         box = element.get("bbox") or []
-        if len(box) != 4:
-            continue
-        label = str(element.get("text") or element.get("caption") or "")[:24]
-        boxes.append((float(box[0]), float(box[1]), float(box[2]), float(box[3]), label))
-    _LAST_OBS[window_id] = {"boxes": boxes, "ts": time.time()}
+        if len(box) == 4:
+            label = str(element.get("text") or element.get("caption") or "")[:24]
+            boxes.append((float(box[0]), float(box[1]), float(box[2]), float(box[3]), label))
+        elif "click_x" in element and "click_y" in element:
+            # The payload handed to the caller only carries click_x/click_y, not
+            # bbox. Remember a small box around it so "use the tool's own
+            # coordinates" always matches. (WB port finding.)
+            cx, cy = float(element["click_x"]), float(element["click_y"])
+            label = str(element.get("text") or element.get("caption") or "")[:24]
+            boxes.append((cx - 3, cy - 3, cx + 3, cy + 3, label))
+    _LAST_OBS[window_id] = {"boxes": boxes, "ts": time.time(), "stale": False,
+                            "geometry": _client_geometry(hwnd) if hwnd else None}
     if len(_LAST_OBS) > _OBS_MAX_WINDOWS:
         for key in sorted(_LAST_OBS, key=lambda item: _LAST_OBS[item]["ts"])[:8]:
             _LAST_OBS.pop(key, None)
+
+
+def _mark_observation_stale(window_id: str) -> None:
+    """BUG-24: layout can change within a second (menu/tab/view). Time-based TTL
+    alone let a stale element table validate clicks against the old layout."""
+    obs = _LAST_OBS.get(window_id)
+    if obs:
+        obs["stale"] = True
+        obs["stale_at"] = time.time()
+
+
+def _geometry_staleness(window_id: str, hwnd: int) -> dict | None:
+    obs = _LAST_OBS.get(window_id)
+    if not obs or not obs.get("geometry"):
+        return None
+    now = _client_geometry(hwnd)
+    before = obs["geometry"]
+    if not now:
+        return None
+    drift = max(abs(a - b) for a, b in zip(before, now))
+    if drift <= 2:
+        return None
+    return {"geometry_before": list(before), "geometry_now": list(now),
+            "geometry_drift_px": int(drift)}
 
 
 def _click_hit_note(window_id: str, x: float, y: float) -> dict[str, Any] | None:
@@ -1405,8 +1474,14 @@ def _click_hit_note(window_id: str, x: float, y: float) -> dict[str, Any] | None
     observation = _LAST_OBS.get(window_id)
     if not observation or not observation["boxes"]:
         return None
-    if time.time() - observation["ts"] > _OBS_TTL_SECONDS:
-        return None
+    stale = bool(observation.get("stale")) or (
+        time.time() - observation["ts"] > _OBS_TTL_SECONDS)
+    if stale:
+        # BUG-24: never silently give up on hit detection. "No claim" is what
+        # caused stale tables to look like a clean bill of health.
+        return {"hit": None, "warning": "OBSERVATION_STALE",
+                "message": "上次观察之后界面已变化或观测已过期，命中判定不可信；"
+                           "请重新 analyze（或 uia）刷新元素表。"}
     nearest = None
     for x1, y1, x2, y2, label in observation["boxes"]:
         if x1 <= x <= x2 and y1 <= y <= y2:
@@ -1771,7 +1846,7 @@ def desktop_analyze(
     # one of them instead of reporting success for a point in empty space. Uses the
     # unfiltered list: a placeholder icon is still a legitimate click target.
     try:
-        _remember_observation(window_id, elements, scope)
+        _remember_observation(window_id, elements, scope, hwnd)
     except Exception:  # noqa: BLE001
         logger.debug("observation cache skipped", exc_info=True)
     # The window-scope capture is a screen crop of the client rect, so a window
@@ -1803,9 +1878,55 @@ def desktop_analyze(
             "scanned": len(elements),
             "kept": len(kept),
         }
+        # BUG-10: two bare numbers were easy to ignore. Say explicitly that the
+        # list was cut, how much is hidden, and which knob caused it.
+        hidden = len(elements) - len(kept)
+        if hidden > 0:
+            cause = ("only_actionable" if only_actionable and max_elements else
+                     "max_elements" if max_elements else "only_actionable")
+            result["truncated"] = {
+                "kept": len(kept), "total": len(elements), "hidden": hidden,
+                "cause": cause,
+                "hint": ("列表已截断，未返回的条目仍在画面上；需要它们时提高 "
+                         "max_elements 或关闭 only_actionable 再观察。"),
+            }
+        # The caller's table is the *filtered* one. Remember that exact table so
+        # hit checks judge against what the caller actually saw (WB port finding).
+        try:
+            _remember_observation(window_id, kept, scope, hwnd)
+        except Exception:
+            logger.debug("filtered observation cache skipped", exc_info=True)
     result["success"] = True
     return result
 
+
+
+def _foreground_status(hwnd: int) -> dict:
+    """Is the target actually in front? A visible-but-background window accepts
+    no physical input, which is BUG-20's silent no-op."""
+    try:
+        fg = int(win32gui.GetForegroundWindow())
+        return {"is_target": fg == int(hwnd), "hwnd": fg,
+                "title": win32gui.GetWindowText(fg)[:80] or None}
+    except Exception:
+        return {"is_target": None, "hwnd": None, "title": None}
+
+
+def _blocking_window_info(hwnd: int, guard: dict) -> dict | None:
+    """Identify the top-level window a rejected click would have landed on."""
+    root = int(guard.get("root_hwnd") or 0)
+    if not root or root == int(hwnd):
+        return None
+    try:
+        _, target_pid = win32process.GetWindowThreadProcessId(hwnd)
+        _, root_pid = win32process.GetWindowThreadProcessId(root)
+        return {"hwnd": root,
+                "title": win32gui.GetWindowText(root)[:80],
+                "class": win32gui.GetClassName(root)[:60],
+                "same_process": int(root_pid) == int(target_pid),
+                "pid": int(root_pid)}
+    except Exception:
+        return None
 
 
 def _click_target_ok(hwnd: int, x: int, y: int) -> tuple[bool, dict]:
@@ -1867,7 +1988,8 @@ def _click_target_ok(hwnd: int, x: int, y: int) -> tuple[bool, dict]:
       "既省 token 也省一次分析；说不准时它会给候选而不是瞎点。② 传归一化 0-1000 坐标"
       "（取元素 bbox 中心）。优先用 goal；只有目标没有文字、或你已经有精确坐标时才用坐标。")
 def desktop_click(window_id: str, x: int = -1, y: int = -1, clicks: int = 1,
-              goal: str = "", source: str = "auto", caption: bool = False) -> dict:
+               goal: str = "", source: str = "auto", caption: bool = False,
+               abort_on_miss: bool = True) -> dict:
     controller = _controller()
     if controller is None:
         return {"error": "DESKTOP_NOT_READY: AppController 尚未初始化"}
@@ -1884,10 +2006,15 @@ def desktop_click(window_id: str, x: int = -1, y: int = -1, clicks: int = 1,
             return table
         decision = decide(goal, table.get("elements", []))
         if decision.id is None:
+            low = decision.reason in ("low_confidence",) or decision.ambiguous
             return {"success": False, "effect": "refused", "goal": goal,
                     "score": decision.score, "gap": decision.gap,
+                    "confidence": round(decision.confidence, 3),
                     "reason": decision.reason, "candidates": decision.candidates[:5],
-                    "error": "本地决策层没有找到可信元素（分数/差距不足），未点击"}
+                    "error": ("LOW_CONFIDENCE: 只有一个同名候选且是文本/导航类控件，"
+                              "可能不是目标按钮。请改用元素自带的坐标，或换更精确的目标词。"
+                              if low else
+                              "本地决策层没有找到可信元素（分数/差距不足），未点击")}
         picked = next(e for e in table["elements"] if e["id"] == decision.id)
         box = picked["bbox"]
         x = round((box[0] + box[2]) / 2)
@@ -1897,13 +2024,74 @@ def desktop_click(window_id: str, x: int = -1, y: int = -1, clicks: int = 1,
                    "table_source": table.get("source"), "table_size": table.get("count")}
     if not 0 <= x <= 1000 or not 0 <= y <= 1000:
         return {"success": False, "error": "坐标必须在 0-1000，或者传 goal 让决策层定位"}
-    ok, detail = _click_target_ok(int(info["hwnd"]), int(x), int(y))
+    hwnd = int(info["hwnd"])
+    # BUG-13: a minimized window silently swallows a coordinate click. Restore it
+    # first and say so, instead of returning success for a hit that never landed.
+    auto_restored = False
+    try:
+        if win32gui.IsIconic(hwnd):
+            win32gui.ShowWindow(hwnd, 9)  # SW_RESTORE
+            auto_restored = True
+    except Exception:
+        pass
+    # BUG-14: the element table was captured against a client rect. If the window
+    # moved or resized since, every normalized coordinate derived from it is off
+    # by exactly the delta. Reject rather than click a stale point.
+    geometry_warning = _geometry_staleness(window_id, hwnd)
+    if geometry_warning:
+        return {"success": False, "effect": "refused", "window_id": window_id,
+                "error": "STALE_GEOMETRY: 观察之后窗口位置或尺寸变了，旧坐标已失效；"
+                         "请重新 analyze 再取坐标。",
+                **geometry_warning}
+    # BUG-22: the hit check used to be a post-hoc note, so a click in empty space
+    # was sent anyway. Refuse before dispatching when we have an observation that
+    # proves the point is not on any element. abort_on_miss=False is the escape
+    # hatch for deliberately clicking blank space (e.g. to dismiss a menu).
+    if abort_on_miss and not str(goal or "").strip():
+        pre = _click_hit_note(window_id, int(x), int(y))
+        if pre and pre.get("warning") == "OBSERVATION_STALE":
+            # BUG-24: refresh the observation once (~1s) rather than making the
+            # caller re-analyze after every successful action. The caller's
+            # coordinates are unchanged; only the element table is refreshed.
+            try:
+                table = desktop_element_table(window_id, "auto", True, False)
+                if table.get("success"):
+                    _remember_observation(window_id, table.get("elements", []), "window", hwnd)
+                    pre = _click_hit_note(window_id, int(x), int(y))
+            except Exception:
+                pass
+            if pre and pre.get("warning") == "OBSERVATION_STALE":
+                return {"success": False, "effect": "refused", "window_id": window_id,
+                        "error": "OBSERVATION_STALE: 界面已变化且自动重取元素表失败，"
+                                 "请重新 analyze；确实要盲点可传 abort_on_miss=False。",
+                        "hit_check": pre}
+        if pre and pre.get("hit") is None and pre.get("warning") == "CLICK_HIT_EMPTY":
+            nearest = pre.get("nearest") or {}
+            return {"success": False, "effect": "refused", "window_id": window_id,
+                    "error": (f"CLICK_WOULD_MISS: ({int(x)},{int(y)}) 不在任何已观测元素框内，"
+                              f"最近的是「{nearest.get('text', '?')}」"
+                              f"({nearest.get('click_x')},{nearest.get('click_y')})。"
+                              "请重新 analyze 用元素的 click_x/click_y；"
+                              "确实要点空白时传 abort_on_miss=False。"),
+                    "hit_check": pre, "abort_on_miss": True}
+    ok, detail = _click_target_ok(hwnd, int(x), int(y))
     if not ok:
-        return {"success": False, "effect": "refused",
+        # BUG-15/20: a bare mismatch points at "wrong coordinates", but the usual
+        # cause is a modal dialog or a non-foreground target. Name the blocking
+        # window so the caller can bind it instead of nudging numbers.
+        blocker = _blocking_window_info(hwnd, detail)
+        if blocker and blocker.get("same_process"):
+            return {"success": False, "effect": "refused", "window_id": window_id,
+                    "error": ("MODAL_OPEN: 同进程的另一个顶层窗口挡在点击点上"
+                              f"（hwnd={blocker['hwnd']}, 标题={blocker['title']!r}）。"
+                              "先用 doraemon_windows 绑定它再操作，或关闭该弹窗。"),
+                    "modal": blocker, "click_guard": detail}
+        return {"success": False, "effect": "refused", "window_id": window_id,
                 "error": "CLICK_TARGET_MISMATCH: 该点会落到别的窗口上，已拒绝点击"
                          "（目标不在前台，或同进程开了多个窗口）。"
                          "请先 activate 目标窗口，或改用 desktop_uia_invoke。",
-                "click_guard": detail, "window_id": window_id}
+                "foreground": _foreground_status(hwnd),
+                "click_guard": detail}
     _point_cursor_at(int(info["hwnd"]), int(x), int(y))
     with controller._input_lock:
         result = controller.input.click_normalized(int(info["hwnd"]), int(x), int(y), clicks=int(clicks))
@@ -1916,6 +2104,8 @@ def desktop_click(window_id: str, x: int = -1, y: int = -1, clicks: int = 1,
         result["screen_x"], result["screen_y"] = result.pop("x"), result.pop("y")
         result["x"], result["y"] = int(x), int(y)
     result["window_id"] = window_id
+    if auto_restored:
+        result["auto_restored_from_minimized"] = True
     if decided:
         result["decided"] = decided
     # A click in empty space used to come back as plain success; name what was
@@ -2764,13 +2954,75 @@ _SYSTEM_APP_DIRS = [
 
 # 3.8：lnk 校验对象从「lnk 所在目录」收紧到「解析后的 target_exe」。
 # 允许标准安装位置；Downloads/Temp 等可写目录仍不允许。
+# BUG-16: applications installed on a non-C: drive were all rejected. Include
+# every existing drive root. A drive root already ends in os.sep, so the old
+# `startswith(root + os.sep)` test became "D:\\" and never matched (BUG-17) —
+# always go through _under_root(), which normalises the trailing separator.
+def _existing_drive_roots() -> tuple[str, ...]:
+    import string
+    roots = []
+    for letter in string.ascii_uppercase:
+        root = f"{letter}:\\"
+        try:
+            if os.path.isdir(root):
+                roots.append(root)
+        except OSError:
+            continue
+    return tuple(roots)
+
+
+# Still refuse to launch from user-writable staging directories even when the
+# whole drive is allowed: that was the point of the original boundary.
+_LAUNCH_DENY_DIRS = tuple(str(Path(p).resolve()) for p in (
+    os.path.join(os.environ.get("USERPROFILE", ""), "Downloads"),
+    os.environ.get("TEMP", ""),
+    os.environ.get("TMP", ""),
+) if p)
+
 _LAUNCH_TARGET_ROOTS = tuple(dict.fromkeys(str(Path(p).resolve()) for p in (
     os.environ.get("ProgramFiles", r"C:\Program Files"),
     os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)"),
     os.environ.get("ProgramData", r"C:\ProgramData"),
     os.path.join(os.environ.get("LOCALAPPDATA", ""), "Programs"),
     *_SYSTEM_APP_DIRS,
+    *_existing_drive_roots(),
 ) if p))
+
+
+def _under_root(path: str, root: str) -> bool:
+    """True when `path` is inside `root`, handling drive roots like D:\\.
+
+    `root + os.sep` is wrong for a drive root (it already has a separator),
+    which made the whole whitelist a no-op for D: applications.
+    """
+    try:
+        p = os.path.normcase(os.path.abspath(str(path)))
+        r = os.path.normcase(os.path.abspath(str(root))).rstrip("\\/")
+        return p == r or p.startswith(r + os.sep)
+    except Exception:
+        return False
+
+
+def _launch_target_allowed(path: str) -> bool:
+    lowered = str(path or "")
+    if any(_under_root(lowered, d) for d in _LAUNCH_DENY_DIRS):
+        return False
+    # Drive roots are broad, so also reject the well-known writable staging
+    # directories for *any* user, not just the current one. An installed app
+    # does not live under a "Downloads"/"Temp"/"Recycle.Bin" component.
+    try:
+        parts = os.path.normcase(os.path.abspath(lowered)).split(os.sep)
+    except Exception:
+        parts = []
+    if any(part in _DENY_COMPONENTS for part in parts):
+        return False
+    return any(_under_root(lowered, d) for d in _LAUNCH_TARGET_ROOTS)
+
+
+_DENY_COMPONENTS = frozenset({
+    "downloads", "temp", "tmp", "$recycle.bin", "recycler",
+    "windows.old", "appdata\\local\\temp",
+})
 
 
 def _split_windows_args(args: str) -> list[str]:
@@ -2811,7 +3063,7 @@ def _popen_launch(target_exe: str, lnk_args: str = ""):
     # Windows may route a new cmd console into an existing Windows Terminal
     # process, obscuring ownership of its outer window. An explicit console
     # host keeps the console window in this launch's process tree.
-    is_system_exe = any(target_exe.lower().startswith(d.lower() + os.sep) for d in _SYSTEM_APP_DIRS)
+    is_system_exe = any(_under_root(target_exe, d) for d in _SYSTEM_APP_DIRS)
     if os.path.basename(target_exe).lower() == "cmd.exe" and flags and is_system_exe:
         console_host = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32", "conhost.exe")
         cmd.insert(0, console_host)
@@ -3002,8 +3254,8 @@ def desktop_find_app(name: str) -> dict:
     # 其余路径仅作信息展示，不放宽 desktop_launch_app 的安全边界，也不跳过 lnk 扫描。
     registry_launchable = [
         item["exe"] for item in installed
-        if item.get("exe") and any(item["exe"].lower().startswith(d.lower() + os.sep)
-                                   for d in (*_LAUNCH_ROOTS, *_SYSTEM_APP_DIRS))
+        if item.get("exe") and (any(_under_root(item["exe"], d) for d in (*_LAUNCH_ROOTS, *_SYSTEM_APP_DIRS))
+                                or _launch_target_allowed(item["exe"]))
     ]
     if windows or running:
         verdict = "installed_running"
@@ -3116,10 +3368,10 @@ def desktop_launch_app(shortcut_path: str, *, scoped: bool = False, scope_owner:
     if not os.path.isfile(resolved):
         return {"success": False, "error": f"快捷方式不存在: {resolved}"}
     lowered = resolved.lower()
-    if p.suffix.lower() == ".lnk" and not any(lowered.startswith(root.lower() + os.sep) for root in _LAUNCH_ROOTS):
+    if p.suffix.lower() == ".lnk" and not any(_under_root(lowered, root) for root in _LAUNCH_ROOTS):
         return {"success": False, "error": "只允许启动开始菜单/桌面目录内的快捷方式（安全边界）"}
-    if p.suffix.lower() == ".exe" and not any(lowered.startswith(d.lower() + os.sep) for d in _SYSTEM_APP_DIRS):
-        return {"success": False, "error": "只允许启动 Windows 系统目录内的 exe（安全边界）"}
+    if p.suffix.lower() == ".exe" and not _launch_target_allowed(lowered):
+        return {"success": False, "error": "只允许启动已安装目录内的 exe（安全边界）"}
     target_exe, lnk_args = resolved, ""
     if p.suffix.lower() == ".lnk":
         try:
@@ -3129,7 +3381,7 @@ def desktop_launch_app(shortcut_path: str, *, scoped: bool = False, scope_owner:
             lnk_args = str(shortcut.Arguments or "").strip()
         except Exception as exc:
             return {"success": False, "error": f"快捷方式解析失败: {exc}"}
-        if not target_exe or not any(target_exe.lower().startswith(d.lower() + os.sep) for d in _LAUNCH_TARGET_ROOTS):
+        if not target_exe or not _launch_target_allowed(target_exe):
             return {"success": False, "error": f"TARGET_NOT_ALLOWED: 快捷方式目标不在允许目录: {target_exe}"}
 
     started = time.monotonic()
@@ -3143,7 +3395,7 @@ def desktop_launch_app(shortcut_path: str, *, scoped: bool = False, scope_owner:
     aliases = {basename}
     if basename == "calc.exe":
         aliases.update({"calculatorapp.exe", "calculator.exe"})
-    system_target = any(target_exe.lower().startswith(d.lower() + os.sep) for d in _SYSTEM_APP_DIRS)
+    system_target = any(_under_root(target_exe, d) for d in _SYSTEM_APP_DIRS)
     appx_stub = system_target and basename in {"calc.exe", "notepad.exe"}
     proc = None
     early = None

@@ -662,6 +662,7 @@ export function apply(ctx, config) {
       goal: { type: 'string', description: 'What to click, e.g. "登录按钮" or "点击「新建任务」". Resolved locally; nothing is clicked when the match is below the confidence gate.' },
       source: { type: 'string', description: 'Element table for goal: auto (default, UIA then OCR) | uia | ocr.' },
       caption: { type: 'boolean', description: 'Annotate icons so nameless buttons (close/minimise) become addressable by name. Costs one caption pass (~3s) and is cached.' },
+      abort_on_miss: { type: 'boolean', description: 'Default true: refuse a coordinate click that lands outside every observed element (CLICK_WOULD_MISS). Set false only when deliberately clicking blank space, e.g. to dismiss a menu.' },
       window_wait_ms: { type: 'number', description: 'How long to watch for a window this click spawns, 0–30000 (default 600). Many apps open their result in a separate process, seconds later.' },
       clicks: { type: 'number', description: 'Click count, 1–3 (default 1).' },
       button: { type: 'string', description: 'left (default) or right.' },
@@ -739,7 +740,8 @@ export function apply(ctx, config) {
       }
       if (dispatch !== 'input') throw new Error('dispatch must be input, message or auto')
       return bridge.request(`/windows/${id}/click`, ownerOf(exec), {
-        body: { x, y, clicks, button, ...pinCapture(args.capture_id) }, signal: exec.signal,
+        body: { x, y, clicks, button, abort_on_miss: args.abort_on_miss !== false,
+                ...pinCapture(args.capture_id) }, signal: exec.signal,
       })
     },
   }))

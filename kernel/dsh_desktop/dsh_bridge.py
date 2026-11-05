@@ -200,6 +200,7 @@ class ClickRequest(CaptureBound):
     goal: str = Field(default="", max_length=200)
     source: str = Field(default="auto", pattern="^(auto|uia|ocr)$")
     caption: bool = False
+    abort_on_miss: bool = True
 
 
 class ScreenClickRequest(BaseModel):
@@ -1137,8 +1138,26 @@ def create_router(eternity) -> APIRouter:
                                       "new_window_unrelated" if unrelated_added else None)
         if timed_out:
             payload["timed_out"] = True
-        payload["visual_delta"] = None if change is None else round(change["mean"], 2)
-        payload["visual_cells"] = None if change is None else change["cells"]
+        # BUG-11: a refused action (CLICK_TARGET_MISMATCH, CLICK_WOULD_MISS,
+        # LOW_CONFIDENCE, ...) never touched the UI. Emitting visual_delta for it
+        # reads as "clicked, nothing happened" and can accumulate into a false
+        # "the app is unresponsive" diagnostic.
+        if payload.get("success", True) is not False:
+            payload["visual_delta"] = None if change is None else round(change["mean"], 2)
+            payload["visual_cells"] = None if change is None else change["cells"]
+        else:
+            payload["visual_delta"] = None
+            payload["visual_cells"] = None
+        # BUG-24: the screen moved, so the element table that produced these
+        # coordinates is no longer authoritative for the next click. Mark it
+        # stale instead of relying on the 120s TTL.
+        if payload.get("success", True) is not False and effect == "confirmed" and change:
+            if _pixel_change_confirms(change):
+                try:
+                    desktop_tools._mark_observation_stale(window_id)
+                    payload["observation_invalidated"] = True
+                except Exception:
+                    pass
         if evidence:
             payload["evidence"] = evidence
         if capture_id:
@@ -1376,6 +1395,7 @@ def create_router(eternity) -> APIRouter:
                        capture_id=req.capture_id)
         return act(window_id, desktop_tools.desktop_click, window_id, req.x, req.y, req.clicks,
                    goal=req.goal, source=req.source, caption=req.caption,
+                   abort_on_miss=req.abort_on_miss,
                    window_wait_ms=req.window_wait_ms,
                    capture_id=req.capture_id)
 

@@ -55,11 +55,29 @@ class ClickHitTests(unittest.TestCase):
         note = desktop_tools._click_hit_note("win-x", 880, 510)
         self.assertEqual(note["nearest"]["text"], "右侧")
 
-    def test_stale_observation_is_ignored(self):
+    def test_stale_observation_reports_instead_of_silently_giving_up(self):
+        # BUG-24: returning None made an expired table look like a clean bill of
+        # health. Staleness must be an explicit, actionable warning.
         desktop_tools._LAST_OBS["win-x"] = {
             "boxes": [(0.0, 0.0, 100.0, 100.0, "旧")],
             "ts": time.time() - desktop_tools._OBS_TTL_SECONDS - 5,
         }
+        note = desktop_tools._click_hit_note("win-x", 50, 50)
+        self.assertIsNotNone(note)
+        self.assertIsNone(note["hit"])
+        self.assertEqual(note["warning"], "OBSERVATION_STALE")
+
+    def test_layout_stale_flag_is_reported(self):
+        remember("win-x", [(0.0, 0.0, 100.0, 100.0, "旧")])
+        desktop_tools._mark_observation_stale("win-x")
+        note = desktop_tools._click_hit_note("win-x", 50, 50)
+        self.assertEqual(note["warning"], "OBSERVATION_STALE")
+
+    def test_reobserving_clears_the_stale_flag(self):
+        remember("win-x", [(0.0, 0.0, 100.0, 100.0, "旧")])
+        desktop_tools._mark_observation_stale("win-x")
+        desktop_tools._remember_observation("win-x", [], "window")
+        # A fresh observation with no boxes means "unknown", not "stale".
         self.assertIsNone(desktop_tools._click_hit_note("win-x", 50, 50))
 
     def test_remembering_a_desktop_scope_observation_clears_the_window(self):

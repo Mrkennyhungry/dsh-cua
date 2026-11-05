@@ -49,8 +49,42 @@ ANTONYMS = (
 )
 ANTONYM_PENALTY = 0.6
 
+# Types that merely *display* a label. A goal like 下载/设置 is an action, so a
+# Text/Hyperlink with the same word (a nav entry, a breadcrumb) is usually the
+# wrong target: the real toolbar Button often has no accessible name at all and
+# never entered the candidate set. Penalise passive types instead of letting a
+# unique-but-wrong match click through with perfect confidence.
+PASSIVE_TYPES = {"text", "hyperlink", "pane", "group", "custom", "document"}
+PASSIVE_PENALTY = 0.45
+SHARED_CHAR_PENALTY = 0.45
+# A single candidate provides no discrimination evidence. The old formula made
+# confidence exactly 1.0 for it, which is how a lone wrong match looked certain.
+SINGLE_CANDIDATE_CONFIDENCE_CAP = 0.75
+PASSIVE_SINGLETON_CONFIDENCE = 0.25
+MIN_CONFIDENCE = 0.30
+
 _CJK = re.compile(r"[\u4e00-\u9fff]")
 _WORD = re.compile(r"[a-z0-9_]+")
+
+
+def _shared_char_penalty(goal: str, text: str) -> float:
+    """BUG-12: BM25 is per-character for CJK, so sharing ONE character scores.
+
+    If neither string contains the other and they share fewer than
+    min(2, len(goal)) characters, the match is almost certainly spurious
+    (设置 vs 移动设备). Return a multiplier < 1 in that case.
+    """
+    goal_norm, text_norm = normalise(goal), normalise(text)
+    if not goal_norm or not text_norm:
+        return 1.0
+    if goal_norm in text_norm or text_norm in goal_norm:
+        return 1.0
+    goal_chars = set(tokenize(goal_norm))
+    text_chars = set(tokenize(text_norm))
+    shared = len(goal_chars & text_chars)
+    if shared < min(2, len(goal_chars)):
+        return SHARED_CHAR_PENALTY
+    return 1.0
 
 
 def tokenize(text: str) -> list[str]:
@@ -152,6 +186,7 @@ def _titlebar_bonus(goal: str, elements: list[dict], candidates: list[dict]) -> 
 
 def decide(goal: str, elements: list[dict], *, top_k: int = 5,
            min_score: float = 0.35, min_gap: float = 0.10,
+           min_confidence: float = MIN_CONFIDENCE,
            caps: dict | None = None) -> Decision:
     """Rank elements for `goal`. Pure function: no I/O, no model, deterministic.
 
@@ -214,12 +249,26 @@ def decide(goal: str, elements: list[dict], *, top_k: int = 5,
         if antonym:
             score = max(0.0, score - antonym)
             why = "antonym"
+        # BUG-12: a CJK goal sharing just one character with this label is not a
+        # real match. Applied before the type prior so a passive label cannot be
+        # rescued back above the threshold by a verb bonus.
+        char_mult = _shared_char_penalty(goal, text)
+        if score > 0 and char_mult < 1.0:
+            score *= char_mult
+            why = "weak-char-overlap"
         # A type prior may only reorder real text matches; on its own it would let
         # "click anything" look like a hit for a goal that matches nothing.
         if score > 0:
             score += prior
         else:
             why = ""
+        # BUG-19: an action goal should prefer a Button over a same-named
+        # navigation Text. A passive label is weaker evidence, so downgrade the
+        # confidence rather than the score (a Text may legitimately be the only
+        # clickable thing); the gate below decides whether to refuse.
+        if score > 0 and str(item.get("type", "")).lower() in PASSIVE_TYPES:
+            score *= PASSIVE_PENALTY
+            why = why or "passive-type"
         bbox = item.get("bbox") or [0, 0, 0, 0]
         area = max(0, bbox[2] - bbox[0]) * max(0, bbox[3] - bbox[1])
         if area <= 0:
@@ -251,11 +300,25 @@ def decide(goal: str, elements: list[dict], *, top_k: int = 5,
     # Confidence = how much the winner stands out, not its absolute score.
     gap = best["score"] - max(0.0, second)
     confidence = min(1.0, max(0.0, gap / (abs(best["score"]) + 1e-6)))
+    singleton = len(scored) == 1
+    if singleton:
+        # BUG-19: "only one candidate" used to be confidence 1.0. It means the
+        # table has no rival, not that the pick is right. A lone *passive* label
+        # (Text/Hyperlink) is exactly the "unique but wrong" case from the field
+        # report — the real toolbar Button had no accessible name and never
+        # entered the table. Refuse it so the caller falls back to coordinates.
+        passive_singleton = str(best.get("type", "")).lower() in PASSIVE_TYPES
+        cap = (SINGLE_CANDIDATE_CONFIDENCE_CAP if not passive_singleton
+               else PASSIVE_SINGLETON_CONFIDENCE)
+        confidence = min(confidence, cap)
     if best["score"] <= 0:
         return Decision(None, 0.0, scored[:top_k], "no positive match")
     if best["score"] < min_score:
         return Decision(None, confidence, scored[:top_k], "below threshold",
                         score=best["score"], gap=gap)
+    if confidence < min_confidence:
+        return Decision(None, confidence, scored[:top_k], "low_confidence",
+                        score=best["score"], gap=gap, ambiguous=True)
     # A pick that barely beats the runner-up is where the wrong answers live; the
     # caller can escalate those instead of trusting them.
     return Decision(best["id"], confidence, scored[:top_k], best["why"] or "text-match",
