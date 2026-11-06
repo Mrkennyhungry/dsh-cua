@@ -30,7 +30,12 @@ if (Test-Path (Join-Path $weightsSource 'icon_detect\model.onnx')) {
 }
 $env:PYTHONPATH = $sourceRoot
 $env:DSH_DESKTOP_HOME = $InstallDir
-& $python -c 'import dsh_desktop.dsh_bridge_cli; print("kernel source import: ok")'
+# -c with embedded double quotes is mangled by PowerShell 5.1 when handed to a
+# native process, so run the probe from a temp file instead.
+$probe = Join-Path $env:TEMP 'dsh_kernel_import_probe.py'
+'import dsh_desktop.dsh_bridge_cli; print("kernel source import: ok")' | Set-Content -LiteralPath $probe -Encoding ASCII
+& $python $probe
+Remove-Item -LiteralPath $probe -Force -ErrorAction SilentlyContinue
 if ($LASTEXITCODE -ne 0) { throw 'Kernel source import failed.' }
 Write-Host "Desktop kernel ready. Python: $python"
 Write-Host 'Run scripts/install-elevated-task.ps1 once from an elevated PowerShell to enable High integrity.'
