@@ -1,4 +1,4 @@
-/* DSH Client half: show authorized windows/apps as compact composer chips. */
+/* DSH Client half: show authorized windows/apps as compact chips above the composer. */
 window.__ModuleLoader__.load({
   id: 'dsh-doraemon',
   factory(require) {
@@ -50,6 +50,9 @@ window.__ModuleLoader__.load({
             background: 'var(--dsw-alias-bg-secondary, rgba(127,127,127,.10))',
             color: 'var(--dsw-alias-text-primary, inherit)',
             fontSize: 12, lineHeight: '18px',
+            // The rail itself is click-through so it can never block the
+            // composer underneath; only the chips take pointer events.
+            pointerEvents: 'auto',
           },
         },
         h('span', { style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, title),
@@ -69,16 +72,22 @@ window.__ModuleLoader__.load({
       }
       return h('div', {
         'aria-label': 'AI 可操作范围',
-        style: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6,
-          width: 'auto', maxWidth: 'calc(100% - 28px)', boxSizing: 'border-box',
-          marginLeft: 16, marginRight: 12, marginTop: 4, marginBottom: 0, padding: 0 },
+        style: {
+          position: 'absolute', bottom: 'calc(100% + 6px)', left: 12, right: 12, zIndex: 5,
+          display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6,
+          boxSizing: 'border-box', padding: 0,
+          // Click-through rail: the composer and the attachment rail it sits
+          // above stay reachable even while chips are shown.
+          pointerEvents: 'none',
+        },
       },
       selections.map(chip),
       selections.length > 1 ? h('button', {
         type: 'button', disabled: busy, onClick: () => write(''),
         'aria-label': '清空全部操作范围',
         style: { flex: '0 0 auto', border: 0, background: 'transparent', color: 'inherit',
-          opacity: .65, cursor: 'pointer', font: 'inherit', fontSize: 11, padding: '3px 5px' },
+          opacity: .65, cursor: 'pointer', font: 'inherit', fontSize: 11, padding: '3px 5px',
+          pointerEvents: 'auto' },
       }, '全部取消') : null)
     }
 
@@ -86,25 +95,33 @@ window.__ModuleLoader__.load({
       inject: ['slots', 'configForms'],
       apply(ctx) {
         const form = ctx.configForms.get('doraemon')
-        const slot = 'conversation.input.attachments'
-        const officialOwner = '@deepseek-ai/dsh-client-ui-attachment'
+        if (!form) return
 
-        function CompositeAttachments(props) {
-          // This is a single slot, so the composite must retain the official
-          // component: file/image previews, upload/retry, drop handling and the
-          // owner's onRemoveAttachment cleanup all continue through its props.
-          const entries = typeof ctx.slots.entries === 'function' ? ctx.slots.entries(slot) : []
-          const Official = entries.find((entry) => entry.registrant === officialOwner)?.component
-          return h(React.Fragment, null,
-            h(SelectionChips, { form }),
-            Official ? h(Official, props) : null)
-        }
+        // NEVER register into `conversation.input.attachments`.
+        //
+        // That key is a SINGLE slot owned by @deepseek-ai/dsh-client-ui-attachment.
+        // A lower `priority` wins the cell and replaces the official component
+        // outright, and the official component is what renders the draft's file
+        // and image thumbnails, the upload/retry state and the drop target.
+        // 0.4.10-0.4.12 tried to nest that component back in by looking up
+        // `entry.registrant`, but a StoredEntry only exposes
+        // `{ component, options: { key, id, order, label, priority } }` — there is
+        // no `registrant`, so the lookup always missed and the whole attachment
+        // rail (images included) rendered as nothing.
+        //
+        // The chips belong in the composer's overlay list instead: it is a `list`
+        // slot rendered in the card's floating anchor, so several plugins coexist
+        // and the attachment slot is left untouched.
+        // The overlay slot hands the component its own props (sessionId, ...);
+        // the config form is closed over here instead of being read from props.
+        const ChipsForOverlay = () => h(SelectionChips, { form })
 
-        ctx.slots.inject(slot, () => ctx.slots.register({
-          // Lower numbers win a DSH single slot; the official entry defaults to 0.
-          name: slot, id: 'doraemon-selection', priority: -1000,
+        ctx.slots.inject('conversation.input.overlay', () => ctx.slots.register({
+          name: 'conversation.input.overlay',
+          id: 'doraemon-selection',
+          order: -1,
           locale: 'conversation',
-        }, CompositeAttachments))
+        }, ChipsForOverlay))
       },
     }
   },

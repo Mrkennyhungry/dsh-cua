@@ -3,6 +3,15 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import vm from 'node:vm'
 
+/**
+ * The client half must never occupy `conversation.input.attachments`.
+ *
+ * That key is a single slot owned by @deepseek-ai/dsh-client-ui-attachment and
+ * it renders the draft's image/file thumbnails. 0.4.10-0.4.12 won that cell and
+ * then failed to re-render the official entry (StoredEntry has no `registrant`),
+ * so composer attachments disappeared entirely. These tests pin the new design:
+ * chips live in the composer's overlay list, the attachment slot stays untouched.
+ */
 function loadClient(form) {
   let definition
   const registrations = []
@@ -20,26 +29,31 @@ function loadClient(form) {
     assert.equal(name, 'react')
     return React
   })
-  const OfficialAttachments = (props) => ({ type: 'official-attachments', props })
   const ctx = {
     configForms: { get: (id) => { assert.equal(id, 'doraemon'); return form } },
     slots: {
       inject: (slot, register) => register(),
-      entries: (slot) => slot === 'conversation.input.attachments'
-        ? [{ registrant: '@deepseek-ai/dsh-client-ui-attachment', component: OfficialAttachments }] : [],
-      register: (options, component) => registrations.push({ options, component }),
+      register: (options, component) => { registrations.push({ options, component }); return () => {} },
     },
   }
   plugin.apply(ctx)
-  return registrations[0]
+  return { registrations, registration: registrations[0] }
 }
 
-function renderComposite(registration, props = {}) {
-  const fragment = registration.component(props)
-  const [selectionElement, officialElement] = fragment.props.children
+/** Evaluate function components the way React would, down to host elements. */
+function renderComponent(registration, props = {}) {
+  let node = registration.component(props)
+  while (node && typeof node === 'object' && typeof node.type === 'function') {
+    node = node.type(node.props)
+  }
+  return node
+}
+
+function formWith(selection) {
   return {
-    fragment, officialElement,
-    chip: selectionElement.type(selectionElement.props),
+    getSnapshot: () => ({ value: { companionSelection: selection } }),
+    subscribe: (listener) => { listener(); return () => {} },
+    set: async () => true,
   }
 }
 
@@ -60,28 +74,35 @@ function findButton(node) {
   return null
 }
 
-test('Client registers inside the composer attachments and cancel clears the shared field', async () => {
-  const writes = []
-  const form = {
-    getSnapshot: () => ({ value: { companionSelection: JSON.stringify({
-      title: '微信', exe: 'Weixin.exe', pid: 23744, hwnd: 67282,
-    }) } }),
-    subscribe: (listener) => { listener(); return () => {} },
-    set: async (field, value) => { writes.push({ field, value }); return true },
+test('Client never registers into conversation.input.attachments', () => {
+  const { registrations } = loadClient(formWith(''))
+  assert.equal(registrations.length, 1)
+  for (const entry of registrations) {
+    assert.notEqual(
+      entry.options.name, 'conversation.input.attachments',
+      '占用附件单插槽会把官方的图片/文件预览整个顶掉',
+    )
   }
-  const registration = loadClient(form)
-  assert.equal(registration.options.name, 'conversation.input.attachments')
-  assert.equal(registration.options.id, 'doraemon-selection')
-  assert.equal(registration.options.priority, -1000)
-  const { chip, officialElement } = renderComposite(registration)
-  assert.ok(officialElement)
-  const button = findButton(chip)
-  assert.ok(button)
-  await button.props.onClick()
-  assert.deepEqual(writes, [{ field: 'companionSelection', value: '[]' }])
 })
 
-test('Client renders a wrapping chip per selection and removes only the clicked one', async () => {
+test('Client registers the chips into the composer overlay list', () => {
+  const { registration } = loadClient(formWith(''))
+  assert.equal(registration.options.name, 'conversation.input.overlay')
+  assert.equal(registration.options.id, 'doraemon-selection')
+  assert.equal(registration.options.locale, 'conversation')
+})
+
+test('Chip rail is click-through so it cannot block the composer underneath', () => {
+  const selection = JSON.stringify([{ window_id: 'win-a', title: '微信', exe: 'Weixin.exe' }])
+  const { registration } = loadClient(formWith(selection))
+  const rail = renderComponent(registration)
+  assert.equal(rail.props.style.pointerEvents, 'none')
+  assert.equal(rail.props.style.position, 'absolute')
+  const chips = rail.props.children[0]
+  assert.equal(chips[0].props.style.pointerEvents, 'auto')
+})
+
+test('Client renders one chip per selection and removes only the clicked one', async () => {
   const writes = []
   const selections = [
     { window_id: 'win-a', title: '微信', exe: 'Weixin.exe' },
@@ -92,39 +113,18 @@ test('Client renders a wrapping chip per selection and removes only the clicked 
     subscribe: (listener) => { listener(); return () => {} },
     set: async (field, value) => { writes.push({ field, value }); return true },
   }
-  const registration = loadClient(form)
-  const { chip: group } = renderComposite(registration)
-  assert.equal(group.props.style.flexWrap, 'wrap')
-  assert.equal(group.props.style.marginLeft, 16)
-  assert.equal(group.props.style.marginRight, 12)
-  assert.equal(group.props.style.maxWidth, 'calc(100% - 28px)')
-  const chips = group.props.children[0]
+  const { registration } = loadClient(form)
+  const rail = renderComponent(registration)
+  assert.equal(rail.props.style.flexWrap, 'wrap')
+  const chips = rail.props.children[0]
   assert.equal(chips.length, 2)
-  assert.equal(chips[0].props.style.flex, '0 1 auto')
   const button = findButton(chips[1])
+  assert.ok(button)
   await button.props.onClick()
   assert.equal(JSON.parse(writes[0].value)[0].window_id, 'win-a')
 })
 
-test('Client preserves official attachment props even with no window selected', () => {
-  const form = {
-    getSnapshot: () => ({ value: { companionSelection: '' } }),
-    subscribe: (listener) => { listener(); return () => {} },
-    set: async () => true,
-  }
-  const registration = loadClient(form)
-  const onRemoveAttachment = () => {}
-  const onRetryFile = () => {}
-  const props = {
-    attachments: [{ id: 'file-1', kind: 'file' }], canAcceptDrop: true,
-    onAddFiles: () => {}, onRemoveAttachment, uploads: { 'file-1': 50 },
-    onRetryFile, dropLimits: { maxImages: 10 }, t: (key) => key,
-  }
-  const { chip, officialElement } = renderComposite(registration, props)
-  assert.equal(chip, null)
-  assert.ok(officialElement)
-  assert.deepEqual(officialElement.props.attachments, props.attachments)
-  assert.equal(officialElement.props.onRemoveAttachment, onRemoveAttachment)
-  assert.equal(officialElement.props.onRetryFile, onRetryFile)
-  assert.equal(officialElement.props.canAcceptDrop, true)
+test('No selection renders nothing at all', () => {
+  const { registration } = loadClient(formWith(''))
+  assert.equal(renderComponent(registration), null)
 })
