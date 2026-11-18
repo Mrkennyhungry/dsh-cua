@@ -31,11 +31,18 @@ if (Test-Path (Join-Path $weightsSource 'icon_detect\model.onnx')) {
 $env:PYTHONPATH = $sourceRoot
 $env:DSH_DESKTOP_HOME = $InstallDir
 # -c with embedded double quotes is mangled by PowerShell 5.1 when handed to a
-# native process, so run the probe from a temp file instead.
-$probe = Join-Path $env:TEMP 'dsh_kernel_import_probe.py'
-'import dsh_desktop.dsh_bridge_cli; print("kernel source import: ok")' | Set-Content -LiteralPath $probe -Encoding ASCII
-& $python $probe
-Remove-Item -LiteralPath $probe -Force -ErrorAction SilentlyContinue
-if ($LASTEXITCODE -ne 0) { throw 'Kernel source import failed.' }
+# native process, so run the probe from a temp file instead. The name is unique
+# per run so two installs cannot share (and delete) the same probe, and the
+# finally block leaves nothing behind when the import fails.
+$probe = Join-Path $env:TEMP ("dsh_kernel_import_probe_{0}.py" -f [guid]::NewGuid().ToString('N'))
+try {
+  'import dsh_desktop.dsh_bridge_cli; print("kernel source import: ok")' |
+    Set-Content -LiteralPath $probe -Encoding ASCII
+  & $python $probe
+  if ($LASTEXITCODE -ne 0) { throw 'Kernel source import failed.' }
+}
+finally {
+  Remove-Item -LiteralPath $probe -Force -ErrorAction SilentlyContinue
+}
 Write-Host "Desktop kernel ready. Python: $python"
 Write-Host 'Run scripts/install-elevated-task.ps1 once from an elevated PowerShell to enable High integrity.'
