@@ -50,7 +50,9 @@
     "companion/*.csproj",
     "vendor/weights/**/*",
     "THIRD_PARTY_NOTICES.txt",
-    "docs/**/*"
+    "docs/**/*",
+    "!docs/agent-runtime-refactor/**",
+    "!docs/watch-toast-design-review.md"
   ],
   "engines": {
     "node": ">=22"

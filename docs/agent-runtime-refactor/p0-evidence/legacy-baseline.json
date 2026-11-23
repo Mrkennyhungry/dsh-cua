@@ -1,0 +1,187 @@
+{
+  "version": "0.4.14",
+  "toolCount": 31,
+  "protocol": 1,
+  "records": [
+    {
+      "name": "doraemon_health",
+      "ms": 3.881,
+      "bytes": 1121,
+      "success": true
+    },
+    {
+      "name": "doraemon_windows",
+      "ms": 6.808,
+      "bytes": 3143,
+      "success": true
+    },
+    {
+      "name": "doraemon_windows",
+      "ms": 10.292,
+      "bytes": 372,
+      "success": true
+    },
+    {
+      "name": "doraemon_uia",
+      "ms": 270.362,
+      "bytes": 1525,
+      "success": true
+    },
+    {
+      "name": "doraemon_capture",
+      "ms": 14.052,
+      "bytes": 363,
+      "success": true
+    },
+    {
+      "attempt": 1,
+      "uiaAttempts": [
+        {
+          "max_depth": 4,
+          "max_nodes": 50,
+          "control_count": 1,
+          "truncated": false,
+          "truncation_reasons": [],
+          "uia_coverage": {
+            "control_count": 1,
+            "named_control_count": 1,
+            "named_semantic_control_count": 0,
+            "message_like_candidate_count": 0
+          },
+          "target_found": false
+        }
+      ],
+      "controls": 1,
+      "image": {
+        "width": 480,
+        "height": 180,
+        "bytes": 6950,
+        "format": "JPEG"
+      }
+    },
+    {
+      "name": "doraemon_windows",
+      "ms": 3.09,
+      "bytes": 77,
+      "success": true
+    },
+    {
+      "name": "doraemon_windows",
+      "ms": 5.926,
+      "bytes": 3143,
+      "success": true
+    },
+    {
+      "name": "doraemon_windows",
+      "ms": 8.859,
+      "bytes": 372,
+      "success": true
+    },
+    {
+      "name": "doraemon_uia",
+      "ms": 261.292,
+      "bytes": 1524,
+      "success": true
+    },
+    {
+      "name": "doraemon_capture",
+      "ms": 11.44,
+      "bytes": 362,
+      "success": true
+    },
+    {
+      "attempt": 2,
+      "uiaAttempts": [
+        {
+          "max_depth": 4,
+          "max_nodes": 50,
+          "control_count": 1,
+          "truncated": false,
+          "truncation_reasons": [],
+          "uia_coverage": {
+            "control_count": 1,
+            "named_control_count": 1,
+            "named_semantic_control_count": 0,
+            "message_like_candidate_count": 0
+          },
+          "target_found": false
+        }
+      ],
+      "controls": 1,
+      "image": {
+        "width": 480,
+        "height": 180,
+        "bytes": 6950,
+        "format": "JPEG"
+      }
+    },
+    {
+      "name": "doraemon_windows",
+      "ms": 2.778,
+      "bytes": 77,
+      "success": true
+    },
+    {
+      "name": "doraemon_windows",
+      "ms": 7.524,
+      "bytes": 3143,
+      "success": true
+    },
+    {
+      "name": "doraemon_windows",
+      "ms": 8.913,
+      "bytes": 372,
+      "success": true
+    },
+    {
+      "name": "doraemon_uia",
+      "ms": 262.679,
+      "bytes": 1524,
+      "success": true
+    },
+    {
+      "name": "doraemon_capture",
+      "ms": 5.875,
+      "bytes": 362,
+      "success": true
+    },
+    {
+      "attempt": 3,
+      "uiaAttempts": [
+        {
+          "max_depth": 4,
+          "max_nodes": 50,
+          "control_count": 1,
+          "truncated": false,
+          "truncation_reasons": [],
+          "uia_coverage": {
+            "control_count": 1,
+            "named_control_count": 1,
+            "named_semantic_control_count": 0,
+            "message_like_candidate_count": 0
+          },
+          "target_found": false
+        }
+      ],
+      "controls": 1,
+      "image": {
+        "width": 480,
+        "height": 180,
+        "bytes": 6950,
+        "format": "JPEG"
+      }
+    },
+    {
+      "name": "doraemon_windows",
+      "ms": 2.406,
+      "bytes": 77,
+      "success": true
+    }
+  ],
+  "summary": {
+    "n": 16,
+    "p50": 7.524,
+    "p95": 270.362,
+    "totalMs": 886.177
+  }
+}

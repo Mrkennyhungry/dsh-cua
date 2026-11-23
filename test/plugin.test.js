@@ -1,10 +1,11 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
-import path, { delimiter, join } from 'node:path'
+import path, { delimiter, dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { execFileSync } from 'node:child_process'
 import { apply, Config, createToolTimeline } from '../index.js'
 import { createBridge, extractFrames, ownerOf } from '../bridge-client.js'
 import { createKernel } from '../kernel.js'
@@ -48,23 +49,13 @@ const BINARY_FILE = /\.(png|gif|jpe?g|ico|onnx|ttf|woff2?|pyc)$/i
 // Third-party minified bundles and model weights are not authored here.
 const THIRD_PARTY_PREFIXES = ['kernel/dsh_desktop/static/vendor/', 'vendor/weights/']
 
-/** Every text file `npm pack` would publish, expanded from package.json#files. */
+/** Use npm's actual glob and exclusion rules for the publication check. */
 function shippedTextFiles() {
-  const manifest = JSON.parse(readFileSync(join(repoRoot, 'package.json'), 'utf8'))
-  const found = new Set(['package.json', 'LICENSE'])
-  const walk = (dir) => {
-    for (const entry of readdirSync(join(repoRoot, dir), { withFileTypes: true })) {
-      const rel = `${dir}/${entry.name}`
-      if (entry.isDirectory()) walk(rel)
-      else found.add(rel)
-    }
-  }
-  for (const pattern of manifest.files) {
-    if (pattern.startsWith('!')) continue
-    if (pattern.endsWith('/**/*')) walk(pattern.slice(0, -'/**/*'.length))
-    else found.add(pattern)
-  }
-  return [...found].filter((file) => existsSync(join(repoRoot, file))
+  const npmCli = process.env.npm_execpath || join(dirname(process.execPath), 'node_modules/npm/bin/npm-cli.js')
+  const [pack] = JSON.parse(execFileSync(process.execPath, [npmCli, 'pack', '--dry-run', '--json', '--ignore-scripts'], {
+    cwd: repoRoot, encoding: 'utf8', windowsHide: true,
+  }))
+  return pack.files.map(file => file.path).filter((file) => existsSync(join(repoRoot, file))
     && !file.includes('__pycache__/') && !BINARY_FILE.test(file)
     && !THIRD_PARTY_PREFIXES.some((prefix) => file.startsWith(prefix)))
 }
@@ -97,11 +88,9 @@ test('every published file is free of private names, private hosts and local pat
 })
 
 
-test('real 0.2.1-rc.2 SDK registers every tool with canonical output schemas', () => {
+test('installed DSH SDK registers every legacy tool with canonical output schemas', () => {
   const { tools } = setup()
-  // 31 with doraemon_click_screen, minus doraemon_cursor when the docked commander
-  // replaced the cosmetic pointer.
-  assert.equal(tools.size, 30)
+  assert.equal(tools.size, 31)
   for (const tool of tools.values()) assert.equal(tool.output.schema.type, 'object')
 })
 
@@ -187,7 +176,7 @@ test('window tools forward normalized coordinates and reject out-of-range input'
     await tools.get('doraemon_click').execute(
       { window_id: 'win-0123456789', x: 120, y: 340 }, execution())
     assert.equal(calls[0].url, 'http://127.0.0.1:8766/api/dsh/windows/win-0123456789/click')
-    assert.deepEqual(JSON.parse(calls[0].options.body), { x: 120, y: 340, clicks: 1, button: 'left' })
+    assert.deepEqual(JSON.parse(calls[0].options.body), { x: 120, y: 340, clicks: 1, button: 'left', abort_on_miss: true })
 
     await assert.rejects(
       tools.get('doraemon_click').execute({ window_id: 'win-0123456789', x: 1001, y: 0 }, execution()),
@@ -642,7 +631,7 @@ test('package.json is BOM-free and parseable, and every shipped file exists', as
   const raw = await readFile(new URL('../package.json', import.meta.url))
   assert.notDeepEqual([...raw.subarray(0, 3)], [0xef, 0xbb, 0xbf], 'package.json must not start with a BOM')
   const manifest = JSON.parse(raw.toString('utf8'))
-  for (const file of manifest.files.filter(file => !file.includes('*'))) {
+  for (const file of manifest.files.filter(file => !file.startsWith('!') && !file.includes('*'))) {
     await readFile(new URL(`../${file}`, import.meta.url))
   }
   assert.ok(manifest.files.includes('kernel/**/*'), 'bundled kernel source must be included')
@@ -1055,7 +1044,9 @@ test('bootstrap installation is discovered without changing PATH or a profile', 
     const python = join(root, 'dsh-desktop', 'venv', 'Scripts', 'python.exe')
     mkdirSync(path.dirname(python), { recursive: true })
     writeFileSync(python, '')
-    const kernel = createKernel({ port: 65018, tokenEnv: 'DSH_DESKTOP_BRIDGE_TOKEN' })
+    // A checkout's real development venv takes priority over the bootstrap.
+    // Give this fixture its own absent development interpreter.
+    const kernel = createKernel({ port: 65018, tokenEnv: 'DSH_DESKTOP_BRIDGE_TOKEN', repoRoot: join(root, 'checkout'), homeDir: join(root, 'dsh-desktop') })
     assert.equal(kernel.executable().command, python)
     assert.equal(kernel.executable().source, 'bootstrap venv')
     assert.equal(kernel.paths.home, join(root, 'dsh-desktop'))
