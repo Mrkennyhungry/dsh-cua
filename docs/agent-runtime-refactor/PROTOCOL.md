@@ -247,6 +247,10 @@ owner 只能读取自身操作和观察。全局健康摘要可以包含设备�
 
 OCR/YOLO 按需惰性启用。基础语义与截图尽量同批获取，避免同一轮重复 UIA 扫描。
 
+P3 观察缓存默认 64 份、300 秒，图片总预算 32 MiB，单图 JPEG 上限 4 MiB。默认元素页 80 项、正文页 6000 字符，元素 JSON 预算 45000 bytes，源码采集上限 DOM 3000 项、UIA 1500 项、正文 60000 字符，达到上限返回 source_truncated。cursor 保存原观察 ID 及元素/正文两个偏移，分页读取增加采集次数为 0。图片只在首个携图响应中提供，后续纯语义页省略 bounds。
+
+DOM ref 使用文档内 WeakMap 身份与 WeakRef 对象索引，内部完整 selector 用于诊断。导航、移除后同名替换、跨 owner 和缓存过期均拒绝旧引用。MutationObserver、scroll、input/change 和 resize 维护布局版本，开放 shadow root 由同一观察器追踪。UIA wrapper 留在单一惰性 COM apartment worker，API 调用只在该线程读取与执行。worker 最多一个在途调用和一个排队项，provider 卡住返回实际 timeout/busy，禁止扩张线程池。
+
 ## 7. `doraemon_act`
 
 ### 参数

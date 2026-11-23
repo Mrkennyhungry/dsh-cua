@@ -24,8 +24,13 @@ class Target:
     closed: bool = False
 
     def summary(self):
-        return {'target_id': self.target_id, 'kind': self.kind, 'revision': self.revision,
-                'closed': self.closed, **self.metadata}
+        result = {'target_id': self.target_id, 'kind': self.kind, 'revision': self.revision,
+                  'closed': self.closed, **self.metadata}
+        for key, limit in (('title', 512), ('url', 2048)):
+            if isinstance(result.get(key), str) and len(result[key]) > limit:
+                result[key] = result[key][:limit]
+                result[key + '_truncated'] = True
+        return result
 
 
 class TargetRegistry:
@@ -137,3 +142,7 @@ class FrameRegistry:
     def release(self, owner):
         with self._lock:
             self._frames = OrderedDict((key, frame) for key, frame in self._frames.items() if frame.owner != owner)
+
+    def discard(self, frame_id):
+        with self._lock:
+            self._frames.pop(frame_id, None)

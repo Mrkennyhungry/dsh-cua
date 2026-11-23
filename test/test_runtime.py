@@ -42,6 +42,19 @@ class RuntimeTests(unittest.TestCase):
             fake.assert_called_once()
             self.assertTrue(all(parser is parsers[0] for parser in parsers))
 
+    def test_ocr_and_yolo_initialize_independently_once(self):
+        with tempfile.TemporaryDirectory() as directory:
+            runtime = DesktopRuntime(RuntimeConfig.from_home(Path(directory)))
+            parser = mock.Mock()
+            with mock.patch.dict(sys.modules, {'dsh_desktop.ui_parser': mock.Mock(UIParser=parser)}):
+                runtime.perceive(mock.Mock(), 'ocr')
+                runtime.perceive(mock.Mock(), 'ocr')
+                runtime.perceive(mock.Mock(), 'yolo')
+            self.assertEqual(parser.call_count, 2)
+            self.assertEqual(parser.call_args_list[0].kwargs, {'enable_ocr': True, 'enable_yolo': False})
+            self.assertEqual(parser.call_args_list[1].kwargs, {'enable_ocr': False, 'enable_yolo': True})
+            self.assertEqual(runtime.parser_initializations, 2)
+
     def test_companion_emergency_stop_calls_runtime_callback(self):
         from dsh_desktop.companion import Companion
         companion = Companion()

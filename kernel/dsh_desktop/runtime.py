@@ -25,6 +25,7 @@ from .config import WorkspaceConfig, ParserConfig
 from .targets import TargetRegistry, FrameRegistry, RuntimeFault
 from .browser import BrowserRuntime
 from .window_identity import WindowIdentities
+from .observations import ObservationService
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +80,7 @@ class DesktopRuntime:
         self.frames = FrameRegistry(self.epoch)
         self.browser = BrowserRuntime(self)
         self.window_identities = WindowIdentities(self.epoch)
+        self.observations = ObservationService(self)
         self.window = window.WindowService()
         self.capture = capture.CaptureService(self.window)
         self.input = input_mod.InputService(self.window)
@@ -86,6 +88,7 @@ class DesktopRuntime:
         self._parser_lock = threading.Lock()
         self._ui_parser = None
         self.parser_initializations = 0
+        self._vision_parsers = {}
         self._screenshot_dir = Path(config.workspace.screenshot_dir)
         self._window_picker = WindowPicker()
         self._window_picker_overlay = WindowPickerOverlay(self._window_picker)
@@ -106,12 +109,27 @@ class DesktopRuntime:
         from .desktop_tools import AppControllerRef
         AppControllerRef.current = self
 
+    def perceive(self, image, backend):
+        if backend not in ('ocr', 'yolo'):
+            raise ValueError('Unknown local vision backend')
+        with self._parser_lock:
+            if backend not in self._vision_parsers:
+                from .ui_parser import UIParser
+                parser = UIParser(self.config.workspace.weights_dir,
+                                  enable_ocr=backend == 'ocr', enable_yolo=backend == 'yolo')
+                if backend == 'yolo' and parser.yolo_session is None:
+                    raise RuntimeFault('BACKEND_UNAVAILABLE', 'Local icon weights are unavailable. Run scripts/bootstrap.ps1')
+                self._vision_parsers[backend] = parser
+                self.parser_initializations += 1
+            parser = self._vision_parsers[backend]
+            return parser._detect_text(image) if backend == 'ocr' else parser._detect_icons(image)
+
     def initialized_backends(self):
         backends = ['windows', 'capture', 'input']
         web = sys.modules.get('dsh_desktop.web_tools')
         if web is not None and web._pw_context is not None:
             backends.append('web')
-        if self._ui_parser is not None:
+        if self._ui_parser is not None or self._vision_parsers:
             backends.append('vision')
         return backends
 
@@ -129,6 +147,7 @@ class DesktopRuntime:
         self._window_picker_overlay.stop()
         watch.registry().stop_all()
         self.window_identities.shutdown()
+        self.observations.shutdown()
         # Playwright cleanup must run on its owning bridge worker.
         try:
             self.browser.shutdown()
@@ -228,8 +247,10 @@ class DesktopRuntime:
 
     def release_owner(self, owner):
         self.browser.release(owner)
+        cleanup = self.observations.release(owner)
         self.frames.release(owner)
         self.targets.release(owner)
+        return cleanup
 
     @tool("List all visible windows on the desktop. Returns hwnd, title, exe, pid, and rect for each window.")
     def list_windows(self) -> dict:

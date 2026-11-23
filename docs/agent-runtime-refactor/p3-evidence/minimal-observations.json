@@ -1,0 +1,141 @@
+{
+  "native_capture": {
+    "width": 480,
+    "height": 180,
+    "source_rect": [
+      100,
+      100,
+      480,
+      180
+    ],
+    "image_size": [
+      480,
+      180
+    ],
+    "client_rect": [
+      108,
+      131,
+      464,
+      141
+    ],
+    "window_rect": [
+      100,
+      100,
+      480,
+      180
+    ],
+    "crop": null,
+    "dpi": [
+      96,
+      96
+    ],
+    "virtual_origin": [
+      0,
+      0
+    ],
+    "method": "printwindow",
+    "coordinate_space": "screen_physical",
+    "model_rect": [
+      0,
+      0,
+      480,
+      180
+    ],
+    "scale": [
+      1.0,
+      1.0
+    ],
+    "screen_rect": [
+      100,
+      100,
+      480,
+      180
+    ]
+  },
+  "native_move_resize_crop": {
+    "revision": 2,
+    "mapped": [
+      320,
+      240
+    ]
+  },
+  "desktop_capture": {
+    "image_size": [
+      1366,
+      768
+    ],
+    "source_rect": [
+      0,
+      0,
+      2560,
+      1440
+    ]
+  },
+  "profile_lock_diagnosed": 1,
+  "failed_explicit_connection_diagnosed": 1,
+  "observations": {
+    "dom_scans": 1,
+    "dom_frames": 3,
+    "elements": 107,
+    "text_chars": 11230,
+    "pages": 2,
+    "stable_capture_count": 0,
+    "roi": {
+      "dom": 1,
+      "dom_frames": 3,
+      "uia": 0,
+      "capture": 1,
+      "ocr": 1,
+      "yolo": 0,
+      "caption": 0,
+      "dom_ms": 53.711,
+      "uia_ms": 0,
+      "capture_ms": 821.036,
+      "ocr_ms": 1.679,
+      "yolo_ms": 0,
+      "elapsed_ms": 904.885
+    },
+    "uia": {
+      "dom": 0,
+      "dom_frames": 0,
+      "uia": 1,
+      "capture": 1,
+      "ocr": 0,
+      "yolo": 0,
+      "caption": 0,
+      "dom_ms": 0,
+      "uia_ms": 196.346,
+      "capture_ms": 15.726,
+      "ocr_ms": 0,
+      "yolo_ms": 0,
+      "elapsed_ms": 220.513
+    },
+    "native_stale_ref_rejected": 1,
+    "long_locator_chars": 209
+  },
+  "browser_identity": {
+    "same_url_tabs": 3,
+    "nested_frames": 3,
+    "wrong_instance_clicks": 0,
+    "image_size": [
+      304,
+      154
+    ]
+  },
+  "browser_scroll_navigation_invalidations": 2,
+  "other_owner_in_progress_read_survived": 1,
+  "owner_cleanup": {
+    "released_targets": 0,
+    "surviving_targets": 5
+  },
+  "persistent_profile": {
+    "cookie_restored": 1,
+    "site_setting_restored": 1,
+    "restart_cycles": 1,
+    "profile_under_state_dir": true
+  },
+  "closed_targets_rejected": 3,
+  "external_browser_survived_release_and_unload": 1,
+  "parser_initializations": 0,
+  "elapsed_ms": 12359.0
+}

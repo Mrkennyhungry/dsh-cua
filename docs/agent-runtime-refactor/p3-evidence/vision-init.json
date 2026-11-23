@@ -1,0 +1,11 @@
+{
+  "ocr_ms": 723.965,
+  "ocr_text": "中文小字A7B9",
+  "ocr_initialized_yolo": 0,
+  "yolo_ms": 357.891,
+  "yolo_initialized_ocr": 0,
+  "yolo_detections": 4,
+  "network_connections": 0,
+  "caption_requests": 0,
+  "parser_initializations": 2
+}

@@ -50,6 +50,17 @@ class UiaMergeTests(unittest.TestCase):
         self.assertTrue(helper.called)
         self.assertEqual(result["source"], "uia")
 
+    def test_sparse_element_table_avoids_second_uia_scan_in_ocr_fallback(self):
+        with patch.object(desktop_tools, '_uia_named_items', return_value=[]) as uia, \
+             patch.object(desktop_tools, '_controller', return_value=Mock()), \
+             patch.object(desktop_tools, 'desktop_analyze', return_value={'ui_elements': []}) as analyze, \
+             patch.object(desktop_tools, '_STATE') as state:
+            state._lock = __import__('threading').Lock()
+            state._windows = {'win-x': {'hwnd': 1}}
+            desktop_tools.desktop_element_table('win-x', 'auto', True, False)
+        uia.assert_called_once()
+        self.assertFalse(analyze.call_args.kwargs['include_uia'])
+
 
 class WatchTests(unittest.TestCase):
     """Design-01: dual scores, ring buffer, time ordering, bounded sheet."""

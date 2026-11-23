@@ -4404,7 +4404,7 @@ def desktop_element_table(window_id: str, source: str = "auto", fresh: bool = Fa
         return _uia_named_items(window_id)
 
     def from_ocr() -> list[dict]:
-        analysis = desktop_analyze(window_id, caption=caption, annotate=False)
+        analysis = desktop_analyze(window_id, caption=caption, annotate=False, include_uia=False)
         rows = []
         for element in analysis.get("ui_elements", []):
             raw_text = str(element.get("text") or "").strip()
@@ -5470,6 +5470,8 @@ def _uia_live_check(element, region, action):
         raise _StaleElementError(
             f"ELEMENT_REPLACED: 控件标识已变化（{element['auto_id']!r}/{element['name']!r}"
             f" → {auto_id!r}/{name!r}）")
+    if element.get('runtime_id') is not None and tuple(info.runtime_id) != element['runtime_id']:
+        raise _StaleElementError('ELEMENT_REPLACED: UIA runtime identity changed')
     if action == "click":
         box = _uia_box_from_rect(rect, region)
         drift = max(abs(a - b) for a, b in zip(box, element["bbox"]))
@@ -5477,13 +5479,14 @@ def _uia_live_check(element, region, action):
             raise _StaleElementError(f"ELEMENT_MOVED: 控件位移 {drift}（归一化单位），缓存坐标不可信")
 
 
-def _uia_batch_elements(root, region, max_depth, max_nodes, deadline):
+def _uia_batch_elements(root, region, max_depth, max_nodes, deadline, *, truncation=None, semantics=False):
     pending, elements = [(root, 0)], []
     while pending and len(elements) < max_nodes:
         if time.monotonic() >= deadline:
             raise TimeoutError("UIA_BATCH_TIMEOUT: 扫描超时")
         element, depth = pending.pop()
-        info, rect = element.element_info, element.element_info.rectangle
+        info = element.element_info
+        rect = info.rectangle
         if rect.width() > 0 and rect.height() > 0:
             box = [round((rect.left - region.left) / region.width * 1000),
                    round((rect.top - region.top) / region.height * 1000),
@@ -5492,8 +5495,28 @@ def _uia_batch_elements(root, region, max_depth, max_nodes, deadline):
             elements.append({"name": str(info.name or ""), "auto_id": str(info.automation_id or ""),
                              "control_type": str(info.control_type or ""), "bbox": box,
                              "wrapper": element})
+            if semantics:
+                node = elements[-1]
+                node['runtime_id'] = tuple(info.runtime_id)
+                node['rect'] = [rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top]
+                node['enabled'] = bool(element.is_enabled())
+                node['focused'] = bool(getattr(info, 'has_keyboard_focus', False))
+                node['editable'] = node['control_type'] in ('Edit', 'Document')
+                try:
+                    if node['control_type'] in ('Edit', 'Document', 'ComboBox') and not getattr(info, 'is_password', False):
+                        node['value'] = str(element.iface_value.CurrentValue)[:12000]
+                    if node['control_type'] == 'CheckBox':
+                        node['checked'] = bool(element.get_toggle_state())
+                    if node['control_type'] in ('RadioButton', 'ListItem', 'TabItem'):
+                        node['selected'] = bool(element.is_selected())
+                except Exception:
+                    pass
         if depth < max_depth:
             pending.extend((child, depth + 1) for child in reversed(element.children()))
+        elif truncation is not None:
+            truncation['max_depth'] = True
+    if pending and truncation is not None:
+        truncation['max_nodes'] = True
     return elements
 
 

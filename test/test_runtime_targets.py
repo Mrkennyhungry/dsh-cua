@@ -55,7 +55,7 @@ class GeometryTests(unittest.TestCase):
 
 class TargetTests(unittest.TestCase):
     def test_failed_navigation_retry_retains_target_and_dispatches_once(self):
-        runtime = mock.Mock()
+        runtime = mock.Mock(epoch='fixture')
         browser = BrowserRuntime(runtime)
         target = mock.Mock(target_id='fixture')
         target.handle = (mock.Mock(), mock.Mock())
@@ -73,7 +73,7 @@ class TargetTests(unittest.TestCase):
             home = Path(directory)
             legacy = home / 'web_profile_edge'
             legacy.mkdir()
-            runtime = mock.Mock(home=home, state_dir=home / 'state')
+            runtime = mock.Mock(home=home, state_dir=home / 'state', epoch='fixture')
             browser = BrowserRuntime(runtime)
             driver = mock.Mock()
             with mock.patch.object(browser, '_driver', return_value=driver), \

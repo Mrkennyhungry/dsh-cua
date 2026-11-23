@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.4.17] - 2026-11-23
+
+### Added
+
+- Unified semantic observations with document-scoped DOM identities, full internal locators, UIA wrapper identities, query and source-resolution image regions.
+- Stable snapshot pagination, bounded owner-scoped image resources, frame/reference expiry and backend call/timing traces.
+- A single lazy COM apartment worker with one queued request and bounded shutdown for unresponsive providers.
+
+### Changed
+
+- DOM collection preserves field types, values, checked/selected state, options, overlay ordering and nested-frame provenance.
+- Local OCR and YOLO initialize independently on demand. Semantic observations and screenshots keep caption network requests at zero.
+- Stable semantic layouts return lightweight observations. Image bounds are emitted with the corresponding image frame.
+
+### Fixed
+
+- OCR fallback from the legacy element table reuses its completed UIA scan.
+- Browser capture preserves input caret styles, keeping screenshot-side DOM mutations out of target revisions.
+
 ## [0.4.16] - 2026-11-23
 
 ### Added

@@ -57,7 +57,10 @@ os.environ['DSH_DESKTOP_STATE_DIR'] = str(home / 'state')
 with socket.socket() as reservation:
     reservation.bind(('127.0.0.1', 0))
     os.environ['DSH_DESKTOP_CDP_PORT'] = str(reservation.getsockname()[1])
-runtime = DesktopRuntime(RuntimeConfig.from_home(home), home=home)
+config = RuntimeConfig.from_home(home)
+if '--vision' in sys.argv:
+    config.workspace.weights_dir = str(Path(os.environ['LOCALAPPDATA']) / 'dsh-desktop' / 'weights')
+runtime = DesktopRuntime(config, home=home)
 runtime.setup()
 server = ThreadingHTTPServer(('127.0.0.1', 0), FixtureHandler)
 thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -124,6 +127,98 @@ finally:
     frames = runtime.browser.frames('a', first.target_id)
     assert len(frames) == 3, frames
     inner = next(row for row in frames if row['frame_name'] == 'inner')
+
+    if '--observations' in sys.argv:
+        service = runtime.observations
+        long_id = 'locator_' + 'x' * 200
+        def prepare_semantics():
+            first.handle[1].evaluate('''longId => {
+              const form = document.createElement('div');
+              form.innerHTML = `<label for="${longId}">中文备注</label><input id="${longId}" value="初始值">
+                <label><input id="check" type="checkbox" checked>加急</label>
+                <select aria-label="城市"><option>杭州</option><option selected>上海</option></select>
+                <input type="password" aria-label="密码" value="hidden-fixture-secret">
+                <div role="dialog"><button id="dialog-button">确认弹窗</button></div>`;
+              for (let i = 0; i < 100; i++) {
+                const button = document.createElement('button'); button.textContent = '项目' + i; form.append(button);
+              }
+              const body = document.createElement('p'); body.textContent = '中文正文内容'.repeat(1800); form.append(body);
+              document.body.prepend(form);
+            }''', long_id)
+        runtime.browser.call(prepare_semantics)
+        observed = service.observe('a', first.target_id)['observation']
+        assert observed['trace']['dom'] == 1 and observed['trace']['dom_frames'] == 3, observed
+        assert observed['trace']['capture'] == 1 and observed['trace']['caption'] == 0
+        assert observed['elements'][0]['name'] == '确认弹窗'
+        oid = observed['observation_id']
+        saved = service.get('a', oid)
+        textbox = next(element for element in saved.elements if element.semantic.get('name') == '中文备注')
+        assert len(textbox.locator['selector']) > 200
+        assert next(element for element in saved.elements if element.semantic.get('name') == '加急').semantic['checked'] is True
+        select = next(element for element in saved.elements if element.semantic.get('name') == '城市')
+        assert select.semantic['options'] == ['杭州', '上海'] and select.semantic['selected'] == ['上海']
+        password = next(element for element in saved.elements if element.semantic.get('name') == '密码')
+        assert 'value' not in password.semantic
+        def resolve_long():
+            node = service.dom_element('a', textbox)
+            try:
+                assert node.input_value() == '初始值'
+            finally:
+                node.dispose()
+        runtime.browser.call(resolve_long)
+        all_refs = [element['ref'] for element in observed['elements']]
+        body = observed['text']
+        cursor = observed.get('next_cursor')
+        pages = 1
+        while cursor:
+            page = service.observe('a', first.target_id, cursor=cursor)['observation']
+            assert page['observation_id'] == oid and page['trace']['dom'] == 1
+            assert page['frames'] == [] and all('bounds' not in element for element in page['elements'])
+            all_refs.extend(element['ref'] for element in page['elements'])
+            body += page['text']
+            cursor = page.get('next_cursor')
+            pages += 1
+        assert len(all_refs) == len(set(all_refs)) == len(saved.elements)
+        assert body == saved.text and len(body) > 6000
+        fault('OBSERVATION_EXPIRED', lambda: service.observe('b', first.target_id, cursor=observed['next_cursor']))
+        stable = service.observe('a', first.target_id)['observation']
+        assert stable['frames'] == [] and stable['trace']['capture'] == 0, stable['trace']
+        runtime.browser.call(lambda: first.handle[1].evaluate('id => document.getElementById(id).replaceWith(document.getElementById(id).cloneNode(true))', long_id))
+        fault('REF_STALE', lambda: runtime.browser.call(service.dom_element, 'a', textbox))
+        assert service.get('a', oid).text == body
+        directed = service.observe('a', first.target_id, query='中文备注', image=False)['observation']
+        assert len(directed['elements']) == 1 and directed['trace']['dom'] == 1 and directed['trace']['ocr'] == 0
+        fresh = service.observe('a', first.target_id, image=True)['observation']
+        roi = service.observe('a', first.target_id, region={'frame_id': fresh['frames'][0]['frame_id'],
+                              'x': 0, 'y': 0, 'width': 300, 'height': 250}, image=True)['observation']
+        assert roi['trace']['dom'] == 1 and roi['trace']['capture'] == 1 and roi['trace']['caption'] == 0
+        assert roi['frames'][0]['width'] > 300
+        assert service.image('a', roi['frames'][0]['frame_id'])[:2] == b'\xff\xd8'
+        fault('FRAME_EXPIRED', lambda: service.image('b', roi['frames'][0]['frame_id']))
+        native_observation = service.observe('b', native_b.target_id)['observation']
+        assert native_observation['trace']['uia'] == 1 and native_observation['elements'], native_observation
+        native_ref = service.get('b', native_observation['observation_id']).elements[0]
+        service.uia.call(service.validate_uia, 'b', native_ref)
+        previous_title = win32gui.GetWindowText(hwnd)
+        win32gui.SetWindowText(hwnd, previous_title + ' changed')
+        fault('REF_STALE', lambda: service.uia.call(service.validate_uia, 'b', native_ref))
+        win32gui.SetWindowText(hwnd, previous_title)
+        report['observations'] = {'dom_scans': observed['trace']['dom'], 'dom_frames': observed['trace']['dom_frames'],
+                                   'elements': len(saved.elements), 'text_chars': len(body), 'pages': pages,
+                                   'stable_capture_count': stable['trace']['capture'], 'roi': roi['trace'],
+                                   'uia': native_observation['trace'], 'native_stale_ref_rejected': 1,
+                                   'long_locator_chars': len(textbox.locator['selector'])}
+        if '--vision' in sys.argv:
+            runtime.browser.call(lambda: first.handle[1].evaluate('''() => {
+              const canvas = document.createElement('canvas'); canvas.width = 500; canvas.height = 160;
+              document.body.prepend(canvas);
+              const context = canvas.getContext('2d'); context.fillStyle = 'white'; context.fillRect(0, 0, 500, 160);
+              context.font = '24px Microsoft YaHei'; context.fillStyle = 'black'; context.fillText('中文小字 A7B9', 30, 80);
+            }'''))
+            visual = service.observe('a', first.target_id, query='A7B9', image=True)['observation']
+            assert any('A7B9' in element['name'] for element in visual['elements']), visual
+            assert visual['trace']['dom'] == 1 and visual['trace']['ocr'] == 1 and visual['trace']['yolo'] == 0
+            report['visual_query'] = {'elements': visual['elements'], 'trace': visual['trace']}
 
     def click_inner():
         target = runtime.browser.resolve('a', inner['target_id'])

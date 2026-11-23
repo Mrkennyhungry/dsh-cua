@@ -18,8 +18,8 @@
 |---|---|---|---|
 | P0 | 可运行测试基线、DSH 图片合同、协议确认 | 本方案 | PASS，2d03f81 |
 | P1 | 轻量 DesktopRuntime，DSH 启动解耦 | P0 | PASS，cc31ffd |
-| P2 | 专用持久浏览器、目标/帧身份与统一坐标 | P1 | PASS，数值见 ACCEPTANCE 第 12 节 |
-| P3 | 统一观察、元素 ref、按需感知 | P2 | 待实施 |
+| P2 | 专用持久浏览器、目标/帧身份与统一坐标 | P1 | PASS，c5ed0ec |
+| P3 | 统一观察、元素 ref、按需感知 | P2 | PASS，数值见 ACCEPTANCE 第 13 节 |
 | P4 | 统一动作、读回、短批量与恢复 | P3 | 待实施 |
 | P5 | 六工具 Host、图片输出、条件等待与管理 | P0、P4 | 待实施 |
 | P6 | 默认依赖与历史实现清理、安装迁移 | P5 | 待实施 |
@@ -115,11 +115,11 @@
 
 ### 完成条件
 
-- [ ] 一份观察内每种后端最多扫描一次，trace 有计数证据。
-- [ ] 长 selector、重复元素、checkbox、dialog 和 iframe 的数据保真。
-- [ ] observe 能读取正文、列表和聊天内容，并明确分页/截断。
-- [ ] 视觉坐标、ref 与对应 frame/observation 可追溯。
-- [ ] 默认远程 caption 调用数为零。
+- [x] DOM/UIA/OCR/YOLO 单种后端每观察最多调用 1 次，三层 frame 分别读取一次，trace 记录实际数值与耗时。
+- [x] 209 字符 selector 保留，107 元素含重复按钮、checkbox、select、dialog 与三层 iframe，旧 DOM 对象替换和 UIA 改名均拒绝旧 ref。
+- [x] 11230 字正文分 2 页，复用 observation_id 和捕获时间，后续分页新增采集 0；分页、过期、容量与 owner 隔离单测通过。
+- [x] ROI 保留源分辨率，图片、ref、观察和 frame 可追溯；只发语义时 bounds 0，图片资源跨 owner 访问拒绝。
+- [x] 默认与本地视觉实测 caption 请求 0，独立视觉网络连接 0，OCR 与 YOLO 独立初始化 2 次。
 
 ## P4 统一动作、读回与操作记录
 

@@ -7,6 +7,7 @@ import threading
 import uuid
 
 from .targets import RuntimeFault
+from .dom import STATE_JS
 
 
 class BrowserRuntime:
@@ -23,6 +24,7 @@ class BrowserRuntime:
         self._playwright = None
         self._pages_by_id = {}
         self._profile_lease = None
+        self.document_key = '__dsh_' + runtime.epoch
 
     def call(self, function, *args, timeout=30, **kwargs):
         from .dsh_bridge import _WEB_EXECUTOR
@@ -117,6 +119,7 @@ class BrowserRuntime:
         documents = self._documents[page]
         documents.setdefault(frame, uuid.uuid4().hex)
         identity = (self._page_ids[page], frame)
+        document_revision = frame.evaluate(STATE_JS, self.document_key)
         layout = frame.evaluate('''() => ({x: scrollX, y: scrollY, width: innerWidth,
           height: innerHeight, dpi: devicePixelRatio, length: document.documentElement?.scrollHeight})''')
         parent = frame.parent_frame
@@ -124,7 +127,18 @@ class BrowserRuntime:
         metadata = {'title': page.title(), 'url': frame.url,
                     'tab_id': self._page_ids[page], 'document_id': documents[frame],
                     'frame_name': frame.name, 'visible': not page.is_closed(),
-                    'layout': layout, 'frame_bounds': bounds}
+                    'layout': layout, 'frame_bounds': bounds, 'document_revision': document_revision}
+        if frame is page.main_frame:
+            descendants = []
+            for child in page.frames[:30]:
+                if child is frame:
+                    continue
+                try:
+                    descendants.append((documents.setdefault(child, uuid.uuid4().hex), child.url,
+                                        child.evaluate(STATE_JS, self.document_key), child.frame_element().bounding_box()))
+                except Exception:
+                    descendants.append(('unavailable', child.url))
+            metadata['descendants'] = descendants
         return self.runtime.targets.adopt(owner, 'browser', identity, (page, frame), metadata)
 
     def _forget_page(self, page):
@@ -226,7 +240,9 @@ class BrowserRuntime:
             page, frame = target.handle
             bounds = target.metadata['frame_bounds']
             clip = bounds if bounds else None
-            raw = page.screenshot(type='png', scale='css', clip=clip, timeout=10000)
+            # Playwright's default caret hiding mutates input style attributes.
+            # Keep the observed page intact so our mutation revision stays real.
+            raw = page.screenshot(type='png', scale='css', clip=clip, caret='initial', timeout=10000)
             image = cv2.imdecode(np.frombuffer(raw, dtype=np.uint8), cv2.IMREAD_COLOR)
             height, width = image.shape[:2]
             # Browser points remain page viewport CSS pixels. They are dispatched

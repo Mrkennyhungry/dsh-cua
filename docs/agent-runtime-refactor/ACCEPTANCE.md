@@ -282,3 +282,23 @@ open 在导航前登记 call 身份，失败导航的重试保留原 target 和�
 实机入口为 .runtime/runtime-test-venv/Scripts/python.exe test/targets_probe.py .runtime/p2-gate-home，完整 fixture 耗时 8000 ms，n=1，parser 初始化 0。证据保存在 p2-evidence/targets-probe.json。实际机器为单屏、96 DPI，150% 与负屏原点由确定性几何测试验证，实际异 DPI 多屏操作仍列入 P7 硬件覆盖记录。
 
 捕获基准按后端实际能力修正。原生图采用物理屏幕坐标，PrintWindow 整窗和 client fallback 均记录各自 source_rect。DOM 使用 Playwright scale=css 截图及 browser_css 坐标，通过同一映射实现处理缩放和 crop，由原有 browser worker 派发。外层 frame 元数据包含完整来源、模型矩形、缩放、DPI 和 revision。P3 继续将这些帧与语义观察、引用和布局变化关联。
+
+## 13. P3 执行记录
+
+版本 0.4.17，P2 提交 c5ed0ec 之后实施。ObservationService 统一 DOM/UIA、图片、query、ROI、ref 和分页，输出逐后端次数与毫秒耗时。复用既有 _SNAPSHOT_JS 与 _uia_batch_elements，扩充可执行字段和真实对象身份。旧 element_table 的 OCR fallback 关闭重复 UIA 扫描。视觉通过 UIParser 的 enable_ocr/enable_yolo 分别惰性加载。
+
+| P3 退出项 | 状态 | 实测结果 |
+| --- | --- | --- |
+| 单次采集 | PASS | 实机 DOM 观察扫描 1 次、frame 3 个各 1 次；原生 UIA 1 次、截图 1 次，UIA 196.346 ms、截图 15.726 ms、总体 220.513 ms；ROI DOM 1、截图 1、OCR 1、YOLO 0；旧表格 fallback UIA 调用 1/1 |
+| DOM 数据保真 | PASS | 107 元素、三层 frame、209 字符 selector 原样保留；中文字段 value、checkbox checked、select 两个 options 与 selected、dialog 首位排序各通过 1/1；password value 输出 0；旧对象被同文案 clone 替换后 ref 拒绝 1/1 |
+| 正文与分页 | PASS | 正文 11230 字符、分页 2 页，元素总数 107、唯一 ref 107，完整正文读回相同；后续页新增 DOM/UIA/截图 0，observation_id 和 captured_at 相同；分页跨 owner、过期及非法偏移拒绝 |
+| 引用与图片生命周期 | PASS | 原生 UIA ref 现场验证 1/1，窗口改名后拒绝 1/1；frame、owner、TTL、图片总量和观察数量淘汰共 4 个回归用例通过，关联帧随观察删除；后续纯语义页 bounds 0，图片跨 owner 读取拒绝 1/1 |
+| 图像策略与局部读取 | PASS | 首次有效观察图 1，语义稳定后图 0；ROI 只截图 1 次并保留源像素。画布独有“中文小字A7B9”通过 query 识别 1/1，DOM 1、截图 1、OCR 1、YOLO 0、caption 0，总体 9841.4 ms，其中 OCR 9208.411 ms |
+| 惰性视觉与零 caption | PASS | 独立基础依赖环境完成 DOM/UIA/ROI 降级，parser 构造 0；完整环境独立 OCR 初始化 723.965 ms，独立 YOLO 357.891 ms；OCR 加载 YOLO 0、YOLO 加载 OCR 0；禁止 socket connect 时视觉通过，网络连接 0、caption 请求 0 |
+| UIA 超时与清理 | PASS | 故障注入在途阻塞 1、排队 1、第三次 BACKEND_BUSY 1，实际 apartment worker 线程 1；释放阻塞后排队结果 7，shutdown 后线程 0。owner 清理遇阻时记录 pending，provider 返回后统一释放 |
+| 完整回归 | PASS | scripts/check.ps1，Node 83 PASS / 0 FAIL / 0 SKIP，1615.5166 ms；Python 283 PASS / 0 FAIL / 1 预期 SKIP / 17 subtests PASS，9.75 s；Host/Client 语法 2/2 PASS |
+| 发布检查 | PASS | npm dry-run 174 文件，压缩 27593103 bytes，解包 30523601 bytes；dom/observations/worker 共 3 个新 runtime 文件入包，新增依赖 0 |
+
+实机基础命令为 targets_probe.py <隔离 home> --observations，完整视觉环境增加 --vision。基础环境完整 fixture 耗时 12359 ms、parser 初始化 0；视觉环境完整 fixture 耗时 24140 ms、parser 初始化 1，各 n=1。独立 vision_probe.py 使用本机已有 weights 并禁止网络连接。三份 JSON 证据位于 p3-evidence。
+
+首次图片一致性测试发现 Playwright 默认 caret=hide 会修改 input style，引发 MutationObserver 版本变化。源码确认该行为后改用 caret=initial，使采集过程保持原始光标样式。浏览器目标记录子 frame 的 document/layout 版本，保证内层变化也会使整页旧图失效。整页 OCR 的单样本约 9.2 s 已如实记录，P4 将慢采集接入可查询 operation。

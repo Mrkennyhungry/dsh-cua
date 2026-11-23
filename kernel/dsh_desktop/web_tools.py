@@ -612,7 +612,7 @@ _SELECTOR_JS = r"""
   };
 """
 
-_SNAPSHOT_JS = "() => {\n" + _SELECTOR_JS + """
+_SNAPSHOT_JS = "(args) => {\n args = args || {};\n" + _SELECTOR_JS + """
   // 自绘组件（div/li/a 实现，没有 role）必须按类名补进来，否则它们既不在快照里、
 // 也进不了决策层：自绘页签、翻页与开关可能没有原生 ARIA role，
 // 开关是 div[class*=switch]。这三类都实测在控制台里存在但原来一个都看不到。
@@ -642,6 +642,7 @@ _SNAPSHOT_JS = "() => {\n" + _SELECTOR_JS + """
       )) push(el);
       for (const el of root.querySelectorAll('*')) {
         if (el.shadowRoot) {
+          if (args.key) window[args.key].watch(el.shadowRoot);
           for (const sub of deepQueryAll(el.shadowRoot)) push(sub);
         }
       }
@@ -726,6 +727,31 @@ _SNAPSHOT_JS = "() => {\n" + _SELECTOR_JS + """
       }
     }
     const sel = selectorFor(el, tag, text);
+    const semantic = {};
+    if (args.key) {
+      const state = window[args.key];
+      let token = state.ids.get(el);
+      if (!token) { token = String(++state.next); state.ids.set(el, token); }
+      state.nodes.set(token, new WeakRef(el));
+      while (state.nodes.size > 4000) state.nodes.delete(state.nodes.keys().next().value);
+      const labels = el.labels ? Array.from(el.labels).map(label => label.innerText).join(' ') : '';
+      const explicit = el.getAttribute('aria-label') || labels || el.getAttribute('title') || el.getAttribute('placeholder');
+      const type = (el.getAttribute('type') || '').toLowerCase();
+      Object.assign(semantic, {token, name: String(explicit || el.innerText || el.textContent || '').trim().slice(0, 4000),
+        input_type: type, enabled: !el.disabled && el.getAttribute('aria-disabled') !== 'true',
+        editable: el.isContentEditable || tag === 'textarea' || (tag === 'input' && !['checkbox','radio','file','button','submit'].includes(type)),
+        focused: document.activeElement === el});
+      if ('value' in el && type !== 'password') semantic.value = String(el.value).slice(0, 12000);
+      if ('checked' in el || el.hasAttribute('aria-checked')) semantic.checked = 'checked' in el ? el.checked : el.getAttribute('aria-checked') === 'true';
+      if (el.hasAttribute('aria-selected')) semantic.selected = el.getAttribute('aria-selected') === 'true';
+      if (tag === 'select') {
+        semantic.options = Array.from(el.options).slice(0, 300).map(option => option.label);
+        semantic.options_truncated = el.options.length > 300;
+        semantic.selected = Array.from(el.selectedOptions).map(option => option.label);
+      }
+      semantic.role = el.getAttribute('role') || ({button:'button',a:'link',textarea:'textbox',select:'combobox',summary:'button'})[tag]
+        || (tag === 'input' ? ({checkbox:'checkbox',radio:'radio',file:'file',button:'button',submit:'button'})[type] || 'textbox' : tag);
+    }
     return {
       tag, text: text || '', selector: sel,
       id: el.id || '',
@@ -739,13 +765,14 @@ _SNAPSHOT_JS = "() => {\n" + _SELECTOR_JS + """
       // data-testid / aria contract), so keep the first few, deduped.
       cls: (typeof el.className === 'string' ? el.className : '')
              .trim().split(/\\s+/).filter(Boolean).slice(0, 4),
+      ...semantic,
     };
   };
 
   const all = deepQueryAll(document);
   const overlayOut = [], regularOut = [];
   let hitCap = false, seen = 0;
-  const CAP = 200, REGULAR_CAP = 120;
+  const CAP = args.limit || 200, REGULAR_CAP = args.limit ? Math.max(1, CAP - 80) : 120;
   for (const el of all) {
     seen++;
     if (!visibleEl(el)) continue;
@@ -771,6 +798,8 @@ _SNAPSHOT_JS = "() => {\n" + _SELECTOR_JS + """
     overlay_count: overlayOut.length,
     hit_cap: hitCap || (elements.length >= CAP),
     total_interactive_seen: seen,
+    ...(args.key ? {text: (document.body?.innerText || '').slice(0, 60000),
+       text_truncated: (document.body?.innerText || '').length > 60000} : {}),
   };
 }
 """

@@ -11,7 +11,6 @@ from typing import Any
 import cv2
 import numpy as np
 import onnxruntime as ort
-from rapidocr_onnxruntime import RapidOCR
 
 from .mem_track import mem_tag
 
@@ -146,7 +145,8 @@ class UIParser:
 
     def __init__(self, weights_dir: str | None = None, screenshot_max_dim: int = 1366,
                  use_dml: bool = False,
-                 icon_detector: Callable[[np.ndarray], list[dict]] | None = None):
+                 icon_detector: Callable[[np.ndarray], list[dict]] | None = None,
+                 enable_ocr: bool = True, enable_yolo: bool = True):
         self.max_dim = screenshot_max_dim
         self.yolo_session = None
         self.icon_detector = icon_detector
@@ -156,6 +156,16 @@ class UIParser:
             logger.info("DirectML enabled (providers: %s)", ort.get_available_providers())
         else:
             logger.info("DirectML not available, using CPU (providers: %s)", ort.get_available_providers())
+
+        self.ocr = None
+        self.use_dml_ocr = False
+        if enable_ocr:
+            self._load_ocr(weights_dir)
+        if enable_yolo:
+            self._load_yolo(weights_dir)
+
+    def _load_ocr(self, weights_dir):
+        from rapidocr_onnxruntime import RapidOCR
 
         # Build RapidOCR kwargs
         # rapidocr_onnxruntime has a bug parsing Windows Server version strings (e.g. '2025Server'),
@@ -186,6 +196,7 @@ class UIParser:
         self.ocr = RapidOCR(**ocr_kwargs)
         mem_tag("after RapidOCR init")
 
+    def _load_yolo(self, weights_dir):
         if self.icon_detector is not None:
             logger.info("Custom icon detector provided, built-in YOLO disabled")
         elif weights_dir:
@@ -300,6 +311,8 @@ class UIParser:
 
     def _detect_text(self, resized: np.ndarray) -> list[dict]:
         """OCR on compressed image. Boxes normalized to [0, 1000]."""
+        if self.ocr is None:
+            return []
         t0 = time.time()
         h, w = resized.shape[:2]
         if self._inference_lock:
