@@ -174,30 +174,21 @@ export function apply(ctx, config) {
   }
   if (!/^[A-Z_][A-Z0-9_]*$/.test(config.tokenEnv)) throw new Error('Invalid token environment variable')
   config = { ...config, port: resolvePort(config.port) }
-  // Reuse the key already configured in this DSH window instead of asking for a second copy.
-  // Read lazily through ctx.get so a composition without the credentials service still loads.
-  const bridge = createBridge(config, fetch, {
-    resolveApiKey: async () => {
-      const credentials = typeof ctx.get === 'function' ? ctx.get('credentials') : ctx.credentials
-      if (!credentials || typeof credentials.resolve !== 'function') {
-        throw new Error('credentials service is unavailable')
-      }
-      const hit = await credentials.resolve('DEEPSEEK_API_KEY')
-      return typeof hit?.value === 'string' ? hit.value : undefined
-    },
-  })
+  const bridge = createBridge(config)
   const active = new Map()
   const commandFeedbackEnabled = config.commandFeedback === true
   const cursorFeedback = commandFeedbackEnabled
     ? installCursorThinking(ctx, bridge)
     : { begin() {}, end() {}, dispose: async () => {} }
   const companionSelection = installCompanionSelection(ctx, bridge)
+  const lifetime = new AbortController()
   if (commandFeedbackEnabled) {
     // The mascot lives in the kernel, so the kernel has to be running for it to
     // dock on screen. One background health call starts it without blocking the
     // plugin load; a failure here only means "no companion yet".
     bridge.request('/companion/start', '0'.repeat(64), {
       body: { client_pid: process.pid },
+      signal: lifetime.signal,
     }).catch(() => {})
   }
   const registered = []
@@ -248,10 +239,13 @@ export function apply(ctx, config) {
     }))
   }
   ctx.effect(() => async () => {
-    await bridge.request('/companion/shutdown', '0'.repeat(64), { body: {} }).catch(() => {})
+    lifetime.abort()
     await companionSelection.dispose()
     await cursorFeedback.dispose()
     if (bridge.ready) {
+      await bridge.request('/companion/shutdown', '0'.repeat(64), {
+        body: {}, start: false, signal: AbortSignal.timeout(3000),
+      }).catch(() => {})
       await Promise.allSettled([...active].map(([taskId, owner]) =>
         bridge.request(bridge.taskPath(taskId, '/stop'), owner, { body: {} })))
     }

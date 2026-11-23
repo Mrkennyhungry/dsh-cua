@@ -17,10 +17,10 @@ import { fileURLToPath } from 'node:url'
 const HEALTH_OWNER = '0'.repeat(64)
 const PROBE_TIMEOUT_MS = 3000
 const POLL_INTERVAL_MS = 500
-const DEFAULT_KEY_FILE = 'deepseek-api-key'
 // /health.protocol: the plugin refuses to drive a kernel that speaks an older
 // contract, because the missing endpoints would surface as bare 404s.
-export const REQUIRED_PROTOCOL = 1
+export const REQUIRED_PROTOCOL = 2
+const REQUIRED_CAPABILITIES = ['runtime', 'windows', 'capture', 'uia', 'web', 'lazy_vision']
 
 function packageRoot() {
   // The plugin ships flat: kernel.js sits at the package root, so the package
@@ -159,11 +159,11 @@ export function createKernel(config, options = {}) {
     return tokens.length ? tokens : ['probe'.repeat(10)]
   }
 
-  async function probeHealth(token) {
+  async function probeHealth(token, signal) {
     try {
       const response = await fetch(`${base}/health`, {
         headers: { Authorization: `Bearer ${token}`, 'X-DSH-Owner': HEALTH_OWNER },
-        signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
+        signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(PROBE_TIMEOUT_MS)]) : AbortSignal.timeout(PROBE_TIMEOUT_MS),
         redirect: 'error',
       })
       if (!response.ok) {
@@ -174,11 +174,12 @@ export function createKernel(config, options = {}) {
       if (!value || typeof value.protocol !== 'number') {
         return { kind: 'foreign', token, status: response.status, reason: 'unexpected health payload' }
       }
-      if (value.protocol < REQUIRED_PROTOCOL) {
+      if (value.protocol !== REQUIRED_PROTOCOL || REQUIRED_CAPABILITIES.some(name => !value.capabilities?.includes(name))) {
         return { kind: 'outdated', token, protocol: value.protocol, health: value }
       }
       return { kind: 'running', token, health: value }
     } catch (error) {
+      signal?.throwIfAborted()
       if (error?.name === 'TimeoutError' || error?.name === 'AbortError') {
         return { kind: 'foreign', token, reason: 'health probe timed out' }
       }
@@ -186,11 +187,11 @@ export function createKernel(config, options = {}) {
     }
   }
 
-  async function probe() {
+  async function probe(signal) {
     let blocked = null
     let outdated = null
     for (const token of candidateTokens()) {
-      const result = await probeHealth(token)
+      const result = await probeHealth(token, signal)
       if (result.kind === 'running') return result
       // One stale token must not mask a working one further down the list.
       if (result.kind === 'outdated') outdated = outdated || result
@@ -248,11 +249,12 @@ export function createKernel(config, options = {}) {
 
   function assertProtocol(health, where) {
     const protocol = health?.protocol
-    if (typeof protocol === 'number' && protocol >= REQUIRED_PROTOCOL) return
+    const missing = REQUIRED_CAPABILITIES.filter(name => !health?.capabilities?.includes(name))
+    if (protocol === REQUIRED_PROTOCOL && missing.length === 0) return
     const version = kernelVersion() || 'unknown version'
     throw new Error(
       `Desktop kernel ${version} speaks protocol ${protocol ?? 'none'}, but this plugin requires ${REQUIRED_PROTOCOL} (${where}). `
-      + 'Update the DSH plugin package and retry.',
+      + `Missing capabilities: ${missing.join(', ') || 'none'}. Finish or stop active operations, close the resident kernel, and retry with the installed plugin.`,
     )
   }
 
@@ -279,36 +281,6 @@ export function createKernel(config, options = {}) {
     )
   }
 
-  /**
-   * The key the kernel runs with: the credential configured in this DSH window
-   * first (it outranks environment fallbacks there too), then the process
-   * environment, then an optional local file.
-   */
-  async function resolveApiKey() {
-    if (typeof options.resolveApiKey === 'function') {
-      try {
-        const value = await options.resolveApiKey()
-        if (typeof value === 'string' && value.trim()) return { key: value.trim(), source: 'DSH credentials' }
-      } catch {
-        // A missing credentials service must not block an environment or file key.
-      }
-    }
-    const inherited = process.env.DEEPSEEK_API_KEY
-    if (typeof inherited === 'string' && inherited.trim()) return { key: inherited.trim(), source: 'environment' }
-    const explicit = typeof config.apiKeyFile === 'string' && config.apiKeyFile.trim()
-    const candidates = explicit
-      ? [resolve(paths.root, config.apiKeyFile.trim())]
-      : [join(paths.state, DEFAULT_KEY_FILE), join(paths.legacy, DEFAULT_KEY_FILE)]
-    for (const keyFile of candidates) {
-      if (!existsSync(keyFile)) continue
-      try {
-        const value = readFileSync(keyFile, 'utf8').trim()
-        if (value) return { key: value, source: keyFile }
-      } catch {}
-    }
-    return { key: '', source: '' }
-  }
-
   // 高权限启动用的计划任务名。由 scripts/install-elevated-task.ps1 注册
   // （RunLevel=Highest）。注册需要一次性管理员权限，之后每次触发都不需要 UAC。
   const ELEVATED_TASK_NAME = 'DshDesktopKernelAdmin'
@@ -323,7 +295,7 @@ export function createKernel(config, options = {}) {
    * 参数通过 kernel-boot.json 传给任务脚本，所以插件换 token 或端口后依然有效，
    * 不需要重新注册任务。
    */
-  async function tryStartViaElevatedTask({ token, apiKey }) {
+  async function tryStartViaElevatedTask({ token }) {
     if (platform !== 'win32') return { started: false, reason: 'not windows' }
     try {
       const query = spawnSync('schtasks', ['/Query', '/TN', ELEVATED_TASK_NAME], {
@@ -338,14 +310,13 @@ export function createKernel(config, options = {}) {
       try {
         writeFileSync(
           bootFile,
-          JSON.stringify({ token, port: config.port, home: paths.home, stateDir: paths.state, apiKey: apiKey || '' }),
+          JSON.stringify({ token, port: config.port, home: paths.home, stateDir: paths.state }),
           'utf8',
         )
       } catch (error) {
         return { started: false, reason: `cannot write ${ELEVATED_BOOT_FILE}: ${error.message}` }
       }
-      // The file carries the bridge token and possibly the model API key in
-      // plaintext. It has to be readable by the elevated task, so the ACL is
+      // The file carries the bridge token in plaintext. The ACL is
       // narrowed to the current user plus the two built-in service principals
       // (SIDs instead of names, so the shipped file stays free of local words).
       try {
@@ -386,8 +357,6 @@ export function createKernel(config, options = {}) {
       PYTHONIOENCODING: 'utf-8',
       PYTHONUNBUFFERED: '1',
     }
-    const { key: apiKey, source: keySource } = await resolveApiKey()
-    if (apiKey) env.DEEPSEEK_API_KEY = apiKey
 
     // 优先用高权限计划任务启动内核。
     // 原因（实测 2026-10-27）：spawn 继承的是插件的权限（通常 Medium），
@@ -395,19 +364,19 @@ export function createKernel(config, options = {}) {
     // Medium 内核会被 UIPI 全面阻断：topmost / activate / click / type 全失败，
     // 但截图和 OCR 仍然可用 —— 表现为「读能用、写全废」，很难归因。
     // 任务由 scripts/install-elevated-task.ps1 一次性注册；没注册就安静跳过。
-    const elevated = await tryStartViaElevatedTask({ token, apiKey })
+    const elevated = await tryStartViaElevatedTask({ token })
     if (elevated.started) {
       const deadline = Date.now() + config.bootSeconds * 1000
       while (Date.now() < deadline) {
         signal?.throwIfAborted()
-        const result = await probeHealth(token)
+        const result = await probeHealth(token, signal)
         if (result.kind === 'running') {
           // 计划任务拿不到 child.pid，从 health 里取（内核自报）
           const pid = result.health?.bridge?.pid
           const stored = attach(pid, token, true, result.health, 'plugin autostart (elevated task)')
           console.info(
-            '[desktop] kernel started via elevated task (pid=%s, port=%d, api key from %s)',
-            pid, config.port, keySource || 'nowhere; execution disabled',
+            '[desktop] runtime started via elevated task (pid=%s, port=%d)',
+            pid, config.port,
           )
           return stored
         }
@@ -454,10 +423,10 @@ export function createKernel(config, options = {}) {
     while (Date.now() < deadline) {
       signal?.throwIfAborted()
       if (exited) throw failure(exited)
-      const result = await probeHealth(token)
+      const result = await probeHealth(token, signal)
       if (result.kind === 'running') {
         const stored = attach(pid, token, true, result.health, 'plugin autostart')
-        console.info('[desktop] kernel started (pid=%d, port=%d, api key from %s)', pid, config.port, keySource || 'nowhere; execution disabled')
+        console.info('[desktop] runtime started (pid=%d, port=%d)', pid, config.port)
         return stored
       }
       if (result.kind === 'outdated') {
@@ -473,7 +442,7 @@ export function createKernel(config, options = {}) {
   }
 
   async function boot(signal) {
-    const found = await probe()
+    const found = await probe(signal)
     if (found.kind === 'outdated') assertProtocol(found.health, 'kernel already listening')
     if (found.kind === 'running') {
       const stored = storedState()
@@ -481,17 +450,6 @@ export function createKernel(config, options = {}) {
         ? found.health.bridge.pid : stored?.record?.pid
       const source = found.token === envToken() ? 'environment' : stored?.source ?? 'state file'
       const adopted = attach(pid, found.token, false, found.health, source)
-      // A kernel that started without a key can never have accepted a task (the
-      // bridge refuses submissions), so replacing it is safe and is the only way
-      // a key configured after that start can take effect.
-      if (!found.health.execution_enabled && source !== 'environment') {
-        const { key, source: keySource } = await resolveApiKey()
-        if (key) {
-          console.info('[desktop] adopted kernel has no API key; restarting it with %s', keySource)
-          await stop({ force: true })
-          return spawnKernel(signal)
-        }
-      }
       return adopted
     }
     if (found.kind === 'foreign') {
@@ -507,6 +465,7 @@ export function createKernel(config, options = {}) {
   }
 
   async function ensure(signal) {
+    signal?.throwIfAborted()
     if (current) return current
     if (!pending) pending = boot(signal).finally(() => { pending = null })
     return pending

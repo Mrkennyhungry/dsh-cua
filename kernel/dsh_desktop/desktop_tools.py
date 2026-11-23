@@ -27,6 +27,12 @@ from datetime import datetime
 from pathlib import Path, PureWindowsPath
 from typing import Any
 
+from .dpi import set_per_monitor_v2
+
+# PyAutoGUI fixes process DPI awareness at import time. Establish the shared
+# physical-pixel contract first, including callers that import these tools alone.
+set_per_monitor_v2()
+
 import cv2
 import numpy as np
 import psutil
@@ -47,9 +53,8 @@ try:
 except Exception:  # noqa: BLE001 - non-Windows import path
     _user32 = None
 
-from .controller import SOM_IMAGE_PATH_KEY
+from .contracts import SOM_IMAGE_PATH_KEY
 from .tool_decorator import tool
-from tools.registry import registry, tool_result
 
 # Agent automation environment: the cursor may legitimately rest at a screen
 # corner between actions; PyAutoGUI's corner fail-safe aborts hotkeys there.
@@ -5745,6 +5750,8 @@ def desktop_uia_batch(window_id: str, steps: list[dict], *, max_depth: int = 10,
 
 def register_desktop_tools() -> int:
     """Register every @tool function in this module under the 'desktop' toolset."""
+    from tools.registry import registry, tool_result
+
     count = 0
     for name, func in list(globals().items()):
         if not name.startswith("desktop_") or not callable(func):

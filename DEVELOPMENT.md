@@ -100,6 +100,15 @@ pwsh -File scripts/check.ps1
 
 DSH 安装位置可用 DSH_TEST_INSTALLATION 指定。Python 准备脚本支持 -RuntimeDir，要求已有 bootstrap 运行环境和相同 Python 主次版本。pip 缓存卡住时已实测使用 --no-cache-dir --disable-pip-version-check --timeout 15 --retries 0 恢复安装。check.ps1 为 COM 和 pytest 使用独立的 .runtime/test-temp，避免共享 TEMP 的权限冲突。
 
+P1 的独立基础依赖验收可以复现如下。prepare-runtime-test.py 复制本机分发包的基础闭包到 .runtime/runtime-test-venv，并拒绝引入 standalone Agent 或视觉包。--companion 需要已完成 companion 构建。
+
+```powershell
+.\.venv\Scripts\python.exe scripts/prepare-runtime-test.py
+$env:PYTHONPATH = Join-Path (Get-Location) 'kernel'
+$env:TEMP = $env:TMP = Join-Path (Get-Location) '.runtime/test-temp'
+.\.runtime\runtime-test-venv\Scripts\python.exe test/runtime_probe.py .runtime/p1-probe-home --live --companion
+```
+
 ## 5. 版本与 CHANGELOG
 
 - 本轮目标版本 **0.5.0**：工具表从 30+ 收敛到 6 个，属破坏性变更（本项目仍在 0.x，用 minor 表达）。

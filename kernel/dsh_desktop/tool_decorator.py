@@ -26,7 +26,6 @@ import time
 import types
 from typing import get_type_hints
 
-from tools.registry import registry, tool_result
 
 
 logger = logging.getLogger(__name__)
@@ -278,6 +277,8 @@ TOOLSET = "app_controller"
 
 def register_all_tools(controller) -> None:
     """Find all @tool-decorated methods on controller and register them."""
+    from tools.registry import registry, tool_result
+
     for attr_name in dir(controller):
         func = getattr(controller, attr_name, None)
         if func is None or not callable(func):

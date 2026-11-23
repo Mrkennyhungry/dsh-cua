@@ -575,9 +575,16 @@ class Eternity:
                 "1", "true", "yes", "on"):
             try:
                 from . import companion
-                companion.install(self)
+                companion.install(self.controller, self._stop_companion_sessions)
             except Exception:
                 logger.warning("companion mode unavailable", exc_info=True)
+
+    def _stop_companion_sessions(self) -> None:
+        for session_id in list(self._sessions):
+            try:
+                self.stop_session(session_id)
+            except Exception:
+                logger.warning('Could not stop companion session %s', session_id, exc_info=True)
 
     def _seed_workbench_skills(self) -> None:
         """Use the manifest-aware synchronizer for updates and user deletions."""

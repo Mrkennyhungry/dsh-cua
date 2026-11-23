@@ -98,3 +98,18 @@ test('missing settings service leaves the Host plugin operational', async () => 
   await sync.sync()
   await sync.dispose()
 })
+
+test('selection polling and disposal leave a stopped kernel idle', async () => {
+  const { state, sync } = fixture()
+  // The production bridge supplies a readiness property. The fixture's other
+  // tests omit it to exercise a running unmanaged bridge.
+  await sync.dispose()
+  const settings = { describe: () => [], mutate: async () => assert.fail('unexpected mutation') }
+  const idle = installCompanionSelection({ settings }, {
+    ready: false,
+    request: async () => assert.fail('polling must not start the kernel'),
+  }, { autostart: false })
+  await idle.sync()
+  await idle.dispose()
+  assert.equal(state.requests.length, 0)
+})

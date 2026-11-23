@@ -42,6 +42,7 @@ export function installCompanionSelection(ctx, bridge, options = {}) {
   let disposed = false
   let running = false
   let previousCurrent
+  const lifetime = new AbortController()
 
   function currentSection() {
     const descriptor = settings.describe().find((entry) => entry?.ns === NAMESPACE)
@@ -52,11 +53,11 @@ export function installCompanionSelection(ctx, bridge, options = {}) {
   }
 
   async function sync() {
-    if (disposed || running) return
+    if (disposed || running || bridge.ready === false) return
     running = true
     try {
       const [scope, current] = await Promise.all([
-        bridge.request('/scope', UI_OWNER, {}),
+        bridge.request('/scope', UI_OWNER, { start: false, signal: lifetime.signal }),
         Promise.resolve().then(currentSection),
       ])
       if (previousCurrent === undefined) previousCurrent = current.value
@@ -65,12 +66,12 @@ export function installCompanionSelection(ctx, bridge, options = {}) {
       const removed = selectionIds(previousCurrent).filter((id) => !currentIds.has(id))
       if (removed.length && scope?.locked) {
         for (const id of removed) {
-          const result = await bridge.request(`/windows/${encodeURIComponent(id)}/unlock`, UI_OWNER, { body: {} })
+          const result = await bridge.request(`/windows/${encodeURIComponent(id)}/unlock`, UI_OWNER, { body: {}, start: false, signal: lifetime.signal })
           if (result?.success === false) throw new Error(result.error || `failed to unlock ${id}`)
         }
         selected = JSON.stringify(parseSelections(selected).filter((item) => !removed.includes(String(item.window_id || ''))))
       }
-      if (selected !== current.value) {
+      if (!disposed && selected !== current.value) {
         await settings.mutate(NAMESPACE, [{
           op: 'set', path: [FIELD], value: selected,
         }], current.revision)
@@ -92,6 +93,7 @@ export function installCompanionSelection(ctx, bridge, options = {}) {
     sync,
     dispose: async () => {
       disposed = true
+      lifetime.abort()
       clearInterval(timer)
     },
   }

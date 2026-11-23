@@ -183,6 +183,7 @@ class WindowPickerOverlay:
         self._result_hwnd: int | None = None
         self._overlay_thread: threading.Thread | None = None
         self._active = False
+        self._stop = threading.Event()
 
     @property
     def is_active(self) -> bool:
@@ -194,10 +195,17 @@ class WindowPickerOverlay:
             logger.warning("Overlay already active")
             return
 
+        self._stop.clear()
         self._overlay_thread = threading.Thread(
             target=self._run_overlay, args=(callback,), daemon=True,
         )
         self._overlay_thread.start()
+
+    def stop(self) -> None:
+        self._stop.set()
+        thread = self._overlay_thread
+        if thread is not None and thread is not threading.current_thread():
+            thread.join(timeout=2)
 
     def _run_overlay(self, callback) -> int | None:
         """Two-window overlay: dim_win (alpha) + border_win (transparent, edge border)."""
@@ -325,10 +333,17 @@ class WindowPickerOverlay:
         dim_win.bind("<Escape>", on_key)
         border_win.bind("<Escape>", on_key)
 
+        def check_stop():
+            if self._stop.is_set():
+                dim_win.destroy()
+            else:
+                dim_win.after(50, check_stop)
+
+        dim_win.after(50, check_stop)
         dim_win.mainloop()
         self._active = False
 
-        result = self._result_hwnd
+        result = None if self._stop.is_set() else self._result_hwnd
         logger.info("Overlay: exited, result=%s", result)
         if callback:
             callback(result)

@@ -55,6 +55,15 @@ def get_cursor_overlay():
         return _INSTANCE
 
 
+def stop_cursor_overlay():
+    global _INSTANCE
+    with _INSTANCE_LOCK:
+        overlay = _INSTANCE
+        if overlay is not None:
+            overlay.stop()
+            _INSTANCE = None
+
+
 class BLENDFUNCTION(ctypes.Structure):
     _fields_ = [("BlendOp", ctypes.c_byte), ("BlendFlags", ctypes.c_byte),
                 ("SourceConstantAlpha", ctypes.c_byte), ("AlphaFormat", ctypes.c_byte)]
@@ -81,6 +90,7 @@ def _pointer_bitmap() -> np.ndarray:
 class CursorOverlay:
     def __init__(self) -> None:
         self._thread = None
+        self._stop = threading.Event()
         self._hwnd = 0
         self._ready = threading.Event()
         self._error = None
@@ -219,6 +229,11 @@ class CursorOverlay:
             self._thread.start()
         self._ready.wait(timeout=3)
 
+    def stop(self) -> None:
+        self._stop.set()
+        if self._thread is not None and self._thread is not threading.current_thread():
+            self._thread.join(timeout=3)
+
     def move(self, x: int, y: int) -> None:
         # Compatibility no-op: the commander never follows the pointer.
         return
@@ -303,11 +318,18 @@ class CursorOverlay:
             self._error = f"{exc.__class__.__name__}: {exc}"
             self._ready.set()
         finally:
+            if self._canvas is not None:
+                mem, dib, _, _ = self._canvas
+                self._gdi32.SelectObject(mem, self._old_bitmap)
+                self._gdi32.DeleteObject(dib)
+                self._gdi32.DeleteDC(mem)
+                self._canvas = None
             if self._hwnd:
                 try:
                     ctypes.windll.user32.ShowWindow(self._hwnd,SW_HIDE)
                     ctypes.windll.user32.DestroyWindow(self._hwnd)
                 except Exception: pass
+                self._hwnd = 0
 
     def _create_window(self) -> None:
         user32 = ctypes.windll.user32
@@ -436,7 +458,7 @@ class CursorOverlay:
         user32 = self._user32
         msg = wintypes.MSG()
         pos = None
-        while True:
+        while not self._stop.is_set():
             with self._lock:
                 now = time.monotonic()
                 self._expire_tasks(now)

@@ -24,6 +24,7 @@ export function installCursorThinking(ctx, bridge) {
       try {
         await bridge.request('/mascot/state', owner, {
           body: { active, action, client_pid: process.pid }, timeoutMs: 3000,
+          start: active,
         })
       } catch { /* Decorations must never block automation. */ }
     })
@@ -56,7 +57,7 @@ export function installCursorThinking(ctx, bridge) {
       disposed = true
       await Promise.allSettled([...queues.values()])
       if (bridge.ready) await Promise.allSettled([...owners].map(([owner]) =>
-        bridge.request('/mascot/state',owner,{body:{active:false,client_pid:process.pid},timeoutMs:3000})))
+        bridge.request('/mascot/state',owner,{body:{active:false,client_pid:process.pid},timeoutMs:3000,start:false})))
       owners.clear()
     },
   }

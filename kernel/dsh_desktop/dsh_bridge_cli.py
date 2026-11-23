@@ -27,11 +27,17 @@ def main() -> None:
         parser.error("Desktop is already running; close it before starting the DSH kernel")
     import atexit
     atexit.register(win32api.CloseHandle, mutex)
-    home = args.home_dir.resolve()
+    import uvicorn
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    app = create_app(args.home_dir, args.port)
+    logging.info("DSH desktop runtime ready on loopback port %d", args.port)
+    uvicorn.run(app, host="127.0.0.1", port=args.port, access_log=False)
+
+
+def create_app(home: Path, port: int):
+    home = home.resolve()
     home.mkdir(parents=True, exist_ok=True)
-    os.environ["DSH_DESKTOP_HOME"] = os.environ["HERMES_HOME"] = str(home)
-    os.environ["HERMES_BUNDLED_SKILLS"] = str(Path(__file__).parent / "skills")
-    os.environ["DSH_DESKTOP_PARSER_ENGINE"] = "local-deepseek"
+    os.environ["DSH_DESKTOP_HOME"] = str(home)
 
     # Must run before the first window/UIA call: without it Windows virtualises
     # coordinates by the system DPI and every click on a scaled display drifts.
@@ -39,44 +45,30 @@ def main() -> None:
 
     set_per_monitor_v2()
 
-    import uvicorn
     from fastapi import FastAPI, Request
     from fastapi.responses import JSONResponse
 
-    from .config import Config
     from .dsh_bridge import create_router
-    from .eternity import Eternity
-    from .ui_rules import seed_knowledge
-    from .weights import ensure_weights_ready
+    from .runtime import DesktopRuntime, RuntimeConfig
 
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
-    config_path = home / "config.yaml"
-    cfg = Config.from_yaml(str(config_path)) if config_path.is_file() else Config()
-    cfg.parser.engine = "local-deepseek"
-    cfg.cron.enabled = False
-    cfg.tools.allow_shell = False
-    cfg.model.provider = "deepseek"
-    cfg.model.base_url = "https://api.deepseek.com"
-    cfg.model.api_key = os.getenv("DEEPSEEK_API_KEY", "")
-    cfg.model.default = cfg.model.fast = "deepseek-flash"
-    ensure_weights_ready(Path(cfg.workspace.weights_dir))
-    seeded = seed_knowledge(home)
-    if seeded:
-        logging.info("seeded %d UI rules into the knowledge index", seeded)
-    eternity = Eternity(cfg)
-    eternity.setup()
+    cfg = RuntimeConfig.from_home(home)
+    os.environ["DSH_DESKTOP_PARSER_ENGINE"] = cfg.parser.engine
+    runtime = DesktopRuntime(cfg)
+    runtime.setup()
 
     @asynccontextmanager
     async def lifespan(app):
-        yield
-        eternity.shutdown(timeout=5)
+        try:
+            yield
+        finally:
+            runtime.shutdown(timeout=5)
 
     app = FastAPI(title="Desktop DSH task bridge", lifespan=lifespan)
-    app.include_router(create_router(eternity))
+    app.include_router(create_router(runtime))
 
     @app.middleware("http")
     async def local_only(request: Request, call_next):
-        if request.headers.get("host") not in {f"127.0.0.1:{args.port}", f"localhost:{args.port}"}:
+        if request.headers.get("host") not in {f"127.0.0.1:{port}", f"localhost:{port}"}:
             return JSONResponse({"detail": "Invalid loopback host"}, status_code=403)
         if request.headers.get("origin"):
             return JSONResponse({"detail": "Cross-origin access denied"}, status_code=403)
@@ -88,10 +80,8 @@ def main() -> None:
                 return JSONResponse({"detail": "Request too large"}, status_code=413)
         return await call_next(request)
 
-    logging.info("DSH bridge ready: http://127.0.0.1:%d; Desktop cron disabled", args.port)
-    if not cfg.model.api_key:
-        logging.warning("DEEPSEEK_API_KEY is not set; task execution will be rejected")
-    uvicorn.run(app, host="127.0.0.1", port=args.port, access_log=False)
+    app.state.runtime = runtime
+    return app
 
 
 if __name__ == "__main__":

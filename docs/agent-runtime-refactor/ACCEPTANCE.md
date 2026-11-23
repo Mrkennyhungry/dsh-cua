@@ -237,3 +237,25 @@ node scripts/measure-legacy-baseline.mjs 使用温启动的既有 kernel，注�
 前序路由尝试保留结果。openrouter/deepseek/deepseek-v4.1-flash-1017 的 read_image 1 次被路由 image input 声明校验拒绝，模型请求 2、图片送达 0、UI 13 s。wb/cn:hy4free 返回 API 400/model_unavailable，上游 11102、图片送达 0。用户确认以成功的两个 wb 路由作为后续验收目标，见 ADR 0001。hy4std 由用户在 DSH 中切换后发送，deepseek 使用另一张随机图独立验证。
 
 本次各路由成功样本量为 1。provider 原始 HTTP 请求体、图片独立计费和精确金额未知，UI 的约 ¥0.02 显示存在舍入，成本字段保留未知。P0 的测量用于确认通路与建立起点，性能收益在 P7 实测后填写。
+
+## 11. P1 执行记录
+
+2026-11-24，版本 0.4.15，P0 提交 2d03f81 之后实施。contracts.py 承载图片结果常量和提取函数，runtime.py 复用原 AppController 服务、选择器、截图和 overlay 辅助实现，AppController 继承共享实现。配置只读取 workspace/parser，parser 在并发锁内延迟初始化。CLI 直接构造 runtime，Agent task 路由在 legacy_bridge.py 中显式安装。默认 task 请求返回 503 和迁移诊断，历史数据仍保存在原 home。
+
+Host 取消了启动时的模型 credential 解析，保留既有高权限启动机制。health 协议升级为 2，并给出 build、epoch、capabilities、已初始化后端和 parser 构造次数。旧协议或缺失能力的内核返回明确处理指引，正在运行的用户内核由用户完成或停止操作后再关闭。详见 ADR 0002。
+
+| P1 退出项 | 状态 | 实测结果 |
+| --- | --- | --- |
+| 无 standalone 依赖启动 | PASS | scripts/prepare-runtime-test.py 创建独立 venv，基础分发包 42，Hermes/pywebview/croniter/onnxruntime/rapidocr/anthropic 安装 0；runtime_probe 还主动拒绝导入，实际禁用模块加载 0 |
+| 基础 UIA/DOM 与截图 | PASS | 通过 create_app 的真实 HTTP 路由入口和 TestClient 启动生命周期，health 协议 2，列窗口 13，自有窗口截图 JPEG 480×180，UIA 控件 1，本地网页 DOM 匹配 1；provider Key 为空，weights 目录不存在 |
+| 按需初始化 | PASS | 完成上述动作 parser 构造 0，OCR/YOLO 包 0，远端 caption 请求 0；并发访问 8 次，parser 构造 1 次 |
+| companion 与取消/卸载 | PASS | 实机 start/shutdown 2 轮，2 个子进程和 2 个 overlay 线程均退出；回调取消 1/1，watch 清理 2/2；idle polling 和 unload 启动请求 0，后台读失败调用 1 次 |
+| 协议与恢复 | PASS | 旧协议拒绝 1/1，缺失 capability 拒绝 1/1，兼容驻留内核 PID/state 接管用例通过；注入读取断线后 HTTP read 2 次、health 2 次，写响应丢失后派发 1 次；启动取消 1/1，保持未接管 |
+| 完整回归 | PASS | scripts/check.ps1，Node 83 PASS / 0 FAIL / 0 SKIP，1598.7006 ms；Python 267 PASS / 0 FAIL / 1 预期 SKIP / 13 subtests PASS，8.80 s；语法 2/2 PASS |
+| 打包 | PASS | npm dry-run 167 文件，压缩 27572465 bytes，解包 30456205 bytes，新 runtime/contracts/legacy_bridge 和 CHANGELOG 都在包内；三个 optional peers 保留 |
+
+隔离实机日志 p1-final-probe 的 health 加列窗口时间为 1813 ms，截图/UIA/DOM 主体总耗时 6359 ms，n=1。companion 两轮耗时另行执行于同次进程中，此数值用于确认通路。测试使用独立临时 home 和本地网页，既有用户浏览器 profile 延续。
+
+基础依赖曾尝试 pip 联网安装，在构建依赖阶段停滞，uv 重试下载也耗时较长。已终止本次安装进程，改为复制已安装分发包的声明依赖闭包。最终独立 venv 经 metadata 核对只有 42 包，无被排除包，也没有链接完整运行环境的 pth。复制脚本和 smoke fixture 已归档，可重复执行。清理了本轮产生的 25 个 pip 临时目录。
+
+重构导入顺序曾触发 DPI 回归，PyAutoGUI 在 DPI 服务之前设置进程模式。desktop_tools 现在先调用现有 set_per_monitor_v2，再导入输入依赖，完整 DPI 套件已通过。真实旧驻留 kernel 保留，隔离验证在相同 create_app 工厂启动 HTTP 应用，CLI 全局单实例互斥继续生效。P5/P7 再经插件安装机制验证新 DSH 会话。

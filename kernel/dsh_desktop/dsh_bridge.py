@@ -15,7 +15,6 @@ from pathlib import Path
 
 import requests as http_client
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from . import desktop_tools
@@ -25,6 +24,7 @@ from . import ledger
 # Captured once at import: the health response must describe loaded code, not
 # whatever files happen to be on disk after an update.
 _SOURCE_ROOT = Path(__file__).resolve().parent
+_BUILD = hashlib.sha256(b"".join((_SOURCE_ROOT / name).read_bytes() for name in ("runtime.py", "dsh_bridge.py", "desktop_tools.py"))).hexdigest()[:16]
 _INPUT_REVISION = hashlib.sha256((_SOURCE_ROOT / 'game' / 'input.py').read_bytes()).hexdigest()[:16]
 
 # Playwright is thread-affine inside web_tools: every web call must run on the
@@ -735,11 +735,9 @@ def _split_related_windows(window_id: str, windows: list[dict]) -> tuple[list[di
     return related, unrelated
 
 
-def create_router(eternity) -> APIRouter:
+def create_router(runtime, *, legacy=None) -> APIRouter:
     token = os.getenv("DSH_DESKTOP_BRIDGE_TOKEN", "")
     lock = threading.RLock()
-    tasks: dict[str, dict] = {}
-    requests: dict[tuple[str, str], str] = {}
     lifecycle_scopes: dict[str, dict] = {}
 
     def authorize(request: Request) -> str:
@@ -761,34 +759,12 @@ def create_router(eternity) -> APIRouter:
 
     router = APIRouter(prefix="/api/dsh", dependencies=[Depends(authorize)])
 
-    def owned(task_id: str, owner: str) -> dict:
-        with lock:
-            task = tasks.get(task_id)
-            if task is None or task["owner"] != owner:
-                raise HTTPException(404, "Task not found")
-            return task
-
-    def status(task: dict) -> dict:
-        sid = task["session_id"]
-        running = eternity.is_running(sid)
-        raw = None if running else eternity.wait_for_session(sid, timeout=0)
-        result = None
-        if isinstance(raw, dict):
-            from .eternity import _run_end_details
-            result = {**_run_end_details(raw), "final_response": str(raw.get("final_response") or "")[:12_000]}
-        messages = eternity.get_session_messages(sid, limit=10).get("messages", [])
-        progress = [{"role": str(m.get("role") or ""), "content": str(m.get("content") or "")[:1200]}
-                    for m in messages if isinstance(m, dict)]
-        return {"task_id": task["task_id"], "session_id": sid,
-                "status": "running" if running else "finished" if result is not None else "unknown",
-                "result": result, "progress": progress, "created_at": task["created_at"]}
-
     @router.post("/companion/start")
     def start_companion(req: CompanionStartRequest):
         """Attach DSH-owned companion UI, including after a resident-kernel restart."""
         from . import companion
 
-        companion.install(eternity)
+        companion.install(runtime)
         companion.get_companion().watch_client(req.client_pid)
         return {"success": True}
 
@@ -807,8 +783,13 @@ def create_router(eternity) -> APIRouter:
         # 只能从 health 里取。之前没有这个字段，导致 /health 返回 pid=null，
         # plugin 的 attach() 记录下来也是 null，排查时无法直接定位进程。
         # 实测 2026-10-27：`desktop_health` 返回 "pid": null。
-        return {"status": "ok", "protocol": 1, "scheduler": "dsh", "parser": eternity.config.parser.engine,
-                "execution_enabled": bool(os.getenv("DEEPSEEK_API_KEY", "").strip()),
+        return {"status": "ok", "protocol": 2, "scheduler": "dsh", "parser": runtime.config.parser.engine,
+                "execution_enabled": True,
+                "delegated_tasks": legacy is not None,
+                "build": _BUILD, "epoch": runtime.epoch,
+                "capabilities": ["runtime", "windows", "capture", "uia", "web", "lazy_vision"],
+                "initialized_backends": runtime.initialized_backends(),
+                "parser_initializations": runtime.parser_initializations,
                   "bridge": {"pid": os.getpid(), "source_root": str(_SOURCE_ROOT),
                              "input_mode": "physical", "decoration": "task_commander",
                              "input_revision": _INPUT_REVISION},
@@ -820,94 +801,14 @@ def create_router(eternity) -> APIRouter:
                              if desktop_tools._CURSOR is not None else {"visible": False, "started": False}),
                 "ledger": ledger.summary(5)}
 
-    @router.post("/tasks")
-    def start(req: TaskRequest, owner: str = Depends(authorize)):
-        digest = hashlib.sha256(req.task.encode()).hexdigest()
-        with lock:
-            existing = requests.get((owner, req.request_id))
-            if existing:
-                task = tasks[existing]
-                if task["digest"] != digest:
-                    raise HTTPException(409, "request_id already used for a different task")
-                return {"task_id": existing, "session_id": task["session_id"], "reused": True}
-            if not os.getenv("DEEPSEEK_API_KEY", "").strip():
-                raise HTTPException(503, "Set DEEPSEEK_API_KEY before executing tasks")
-            if len(tasks) >= 2000:
-                raise HTTPException(429, "Bridge task registry is full; restart only after all tasks finish")
-            if any(eternity.is_running(t["session_id"]) for t in tasks.values()):
-                raise HTTPException(409, "Desktop is busy; wait for the active task")
-            if any(s.get("is_running") for s in eternity.list_sessions(limit=100)):
-                raise HTTPException(409, "Desktop already has an active session")
-            task_id = uuid.uuid4().hex
-            try:
-                sid = eternity.create_session(task=req.task, source="dsh")
-            except (ValueError, RuntimeError):
-                raise HTTPException(409, "Execution kernel could not start the task") from None
-            tasks[task_id] = {"task_id": task_id, "session_id": sid, "owner": owner,
-                              "digest": digest, "created_at": time.time()}
-            requests[(owner, req.request_id)] = task_id
-            return {"task_id": task_id, "session_id": sid, "reused": False}
-
-    @router.get("/tasks/{task_id}")
-    def get_status(task_id: str, owner: str = Depends(authorize)):
-        return status(owned(task_id, owner))
-
-    @router.post("/tasks/{task_id}/stop")
-    def stop(task_id: str, owner: str = Depends(authorize)):
-        task = owned(task_id, owner)
-        requested = eternity.stop_session(task["session_id"])
-        return {"stop_requested": requested, **status(task)}
-
-    @router.post("/tasks/{task_id}/steer")
-    def steer(task_id: str, req: SteerRequest, owner: str = Depends(authorize)):
-        task = owned(task_id, owner)
-        if not eternity.is_running(task["session_id"]):
-            raise HTTPException(409, "Task finished; steering must not restart desktop actions")
-        if not eternity.steer_session(task["session_id"], req.message):
-            raise HTTPException(409, "Task could not accept steering")
-        return {"status": "steered"}
-
-    @router.get("/tasks/{task_id}/events")
-    async def events(task_id: str, request: Request, owner: str = Depends(authorize)):
-        task = owned(task_id, owner)
-
-        async def generate():
-            yield "data: " + json.dumps({"event": "bridge_status", "data": status(task)}, ensure_ascii=False) + "\n\n"
-            async for event in eternity.get_session_stream(task["session_id"]):
-                if await request.is_disconnected():
-                    break
-                yield "data: " + json.dumps(event, ensure_ascii=False) + "\n\n"
-            yield "data: " + json.dumps({"event": "bridge_status", "data": status(task)}, ensure_ascii=False) + "\n\n"
-
-        return StreamingResponse(generate(), media_type="text/event-stream", headers={"Cache-Control": "no-cache"})
-
-    @router.get("/tasks/{task_id}/image")
-    def image(task_id: str, path: str, owner: str = Depends(authorize)):
-        task = owned(task_id, owner)
-        root = Path(eternity.config.workspace.screenshot_dir).resolve()
-        image_path = Path(path).resolve()
-        if not image_path.is_relative_to(root) or image_path.suffix.lower() not in {".png", ".jpeg", ".jpg"}:
-            raise HTTPException(403, "Image outside screenshot directory")
-        messages = eternity.get_session_messages(task["session_id"], limit=500).get("messages", [])
-        refs = set()
-        for message in messages:
-            content = message.get("content")
-            if isinstance(content, str):
-                try:
-                    content = json.loads(content)
-                except (ValueError, TypeError):
-                    content = None
-            if not isinstance(content, dict):
-                continue
-            for key in ("image_path", "SoM_image_path"):
-                value = content.get(key)
-                if isinstance(value, str):
-                    refs.add(str(Path(value).resolve()))
-        if str(image_path) not in refs:
-            raise HTTPException(403, "Image is not referenced by this task")
-        if not image_path.is_file():
-            raise HTTPException(404, "Image not found")
-        return FileResponse(image_path)
+    if legacy is not None:
+        from .legacy_bridge import install_legacy_routes
+        install_legacy_routes(router, legacy, authorize)
+    else:
+        @router.api_route('/tasks', methods=['POST'])
+        @router.api_route('/tasks/{path:path}', methods=['GET', 'POST'])
+        def delegated_tasks_unavailable(path: str = ''):
+            raise HTTPException(503, 'Delegated Agent tasks require the optional legacy adapter. Use DSH to plan desktop actions.')
 
     # ── window / analysis / action surface ────────────────────────────────
     # The DSH side is already a fully trusted local client (loopback + token +

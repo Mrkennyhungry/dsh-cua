@@ -52,6 +52,8 @@ class _Win32Hotkeys:
         self._stop = True
         if self._thread_id:
             ctypes.windll.user32.PostThreadMessageW(self._thread_id, 0x0012, 0, 0)  # WM_QUIT
+        if self._thread is not None and self._thread is not threading.current_thread():
+            self._thread.join(timeout=2)
 
     def _run(self) -> None:
         user32 = ctypes.windll.user32
@@ -139,7 +141,8 @@ def _ui_executable() -> Path:
 
 class Companion:
     def __init__(self) -> None:
-        self._eternity = None
+        self._runtime = None
+        self._stop_all = None
         self._overlay = None
         self._hotkeys = None
         self._mouse_listener = None
@@ -153,14 +156,15 @@ class Companion:
         self._windows_cache: tuple[float, list[dict]] = (0.0, [])
 
     # ── lifecycle ────────────────────────────────────────────────────────
-    def install(self, eternity) -> None:
+    def install(self, runtime, stop_all=None) -> None:
         """Attach to the overlay and start the global hotkeys (idempotent)."""
         from .cursor_overlay import get_cursor_overlay
 
         with self._lock:
             if self._overlay is not None:
                 return
-            self._eternity = eternity
+            self._runtime = runtime
+            self._stop_all = stop_all or getattr(runtime, 'stop_all', None)
             overlay = get_cursor_overlay()
             overlay.set_companion(True, self.open_menu)
             self._overlay = overlay
@@ -194,7 +198,8 @@ class Companion:
         with self._lock:
             overlay = self._overlay
             self._overlay = None
-            self._eternity = None
+            self._runtime = None
+            self._stop_all = None
             self._client_pid = None
         if overlay is not None:
             try:
@@ -202,6 +207,9 @@ class Companion:
                 overlay.hide()
             except Exception:  # noqa: BLE001 - shutdown must continue
                 logger.debug("failed to hide companion overlay", exc_info=True)
+            from .cursor_overlay import peek_cursor_overlay, stop_cursor_overlay
+            if peek_cursor_overlay() is overlay:
+                stop_cursor_overlay()
         for listener in (self._hotkeys, self._mouse_listener):
             try:
                 if listener is not None:
@@ -282,15 +290,15 @@ class Companion:
             self._ui_process = None
             return
 
+        process = self._ui_process
+
         def read_responses() -> None:
-            assert self._ui_process is not None and self._ui_process.stdout is not None
-            for line in self._ui_process.stdout:
+            for line in process.stdout:
                 if line.strip():
                     self._ui_responses.put(line)
 
         def read_errors() -> None:
-            assert self._ui_process is not None and self._ui_process.stderr is not None
-            for line in self._ui_process.stderr:
+            for line in process.stderr:
                 if line.strip():
                     logger.warning("Arc companion UI: %s", line.strip())
 
@@ -524,8 +532,7 @@ class Companion:
         """Show the full-screen overlay picker and lock whatever the user clicks."""
         from . import desktop_tools as dt
 
-        eternity = self._eternity
-        controller = getattr(eternity, "controller", None)
+        controller = self._runtime
         if controller is None:
             logger.warning("companion: controller not ready")
             return
@@ -553,15 +560,9 @@ class Companion:
         from . import input_gate
 
         input_gate.emergency_stop()
-        eternity = self._eternity
-        stopped = 0
-        for session_id in list(getattr(eternity, "_sessions", {})):
-            try:
-                if eternity.stop_session(session_id):
-                    stopped += 1
-            except Exception:  # noqa: BLE001 - stop must reach every session it can
-                continue
-        logger.warning("companion: emergency stop, sessions stopped=%d", stopped)
+        if self._stop_all is not None:
+            self._stop_all()
+        logger.warning("companion: emergency stop requested")
         self._say("error", 1.5)
 
     def _say(self, action: str, duration: float = 0.8) -> None:
@@ -584,9 +585,9 @@ def get_companion() -> Companion:
         return _INSTANCE
 
 
-def install(eternity) -> Companion:
+def install(runtime, stop_all=None) -> Companion:
     companion = get_companion()
-    companion.install(eternity)
+    companion.install(runtime, stop_all)
     return companion
 
 

@@ -31,7 +31,7 @@ class CompanionLifecycleTests(unittest.TestCase):
         process.wait.assert_called_once_with(timeout=2)
         unlock.assert_called_once_with()
         self.assertIsNone(companion._overlay)
-        self.assertIsNone(companion._eternity)
+        self.assertIsNone(companion._runtime)
         self.assertIsNone(companion._ui_process)
         self.assertIsNone(companion._client_pid)
 

@@ -93,13 +93,13 @@ export function createBridge(config, transport = fetch, options = {}) {
   }
 
   async function request(path, owner, options = {}) {
-    const { body, signal } = options
-    if (managed) await kernel.ensure(signal)
+    const { body, signal, start = true } = options
+    if (managed && start) await kernel.ensure(signal)
     try {
       return await send(path, owner, kernel.token, options)
     } catch (error) {
       // Only idempotent reads are retried: re-sending POST /tasks could duplicate real desktop work.
-      if (!managed || body !== undefined || signal?.aborted || !(error instanceof TypeError)) throw error
+      if (!managed || !start || body !== undefined || signal?.aborted || !(error instanceof TypeError)) throw error
       kernel.forget()
       await kernel.ensure(signal)
       return send(path, owner, kernel.token, options)
@@ -172,7 +172,7 @@ export function createBridge(config, transport = fetch, options = {}) {
 
   return {
     request, stream, taskPath, wait, kernel,
-    get ready() { return kernel.ready },
+    get ready() { return managed ? kernel.ready : kernel.token.length >= 32 },
     shutdown: (force = false) => kernel.stop({ force }),
   }
 }

@@ -24,6 +24,86 @@ function execution(id = 'session-1') {
   return { agent: { session: { id } }, callId: 'call-1', signal: new AbortController().signal }
 }
 
+test('unloading an idle managed plugin makes zero startup requests', async () => {
+  const original = globalThis.fetch
+  globalThis.fetch = async () => assert.fail('unload must not start the kernel')
+  try {
+    const { effects } = setup({ manageKernel: true, commandFeedback: false })
+    for (const effect of effects) await effect()?.()
+  } finally {
+    globalThis.fetch = original
+  }
+})
+
+test('kernel adoption rejects missing runtime capabilities before dispatch', async () => {
+  const original = globalThis.fetch
+  process.env.DSH_DESKTOP_BRIDGE_TOKEN = token
+  globalThis.fetch = async () => Response.json({ protocol: 2, capabilities: ['runtime'], bridge: { pid: 123 } })
+  try {
+    const kernel = createKernel({ port: 65012, tokenEnv: 'DSH_DESKTOP_BRIDGE_TOKEN', autoStart: false })
+    await assert.rejects(kernel.ensure(), /Missing capabilities: windows, capture, uia, web, lazy_vision/)
+    assert.equal(kernel.ready, false)
+  } finally {
+    globalThis.fetch = original
+  }
+})
+
+test('background requests neither ensure nor retry a stopped managed kernel', async () => {
+  process.env.DSH_DESKTOP_BRIDGE_TOKEN = token
+  let requests = 0
+  const bridge = createBridge({ port: 65012, tokenEnv: 'DSH_DESKTOP_BRIDGE_TOKEN', manageKernel: true }, async () => {
+    requests += 1
+    throw new TypeError('fixture connection closed')
+  })
+  await assert.rejects(bridge.request('/scope', '0'.repeat(64), { start: false }), /fixture connection closed/)
+  assert.equal(requests, 1)
+  assert.equal(bridge.ready, false)
+})
+
+test('cancelling startup aborts the health fetch and leaves the kernel unattached', async () => {
+  const original = globalThis.fetch
+  const controller = new AbortController()
+  globalThis.fetch = async (_url, options) => {
+    controller.abort(new Error('fixture startup cancelled'))
+    options.signal.throwIfAborted()
+  }
+  try {
+    const kernel = createKernel({ port: 65012, tokenEnv: 'DSH_DESKTOP_BRIDGE_TOKEN', autoStart: false })
+    await assert.rejects(kernel.ensure(controller.signal), /fixture startup cancelled/)
+    assert.equal(kernel.ready, false)
+  } finally {
+    globalThis.fetch = original
+  }
+})
+
+test('a read reconnects after transport loss while writes keep their single dispatch', async () => {
+  process.env.DSH_DESKTOP_BRIDGE_TOKEN = token
+  const original = globalThis.fetch
+  const health = { protocol: 2, capabilities: ['runtime', 'windows', 'capture', 'uia', 'web', 'lazy_vision'], bridge: { pid: 321 } }
+  let probes = 0
+  globalThis.fetch = async () => { probes += 1; return Response.json(health) }
+  let reads = 0
+  let writes = 0
+  const bridge = createBridge({ port: 65012, tokenEnv: 'DSH_DESKTOP_BRIDGE_TOKEN', autoStart: false }, async (_url, options) => {
+    if (options.body !== undefined) {
+      writes += 1
+      throw new TypeError('write response lost')
+    }
+    reads += 1
+    if (reads === 1) throw new TypeError('kernel connection lost')
+    return Response.json({ success: true })
+  })
+  try {
+    assert.equal((await bridge.request('/windows', '0'.repeat(64))).success, true)
+    assert.equal(reads, 2)
+    assert.equal(probes, 2)
+    await assert.rejects(bridge.request('/windows/bind', '0'.repeat(64), { body: { hwnd: 1 } }), /write response lost/)
+    assert.equal(writes, 1)
+  } finally {
+    globalThis.fetch = original
+  }
+})
+
 
 // Stored encoded so this public test is not itself a readable list of the names
 // it guards against. This is not secrecy: it only keeps them out of plain-text
@@ -109,7 +189,7 @@ test('health reports live PID after a cached kernel is restarted', async () => {
   writeFileSync(join(stateDir, 'kernel-state.json'), JSON.stringify({ port: 8766, token, pid: 111 }))
   const original = globalThis.fetch
   let calls = 0
-  globalThis.fetch = async () => Response.json({ status: 'ok', protocol: 1, execution_enabled: true, bridge: { pid: ++calls === 1 ? 111 : 222 } })
+  globalThis.fetch = async () => Response.json({ status: 'ok', protocol: 2, capabilities: ['runtime', 'windows', 'capture', 'uia', 'web', 'lazy_vision'], execution_enabled: true, bridge: { pid: ++calls === 1 ? 111 : 222 } })
   try {
     const { tools } = setup({ manageKernel: true, autoStart: false, stateDir })
     const result = await tools.get('doraemon_health').execute({}, execution())
@@ -346,7 +426,7 @@ test('a kernel started by an older plugin is adopted through the legacy state fi
   const original = globalThis.fetch
   globalThis.fetch = async (url, init) => (
     init?.headers?.Authorization === `Bearer ${token}`
-      ? Response.json({ protocol: 1, execution_enabled: true })
+      ? Response.json({ protocol: 2, capabilities: ['runtime', 'windows', 'capture', 'uia', 'web', 'lazy_vision'], execution_enabled: true })
       : new Response('{}', { status: 401 })
   )
   try {
@@ -376,7 +456,7 @@ test('adopting a live kernel reconciles its PID without replacing state metadata
   const original = globalThis.fetch
   delete process.env.DSH_DESKTOP_BRIDGE_TOKEN
   writeFileSync(file, JSON.stringify({ port: 65020, token, pid: 111, startedAt: 'original' }))
-  globalThis.fetch = async () => Response.json({ protocol: 1, execution_enabled: true, bridge: { pid: 222 } })
+  globalThis.fetch = async () => Response.json({ protocol: 2, capabilities: ['runtime', 'windows', 'capture', 'uia', 'web', 'lazy_vision'], execution_enabled: true, bridge: { pid: 222 } })
   try {
     const kernel = createKernel({ port: 65020, tokenEnv: 'DSH_DESKTOP_BRIDGE_TOKEN', stateDir: root, autoStart: false })
     assert.equal((await kernel.ensure()).pid, 222)
@@ -403,7 +483,7 @@ test('a stale token no longer hides the working one', async () => {
   const original = globalThis.fetch
   globalThis.fetch = async (url, init) => (
     init?.headers?.Authorization === `Bearer ${good}`
-      ? Response.json({ protocol: 1, execution_enabled: true })
+      ? Response.json({ protocol: 2, capabilities: ['runtime', 'windows', 'capture', 'uia', 'web', 'lazy_vision'], execution_enabled: true })
       : new Response('{}', { status: 401 })
   )
   try {
@@ -431,8 +511,8 @@ test('a kernel speaking an older protocol is refused with an upgrade hint', asyn
     })
     await assert.rejects(kernel.ensure(), (error) => {
       assert.match(error.message, /speaks protocol 0/)
-      assert.match(error.message, /requires 1/)
-      assert.match(error.message, /Update the DSH plugin package/)
+      assert.match(error.message, /requires 2/)
+      assert.match(error.message, /close the resident kernel/)
       return true
     })
   } finally {
@@ -467,7 +547,7 @@ test('stop refuses a stale or recycled kernel PID', async () => {
   const storedToken = 'test-token-for-stale-pid-check-123456789'
   writeFileSync(join(root, 'kernel-state.json'), JSON.stringify({ port: 65019, token: storedToken, pid: 111 }))
   let reads = 0
-  globalThis.fetch = async () => Response.json({ protocol: 1, execution_enabled: true, bridge: { pid: ++reads === 1 ? 111 : 222 } })
+  globalThis.fetch = async () => Response.json({ protocol: 2, capabilities: ['runtime', 'windows', 'capture', 'uia', 'web', 'lazy_vision'], execution_enabled: true, bridge: { pid: ++reads === 1 ? 111 : 222 } })
   try {
     const kernel = createKernel({ port: 65019, tokenEnv: 'DSH_DESKTOP_BRIDGE_TOKEN', stateDir: root, autoStart: false })
     await kernel.ensure()
@@ -682,7 +762,7 @@ test('a non-Windows host can adopt a kernel that already answers', async () => {
   // is already healthy on loopback is adopted, so no Windows error is raised.
   const original = globalThis.fetch
   process.env.DSH_DESKTOP_BRIDGE_TOKEN = 'adopt-only-bridge-token-for-this-test'
-  globalThis.fetch = async () => Response.json({ protocol: 1, execution_enabled: true })
+  globalThis.fetch = async () => Response.json({ protocol: 2, capabilities: ['runtime', 'windows', 'capture', 'uia', 'web', 'lazy_vision'], execution_enabled: true })
   try {
     const kernel = createKernel(
       { port: 65003, tokenEnv: 'DSH_DESKTOP_BRIDGE_TOKEN', autoStart: true, bootSeconds: 5 },

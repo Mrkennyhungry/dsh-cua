@@ -866,6 +866,13 @@ class WatchRegistry:
         return {"success": True, "active": False, "sampled": session.sampled,
                 "kept": session.kept}
 
+    def stop_all(self) -> None:
+        with self._lock:
+            sessions = list(self._sessions.values())
+            self._sessions.clear()
+        for session in sessions:
+            session.stop()
+
     def since(self, window_id: str, seconds: float, limit: int,
               expect: tuple[str, ...] | None = None, expect_all: bool = False,
               ocr_limit: int = MAX_OCR_BANDS) -> dict:
