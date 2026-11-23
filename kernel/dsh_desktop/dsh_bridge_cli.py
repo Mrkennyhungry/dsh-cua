@@ -53,7 +53,7 @@ def create_app(home: Path, port: int):
 
     cfg = RuntimeConfig.from_home(home)
     os.environ["DSH_DESKTOP_PARSER_ENGINE"] = cfg.parser.engine
-    runtime = DesktopRuntime(cfg)
+    runtime = DesktopRuntime(cfg, home=home)
     runtime.setup()
 
     @asynccontextmanager

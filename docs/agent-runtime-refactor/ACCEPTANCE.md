@@ -259,3 +259,26 @@ Host 取消了启动时的模型 credential 解析，保留既有高权限启动
 基础依赖曾尝试 pip 联网安装，在构建依赖阶段停滞，uv 重试下载也耗时较长。已终止本次安装进程，改为复制已安装分发包的声明依赖闭包。最终独立 venv 经 metadata 核对只有 42 包，无被排除包，也没有链接完整运行环境的 pth。复制脚本和 smoke fixture 已归档，可重复执行。清理了本轮产生的 25 个 pip 临时目录。
 
 重构导入顺序曾触发 DPI 回归，PyAutoGUI 在 DPI 服务之前设置进程模式。desktop_tools 现在先调用现有 set_per_monitor_v2，再导入输入依赖，完整 DPI 套件已通过。真实旧驻留 kernel 保留，隔离验证在相同 create_app 工厂启动 HTTP 应用，CLI 全局单实例互斥继续生效。P5/P7 再经插件安装机制验证新 DSH 会话。
+
+## 12. P2 执行记录
+
+版本 0.4.16，P1 提交 cc31ffd 之后实施。TargetRegistry 按 owner 和 epoch 记录 desktop/window/tab/frame，FrameRegistry 保存捕获时 revision，最多 128 帧、300 秒。WindowIdentities 使用随窗口销毁自动消失的 Win32 属性，补足原有 hwnd/pid/process_created 对同进程 HWND 复用的识别。runtime 卸载释放属性句柄。
+
+BrowserRuntime 复用单一 _WEB_EXECUTOR、真实 CDP tab 身份和 Playwright frame 对象。默认直接启动专用 persistent context，显式 connect 才执行 CDP 连接。新 profile 位于 stateDir/browser，已存在的 home/web_profile_edge 或 home/web_profile 继续使用。启动前检查进程命令行并持有按 profile 路径区分的全局 mutex，占用失败返回 BROWSER_PROFILE_UNAVAILABLE。首次实测发现只依赖 Chromium 的锁错误会附带打开两个空 tab，增加启动前检查后额外 tab 为 0。
+
+open 在导航前登记 call 身份，失败导航的重试保留原 target 和错误，实际派发 1 次。当前内存记录上限 1024，owner 清理释放，跨重启持久 journal 在 P4 实施。跨 CDP 连接将同一真实 tab 归并到同一对象，owner 释放共享 tab 时交给存活 owner。外接浏览器在释放和卸载后继续运行。
+
+| P2 退出项 | 状态 | 实测结果 |
+| --- | --- | --- |
+| 持久 profile 与占用 | PASS | 独立基础环境运行 targets_probe，正常关闭/重启 1 轮，Cookie 恢复 1/1，localStorage 恢复 1/1；profile 锁诊断 1/1；旧路径选择测试 1/1；未触碰既有用户 profile |
+| 同 URL 与嵌套 frame | PASS | 同 URL 独立 tab 3 个，frame 3 层，内层按钮实际点击 1 次，其他实例变化 0；同 call 重试新建 tab 0；跨 CDP 身份复用与失败连接诊断各 1/1 |
+| 截图与坐标 | PASS | 实机 PrintWindow 整窗 480×180，客户区 [108,131,464,141]，桌面 [0,0,2560,1440] 输出 1366×768；窗口移至 [200,160]、resize 600×240，crop [20,30,200,100] 缩至 100×50，图片点 [50,25] 映射屏幕 [320,240]；客户区 fallback 单测 1/1 |
+| DPI 与负原点 | PASS | 参数化物理像素测试 4/4，DPI 96/144 × 原点 [0,0]/[-2560,-400]，含客户区偏移、crop、2 倍缩放和往返闭合；越界/NaN/bool 坐标拒绝 4/4；末像素映射 1/1 |
+| owner 隔离与卸载 | PASS | A 清理后目标 0，B 保留 5 个可用目标，清理期间 B 的 300 ms 浏览器读取返回 42；显式连接的独立测试浏览器在 runtime 卸载后存活 1/1，页面标题读回 1/1 |
+| 目标版本与关闭重建 | PASS | 窗口移动/resize revision 1→2；导航/滚动使旧帧失效 2/2；关闭 tab/window 拒绝 3/3；同进程 HWND 属性丢失/重新生成身份 1/1；epoch、owner、TTL 和容量淘汰测试通过 |
+| 完整回归 | PASS | scripts/check.ps1，Node 83 PASS / 0 FAIL / 0 SKIP，1680.4914 ms；Python 276 PASS / 0 FAIL / 1 预期 SKIP / 17 subtests PASS，9.72 s；Host/Client 语法 2/2 PASS |
+| 打包与依赖 | PASS | npm dry-run 171 文件，压缩 27583864 bytes，解包 30488345 bytes；新增 browser/geometry/targets/window_identity 共 4 个 runtime 文件均在包内，新增第三方依赖 0，optional peers 保留 |
+
+实机入口为 .runtime/runtime-test-venv/Scripts/python.exe test/targets_probe.py .runtime/p2-gate-home，完整 fixture 耗时 8000 ms，n=1，parser 初始化 0。证据保存在 p2-evidence/targets-probe.json。实际机器为单屏、96 DPI，150% 与负屏原点由确定性几何测试验证，实际异 DPI 多屏操作仍列入 P7 硬件覆盖记录。
+
+捕获基准按后端实际能力修正。原生图采用物理屏幕坐标，PrintWindow 整窗和 client fallback 均记录各自 source_rect。DOM 使用 Playwright scale=css 截图及 browser_css 坐标，通过同一映射实现处理缩放和 crop，由原有 browser worker 派发。外层 frame 元数据包含完整来源、模型矩形、缩放、DPI 和 revision。P3 继续将这些帧与语义观察、引用和布局变化关联。

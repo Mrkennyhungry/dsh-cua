@@ -431,6 +431,10 @@ stop 立即撤销后续输入资格，移除尚未执行的队列步骤，通知
 
 现有 UIA/OCR 观察中已有归一化坐标约定，实现时先确认各路径。统一 frame 契约时保留明确转换，核对 PrintWindow 整窗与客户区捕获的不同几何来源。
 
+P2 的 FrameGeometry 保存 source_rect、client_rect、window_rect、crop、image_size、model_rect、scale、dpi、virtual_origin 和 method。原生捕获的 coordinate_space 为 screen_physical。Playwright 使用 scale=css 截图并将 coordinate_space 记为 browser_css，映射后的点由同一 browser worker 在对应 page 的 viewport CSS 坐标派发。DOM 截图与点击使用浏览器实际坐标系统，避免重复应用 Windows DPI。模型仍只使用送出图片像素。
+
+FrameRegistry 默认最多保留 128 帧、300 秒，记录 owner、target 与捕获时 revision。目标关闭、窗口属性消失、几何变化、页面导航和滚动均在映射前重验。窗口生命周期属性随 HWND 销毁而清除，用于识别同进程复用句柄。浏览器 tab_id 来自 CDP Target 身份，frame 使用真实对象和 document 身份，跨 CDP 连接复用同一 tab 对象。
+
 ### 图片交付验收
 
 P0 已核验 DSH 0.2.2-rc.3 中 dsh-tools/contracts.ts、dsh-llm/types.ts、dsh-tool-fs/read-image.ts 以及 pi-ai/context.ts、deepseek/serialize.ts 的实际合同。

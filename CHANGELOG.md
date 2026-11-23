@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.4.16] - 2026-11-23
+
+### Added
+
+- Owner-scoped desktop, window, tab and frame identities with live geometry revisions. A window-lifetime property detects same-process HWND reuse.
+- Dedicated persistent browser targets on the existing browser worker, explicit CDP connection, stable tab identity across connections, and call-identity replay protection.
+- Bounded frame records with source, client, window, crop, scale, DPI and virtual-origin metadata and stale-coordinate rejection.
+
+### Changed
+
+- New browser profiles live under stateDir/browser. Existing home/web_profile_edge and home/web_profile directories are reused, with process occupancy checks and a cross-process profile lease.
+- Whole-window capture and client fallback use the shared CaptureService implementation and report their actual coordinate basis.
+- Session cleanup releases its target and frame records. Shared browser tabs transfer to a surviving owner, while browser shutdown retains persistent site data.
+
 ## [0.4.15] - 2026-11-24
 
 ### Added

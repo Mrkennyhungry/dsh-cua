@@ -147,7 +147,8 @@ def _edge_executable() -> str:
 def _profile_dir():
     # 不与历史 Playwright Chromium 共用 profile，避免浏览器版本/锁文件冲突。
     name = "web_profile_edge" if _browser_mode() == "edge" else "web_profile"
-    d = dsh_desktop_home() / name
+    override = os.environ.get('DSH_DESKTOP_BROWSER_PROFILE')
+    d = Path(override) if override else dsh_desktop_home() / name
     d.mkdir(parents=True, exist_ok=True)
     return d
 

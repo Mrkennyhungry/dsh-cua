@@ -353,6 +353,7 @@ export function createKernel(config, options = {}) {
       ...process.env,
       [config.tokenEnv]: token,
       DSH_DESKTOP_HOME: paths.home,
+      DSH_DESKTOP_STATE_DIR: paths.state,
       PYTHONPATH: [moduleRoot, process.env.PYTHONPATH].filter(Boolean).join(delimiter),
       PYTHONIOENCODING: 'utf-8',
       PYTHONUNBUFFERED: '1',

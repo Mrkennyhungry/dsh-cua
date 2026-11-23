@@ -3,14 +3,43 @@ from __future__ import annotations
 
 import logging
 from contextlib import nullcontext
+from dataclasses import dataclass
 
 import cv2
 import mss
 import numpy as np
 
 from . import window
+from ..geometry import FrameGeometry
 
 logger = logging.getLogger(__name__)
+
+
+def window_geometry(hwnd):
+    import ctypes
+    import win32gui
+    left, top, right, bottom = win32gui.GetWindowRect(hwnd)
+    x, y = win32gui.ClientToScreen(hwnd, (0, 0))
+    client = win32gui.GetClientRect(hwnd)
+    get_dpi = ctypes.windll.user32.GetDpiForWindow
+    get_dpi.argtypes = [ctypes.c_void_p]
+    get_dpi.restype = ctypes.c_uint
+    dpi = int(get_dpi(hwnd)) or 96
+    return {'window_rect': (left, top, right - left, bottom - top),
+            'client_rect': (x, y, client[2] - client[0], client[3] - client[1]),
+            'dpi': (dpi, dpi), 'virtual_origin': virtual_origin()}
+
+
+def virtual_origin():
+    import win32api
+    return (win32api.GetSystemMetrics(76), win32api.GetSystemMetrics(77))
+
+
+@dataclass
+class CapturedFrame:
+    image: np.ndarray
+    geometry: FrameGeometry
+    occluded: bool = False
 
 
 def _cursor_guard():
@@ -56,36 +85,17 @@ class CaptureService:
     def _capture_print_window(self, hwnd: int) -> np.ndarray | None:
         """PrintWindow 兜底：截整窗后裁到客户区（与 mss 路径同基准）。"""
         try:
-            import ctypes
-
-            import win32gui
-            import win32ui
-
-            left, top, right, bottom = win32gui.GetWindowRect(hwnd)
-            width, height = right - left, bottom - top
-            if width <= 0 or height <= 0:
+            geometry = window_geometry(hwnd)
+            left, top, _, _ = geometry['window_rect']
+            image = self.print_window(hwnd)
+            if image is None:
                 return None
-            hwnd_dc = win32gui.GetWindowDC(hwnd)
-            mfc_dc = win32ui.CreateDCFromHandle(hwnd_dc)
-            save_dc = mfc_dc.CreateCompatibleDC()
-            bitmap = win32ui.CreateBitmap()
-            bitmap.CreateCompatibleBitmap(mfc_dc, width, height)
-            save_dc.SelectObject(bitmap)
-            ok = ctypes.windll.user32.PrintWindow(hwnd, save_dc.GetSafeHdc(), 2)  # PW_RENDERFULLCONTENT
-            info = bitmap.GetInfo()
-            data = bitmap.GetBitmapBits(True)
-            win32gui.DeleteObject(bitmap.GetHandle())
-            save_dc.DeleteDC()
-            mfc_dc.DeleteDC()
-            win32gui.ReleaseDC(hwnd, hwnd_dc)
-            if not ok:
-                logger.debug("PrintWindow returned 0 for hwnd=%d", hwnd)
-            image = np.frombuffer(data, dtype=np.uint8).reshape(info["bmHeight"], info["bmWidth"], 4)
-            image = cv2.cvtColor(image, cv2.COLOR_BGRA2BGR)
             region = self.window.get_client_region(hwnd)
             if region is not None:
-                x = max(0, region.left - left)
-                y = max(0, region.top - top)
+                x = region.left - left
+                y = region.top - top
+                if min(x, y) < 0 or x + region.width > image.shape[1] or y + region.height > image.shape[0]:
+                    raise RuntimeError('Client region changed during capture')
                 image = image[y : y + region.height, x : x + region.width]
             if image.size == 0:
                 return None
@@ -93,6 +103,78 @@ class CaptureService:
         except Exception as e:
             logger.error("PrintWindow capture failed for hwnd=%d: %s", hwnd, e)
             return None
+
+    def print_window(self, hwnd):
+        """Retain the whole-window origin and release GDI handles on every path."""
+        import ctypes
+        import win32gui
+        import win32ui
+        left, top, right, bottom = win32gui.GetWindowRect(hwnd)
+        width, height = right - left, bottom - top
+        if min(width, height) <= 0:
+            return None
+        window_dc = win32gui.GetWindowDC(hwnd)
+        source = memory = bitmap = None
+        try:
+            source = win32ui.CreateDCFromHandle(window_dc)
+            memory = source.CreateCompatibleDC()
+            bitmap = win32ui.CreateBitmap()
+            bitmap.CreateCompatibleBitmap(source, width, height)
+            memory.SelectObject(bitmap)
+            ctypes.windll.user32.PrintWindow(hwnd, memory.GetSafeHdc(), 2)
+            info = bitmap.GetInfo()
+            bits = bitmap.GetBitmapBits(True)
+            return np.frombuffer(bits, dtype=np.uint8).reshape(info['bmHeight'], info['bmWidth'], 4)[:, :, :3].copy()
+        finally:
+            if bitmap is not None:
+                win32gui.DeleteObject(bitmap.GetHandle())
+            if memory is not None:
+                memory.DeleteDC()
+            if source is not None:
+                source.DeleteDC()
+            win32gui.ReleaseDC(hwnd, window_dc)
+
+    def capture_detailed(self, hwnd=None, *, whole_window=True):
+        """Capture pixels together with their actual source coordinate system."""
+        if hwnd is None:
+            with _cursor_guard(), mss.mss() as sct:
+                monitor = sct.monitors[0]
+                raw = sct.grab(monitor)
+            image = cv2.cvtColor(np.array(raw), cv2.COLOR_BGRA2BGR)
+            source = tuple(monitor[key] for key in ('left', 'top', 'width', 'height'))
+            return CapturedFrame(image, FrameGeometry(source, (image.shape[1], image.shape[0]),
+                                                       virtual_origin=source[:2]))
+        geometry = window_geometry(hwnd)
+        image = None
+        method = 'printwindow'
+        if whole_window:
+            try:
+                image = self.print_window(hwnd)
+            except Exception:
+                logger.debug('Whole-window capture failed', exc_info=True)
+        if image is not None and image.size and int(image.max()) > 8:
+            source = geometry['window_rect']
+            occluded = False
+        else:
+            # The screen and PrintWindow client fallbacks share one client basis.
+            region = geometry['client_rect']
+            try:
+                with _cursor_guard(), mss.mss() as sct:
+                    raw = sct.grab(dict(zip(('left', 'top', 'width', 'height'), region)))
+                image = cv2.cvtColor(np.array(raw), cv2.COLOR_BGRA2BGR)
+                method = 'screen'
+                occluded = True
+            except Exception:
+                image = self._capture_print_window(hwnd)
+                method = 'printwindow_client'
+                occluded = False
+            source = region
+        if image is None or not image.size:
+            raise RuntimeError('CAPTURE_EMPTY')
+        if (image.shape[1], image.shape[0]) != source[2:]:
+            raise RuntimeError('CAPTURE_GEOMETRY_CHANGED')
+        return CapturedFrame(image, FrameGeometry(source, (image.shape[1], image.shape[0]),
+                                                   method=method, **geometry), occluded)
 
     def capture_desktop(self, *, guard_cursor: bool = True) -> np.ndarray | None:
         """Capture the entire desktop (all monitors combined).

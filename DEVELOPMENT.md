@@ -111,6 +111,14 @@ $env:TEMP = $env:TMP = Join-Path (Get-Location) '.runtime/test-temp'
 
 ## 5. 版本与 CHANGELOG
 
+P2 的实机目标、几何与持久 profile 验收使用隔离 home。程序创建并清理自己的窗口、网页和测试浏览器，输出可归档 JSON。
+
+```powershell
+$env:PYTHONPATH = Join-Path (Get-Location) 'kernel'
+$env:TEMP = $env:TMP = Join-Path (Get-Location) '.runtime/test-temp'
+.\.runtime\runtime-test-venv\Scripts\python.exe test/targets_probe.py .runtime/p2-probe-home
+```
+
 - 本轮目标版本 **0.5.0**：工具表从 30+ 收敛到 6 个，属破坏性变更（本项目仍在 0.x，用 minor 表达）。
 - 维护 `CHANGELOG.md`，格式用 [Keep a Changelog](https://keepachangelog.com/)：
   `Added` / `Changed` / `Deprecated` / `Removed` / `Fixed` / `Security`。

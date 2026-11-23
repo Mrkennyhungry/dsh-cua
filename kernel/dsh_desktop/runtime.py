@@ -2,11 +2,12 @@
 from __future__ import annotations
 
 import logging
+import os
 import sys
 import threading
 import time
 import uuid
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, fields, replace
 from datetime import datetime
 from pathlib import Path
 
@@ -21,6 +22,9 @@ from .game import capture, input as input_mod, window
 from .game.window_picker import WindowPicker, WindowPickerOverlay, _resolve_real_pid
 from .tool_decorator import tool
 from .config import WorkspaceConfig, ParserConfig
+from .targets import TargetRegistry, FrameRegistry, RuntimeFault
+from .browser import BrowserRuntime
+from .window_identity import WindowIdentities
 
 logger = logging.getLogger(__name__)
 
@@ -66,9 +70,15 @@ def _overlay_label_text(element: dict) -> str:
 class DesktopRuntime:
     """Own the services used by both DSH and the optional standalone adapter."""
 
-    def __init__(self, config):
+    def __init__(self, config, *, home=None, state_dir=None):
         self.config = config
         self.epoch = uuid.uuid4().hex
+        self.home = Path(home or os.environ.get('DSH_DESKTOP_HOME') or Path(config.workspace.screenshot_dir).parent).resolve()
+        self.state_dir = Path(state_dir or os.environ.get('DSH_DESKTOP_STATE_DIR') or Path.home() / '.dsh' / 'desktop').resolve()
+        self.targets = TargetRegistry(self.epoch)
+        self.frames = FrameRegistry(self.epoch)
+        self.browser = BrowserRuntime(self)
+        self.window_identities = WindowIdentities(self.epoch)
         self.window = window.WindowService()
         self.capture = capture.CaptureService(self.window)
         self.input = input_mod.InputService(self.window)
@@ -110,7 +120,7 @@ class DesktopRuntime:
         input_gate.emergency_stop()
 
     def shutdown(self, timeout=5):
-        from . import companion, desktop_tools, dsh_bridge, watch, web_tools
+        from . import companion, desktop_tools, watch
         from .cursor_overlay import stop_cursor_overlay
         self.stop_all()
         companion.shutdown()
@@ -118,13 +128,108 @@ class DesktopRuntime:
         desktop_tools._CURSOR = None
         self._window_picker_overlay.stop()
         watch.registry().stop_all()
+        self.window_identities.shutdown()
         # Playwright cleanup must run on its owning bridge worker.
         try:
-            dsh_bridge._WEB_EXECUTOR.submit(web_tools.web_close).result(timeout=timeout)
+            self.browser.shutdown()
         except Exception:
             logger.warning('Browser cleanup did not finish within shutdown budget', exc_info=True)
         if desktop_tools.AppControllerRef.current is self:
             desktop_tools.AppControllerRef.current = None
+
+    def _native_metadata(self, info):
+        return {**info, **capture.window_geometry(info['hwnd']),
+                'active': win32gui.GetForegroundWindow() == info['hwnd']}
+
+    def target_directory(self, owner):
+        from . import desktop_tools
+        import win32api
+        monitors = [dict(win32api.GetMonitorInfo(handle)) for handle, _, _ in win32api.EnumDisplayMonitors()]
+        self.targets.adopt(owner, 'desktop', 'desktop', None,
+                           {'title': 'Desktop', 'monitors': monitors, 'virtual_origin': capture.virtual_origin()})
+        for info in desktop_tools._list_visible_windows():
+            try:
+                identity = self.window_identities.acquire(info['hwnd'], info['window_key'])
+                self.targets.adopt(owner, 'window', identity, info['hwnd'], self._native_metadata(info))
+            except RuntimeFault as error:
+                logger.debug('Window discovery could not establish identity: %s', error)
+        # Refresh previously adopted records so the directory cannot return a
+        # destroyed HWND or a detached frame as a live target.
+        for target in self.targets.records(owner):
+            try:
+                self.resolve_target(owner, target.target_id)
+            except RuntimeFault as error:
+                if error.code != 'TARGET_CLOSED':
+                    raise
+        return self.targets.directory(owner)
+
+    def open_target(self, owner, *, target_id=None, hwnd=None, url=None, call_id=None, connect=None):
+        from . import desktop_tools
+        if connect:
+            return self.browser.connect(owner, connect)
+        if url is not None:
+            return self.browser.open(owner, url, call_id, target_id)
+        if target_id:
+            return self.resolve_target(owner, target_id)
+        if hwnd is not None:
+            info = desktop_tools._window_info(int(hwnd))
+            if info is None:
+                raise RuntimeFault('TARGET_CLOSED', 'Window is unavailable')
+            identity = self.window_identities.acquire(int(hwnd), info['window_key'])
+            return self.targets.adopt(owner, 'window', identity, int(hwnd), self._native_metadata(info))
+        self.target_directory(owner)
+        return next(target for target in self.targets.records(owner) if target.kind == 'desktop')
+
+    def resolve_target(self, owner, target_id):
+        from . import desktop_tools
+        target = self.targets.get(owner, target_id)
+        if target.kind == 'browser':
+            return self.browser.call(self.browser.resolve, owner, target_id)
+        if target.kind == 'window':
+            info = desktop_tools._window_info(target.handle)
+            if info is None or not self.window_identities.matches(target.handle, target.identity, info['window_key']):
+                target.closed = True
+                raise RuntimeFault('TARGET_CLOSED', 'Window closed or its handle was reused')
+            self.targets.refresh(target, self._native_metadata(info))
+        if target.kind == 'desktop':
+            import win32api
+            monitors = [dict(win32api.GetMonitorInfo(handle)) for handle, _, _ in win32api.EnumDisplayMonitors()]
+            self.targets.refresh(target, {'title': 'Desktop', 'monitors': monitors, 'virtual_origin': capture.virtual_origin()})
+        return target
+
+    def capture_target(self, owner, target_id, *, max_dim=1366, crop=None):
+        target = self.resolve_target(owner, target_id)
+        revision = target.revision
+        if target.kind == 'browser':
+            image, geometry, target = self.browser.capture(owner, target_id)
+        else:
+            captured = self.capture.capture_detailed(target.handle)
+            image, geometry = captured.image, captured.geometry
+            target = self.resolve_target(owner, target_id)
+        if target.revision != revision:
+            raise RuntimeFault('TARGET_CHANGED', 'Target changed during capture. Retry observation')
+        if crop is not None:
+            # Geometry validates the source-relative crop before array slicing.
+            geometry = replace(geometry, crop=tuple(crop))
+            x, y, width, height = crop
+            image = image[y:y + height, x:x + width]
+        height, width = image.shape[:2]
+        if max_dim and max(height, width) > max_dim:
+            scale = max_dim / max(height, width)
+            image = cv2.resize(image, (max(1, round(width * scale)), max(1, round(height * scale))))
+        geometry = replace(geometry, image_size=(image.shape[1], image.shape[0]))
+        frame = self.frames.add(target, geometry, revision=revision)
+        return image, frame
+
+    def map_point(self, owner, target_id, frame_id, x, y):
+        target = self.resolve_target(owner, target_id)
+        frame = self.frames.get(owner, frame_id, target)
+        return frame.geometry.to_screen(x, y)
+
+    def release_owner(self, owner):
+        self.browser.release(owner)
+        self.frames.release(owner)
+        self.targets.release(owner)
 
     @tool("List all visible windows on the desktop. Returns hwnd, title, exe, pid, and rect for each window.")
     def list_windows(self) -> dict:

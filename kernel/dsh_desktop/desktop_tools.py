@@ -4544,35 +4544,8 @@ def desktop_wait_stable(window_id: str, quiet_ms: int = 600, timeout_ms: int = 2
 
 def _print_window_frame(hwnd: int):
     """Render a window into a bitmap with PrintWindow (works while covered)."""
-    import ctypes
-    import win32gui
-    import win32ui
-
-    left, top, right, bottom = win32gui.GetWindowRect(hwnd)
-    width, height = right - left, bottom - top
-    if width <= 0 or height <= 0:
-        return None
-    window_dc = win32gui.GetWindowDC(hwnd)
-    try:
-        source = win32ui.CreateDCFromHandle(window_dc)
-        memory = source.CreateCompatibleDC()
-        bitmap = win32ui.CreateBitmap()
-        try:
-            bitmap.CreateCompatibleBitmap(source, width, height)
-            memory.SelectObject(bitmap)
-            # PW_RENDERFULLCONTENT (2) asks DWM-composited windows to render too.
-            ctypes.windll.user32.PrintWindow(hwnd, memory.GetSafeHdc(), 2)
-            info = bitmap.GetInfo()
-            bits = bitmap.GetBitmapBits(True)
-            frame = np.frombuffer(bits, dtype=np.uint8).reshape(
-                info["bmHeight"], info["bmWidth"], 4)
-            return frame[:, :, :3].copy()
-        finally:
-            win32gui.DeleteObject(bitmap.GetHandle())
-            memory.DeleteDC()
-            source.DeleteDC()
-    finally:
-        win32gui.ReleaseDC(hwnd, window_dc)
+    from .game.capture import CaptureService
+    return CaptureService().print_window(hwnd)
 
 
 @tool("抓取已绑定窗口自身的画面（PrintWindow）：窗口被别的窗口挡住时，仍能拿到目标窗口的内容。"
@@ -4591,20 +4564,13 @@ def desktop_capture_window(window_id: str) -> dict:
     hwnd = int(info["hwnd"])
     restored = _restore_if_minimized(hwnd)
 
-    frame = None
-    method = "printwindow"
     try:
-        frame = _print_window_frame(hwnd)
-    except Exception:  # noqa: BLE001 - fall back to the screen path
-        frame = None
-    occluded = False
-    if frame is None or int(frame.max()) <= 8:
-        try:
-            frame = controller.capture.capture(hwnd, activate=False)
-        except Exception as exc:  # noqa: BLE001
-            return {"success": False, "error": f"CAPTURE_FAILED: {exc.__class__.__name__}"}
-        method = "screen"
-        occluded = True
+        captured = controller.capture.capture_detailed(hwnd)
+        frame = captured.image
+        method = captured.geometry.method
+        occluded = captured.occluded
+    except Exception as exc:
+        return {"success": False, "error": f"CAPTURE_FAILED: {exc.__class__.__name__}"}
     if frame is None or getattr(frame, "size", 0) == 0:
         return {"success": False, "error": "CAPTURE_EMPTY"}
 
@@ -4627,8 +4593,11 @@ def desktop_capture_window(window_id: str) -> dict:
         path.write_bytes(buf.tobytes())
     except Exception as exc:  # noqa: BLE001
         return {"success": False, "error": f"SAVE_FAILED: {exc.__class__.__name__}"}
+    from dataclasses import replace
+    geometry = replace(captured.geometry, image_size=(width, height))
     return {"success": True, "window_id": window_id, "image_path": str(path),
             "width": int(width), "height": int(height),
+            "geometry": geometry.metadata(),
             "captured_with": method, "occluded": occluded, "restored": restored,
             "note": ("PrintWindow 拿到了窗口自己的画面，与是否被遮挡无关。"
                      if method == "printwindow" else
