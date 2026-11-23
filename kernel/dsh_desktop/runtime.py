@@ -85,6 +85,8 @@ class DesktopRuntime:
         self.capture = capture.CaptureService(self.window)
         self.input = input_mod.InputService(self.window)
         self._input_lock = threading.Lock()
+        self._operations_lock = threading.Lock()
+        self._operations = None
         self._parser_lock = threading.Lock()
         self._ui_parser = None
         self.parser_initializations = 0
@@ -94,6 +96,22 @@ class DesktopRuntime:
         self._window_picker_overlay = WindowPickerOverlay(self._window_picker)
         self._picked_hwnd = None
         self._picked_info = None
+
+    @property
+    def operations(self):
+        with self._operations_lock:
+            if self._operations is None:
+                from .operations import OperationManager
+                self._operations = OperationManager(self)
+            return self._operations
+
+    def act(self, owner, request_key, arguments, *, budget_ms=5000, cancelled=None):
+        from .actions import ActionDispatcher
+        dispatcher = ActionDispatcher(self)
+        dispatcher.validate(arguments)
+        return self.operations.submit(owner, request_key, 'act', arguments,
+                                      lambda context: dispatcher.run(context, arguments), budget_ms=budget_ms,
+                                      cancelled=cancelled)
 
     @property
     def ui_parser(self):
@@ -141,6 +159,8 @@ class DesktopRuntime:
         from . import companion, desktop_tools, watch
         from .cursor_overlay import stop_cursor_overlay
         self.stop_all()
+        if self._operations is not None:
+            self._operations.shutdown()
         companion.shutdown()
         stop_cursor_overlay()
         desktop_tools._CURSOR = None
@@ -246,6 +266,8 @@ class DesktopRuntime:
         return frame.geometry.to_screen(x, y)
 
     def release_owner(self, owner):
+        if self._operations is not None:
+            self._operations.stop(owner)
         self.browser.release(owner)
         cleanup = self.observations.release(owner)
         self.frames.release(owner)

@@ -25,12 +25,32 @@ class BrowserRuntime:
         self._pages_by_id = {}
         self._profile_lease = None
         self.document_key = '__dsh_' + runtime.epoch
+        self.pending_dialogs = {}
+
+    def _dialog(self, page, dialog):
+        self.pending_dialogs[page] = dialog
+        for target in self.runtime.targets.records_for_handle(page):
+            self.runtime.targets.refresh(target, {**target.metadata, 'dialog': self.dialog_metadata(page)})
+
+    def dialog_metadata(self, page):
+        dialog = self.pending_dialogs.get(page)
+        if dialog is None:
+            return None
+        return {'type': dialog.type, 'message': dialog.message[:4000], 'default_value': dialog.default_value[:1000]}
 
     def call(self, function, *args, timeout=30, **kwargs):
         from .dsh_bridge import _WEB_EXECUTOR
         if self.thread_id == threading.get_ident():
             return function(*args, **kwargs)
-        return _WEB_EXECUTOR.submit(function, *args, **kwargs).result(timeout=timeout)
+        def invoke():
+            self.thread_id = threading.get_ident()
+            return function(*args, **kwargs)
+        future = _WEB_EXECUTOR.submit(invoke)
+        try:
+            return future.result(timeout=timeout)
+        except TimeoutError:
+            future.cancel()
+            raise
 
     def _context(self):
         from . import web_tools as web
@@ -115,6 +135,7 @@ class BrowserRuntime:
                 self._documents[page] = {}
                 page.on('framenavigated', lambda changed: self._documents[page].__setitem__(changed, uuid.uuid4().hex))
                 page.on('close', self._forget_page)
+                page.on('dialog', lambda dialog: self._dialog(page, dialog))
         frame = frame or page.main_frame
         documents = self._documents[page]
         documents.setdefault(frame, uuid.uuid4().hex)
@@ -146,6 +167,7 @@ class BrowserRuntime:
         self._pages_by_id.pop(tab_id, None)
         self._documents.pop(page, None)
         self._owned_pages.pop(page, None)
+        self.pending_dialogs.pop(page, None)
         self.runtime.targets.invalidate(lambda target: target.kind == 'browser' and target.handle[0] is page)
 
     def open(self, owner, url, call_id, target_id=None):
@@ -193,10 +215,18 @@ class BrowserRuntime:
         if target.kind != 'browser':
             raise RuntimeFault('TARGET_KIND', 'The selected target is not a browser frame')
         page, frame = target.handle
+        if page in self.pending_dialogs:
+            return target
         if page.is_closed() or frame.is_detached():
             target.closed = True
             raise RuntimeFault('TARGET_CLOSED', 'Browser page or frame has closed')
-        return self._adopt(owner, page, frame)
+        try:
+            return self._adopt(owner, page, frame)
+        except Exception as error:
+            if page.is_closed() or frame.is_detached():
+                target.closed = True
+                raise RuntimeFault('TARGET_CLOSED', 'Browser page or frame closed during validation') from error
+            raise
 
     def frames(self, owner, target_id):
         def collect():
@@ -220,15 +250,17 @@ class BrowserRuntime:
             return [self._adopt(owner, page).summary() for context in browser.contexts for page in context.pages]
         return self.call(attach)
 
-    def close_target(self, owner, target_id):
+    def close_target(self, owner, target_id, *, respect_before_unload=False):
         def close():
             target = self.resolve(owner, target_id)
             page, frame = target.handle
             if frame is not page.main_frame:
                 raise RuntimeFault('TARGET_KIND', 'Close the containing tab to close this frame')
-            page.close()
-            self.runtime.targets.invalidate(lambda record: record.kind == 'browser' and record.handle[0] is page)
-            return {'success': True, 'target_id': target_id}
+            page.close(run_before_unload=respect_before_unload)
+            closed = page.is_closed()
+            if closed:
+                self.runtime.targets.invalidate(lambda record: record.kind == 'browser' and record.handle[0] is page)
+            return {'success': True, 'target_id': target_id, 'closed': closed}
         return self.call(close)
 
     def capture(self, owner, target_id):
@@ -286,5 +318,6 @@ class BrowserRuntime:
             self._page_ids.clear()
             self._documents.clear()
             self._pages_by_id.clear()
+            self.pending_dialogs.clear()
             self._release_profile()
         return self.call(close, timeout=5)

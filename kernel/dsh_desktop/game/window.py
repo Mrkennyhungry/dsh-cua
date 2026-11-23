@@ -348,6 +348,10 @@ class WindowService:
         fg_tid = win32process.GetWindowThreadProcessId(fg_hwnd)[0]
         my_tid = _kernel32.GetCurrentThreadId()
 
+        # Runtime dispatch runs on a lazy COM worker. AttachThreadInput requires
+        # both threads to own a message queue, including this newly born one.
+        win32gui.PumpWaitingMessages()
+
         if fg_tid != my_tid:
             _user32.AttachThreadInput(fg_tid, my_tid, True)
 

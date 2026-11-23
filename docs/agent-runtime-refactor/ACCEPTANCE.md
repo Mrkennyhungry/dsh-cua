@@ -302,3 +302,22 @@ open 在导航前登记 call 身份，失败导航的重试保留原 target 和�
 实机基础命令为 targets_probe.py <隔离 home> --observations，完整视觉环境增加 --vision。基础环境完整 fixture 耗时 12359 ms、parser 初始化 0；视觉环境完整 fixture 耗时 24140 ms、parser 初始化 1，各 n=1。独立 vision_probe.py 使用本机已有 weights 并禁止网络连接。三份 JSON 证据位于 p3-evidence。
 
 首次图片一致性测试发现 Playwright 默认 caret=hide 会修改 input style，引发 MutationObserver 版本变化。源码确认该行为后改用 caret=initial，使采集过程保持原始光标样式。浏览器目标记录子 frame 的 document/layout 版本，保证内层变化也会使整页旧图失效。整页 OCR 的单样本约 9.2 s 已如实记录，P4 将慢采集接入可查询 operation。
+
+## 14. P4 执行记录
+
+版本 0.4.18，P3 提交 24ba0ca 之后实施。DesktopRuntime.act 使用同一 dispatcher 顺序执行单步及 1–8 步批次，校验观察、目标、引用和帧，并在同步动作后返回观察。SQLite journal 在 stateDir 保存 owner/call 身份、参数摘要、派发边界和逐步结果，完整结果保留 1 天，请求摘要保留 30 天。浏览器与 UIA 操作分别在原线程执行，目标锁先于全局输入锁，条件等待释放全局输入锁。
+
+| P4 退出项 | 状态 | 实测结果 |
+| --- | --- | --- |
+| 单步、批次与读回 | PASS | 实机原生 4 步表单、DOM 8 步表单、17 次同步操作，原生和浏览器图片点输入各 1/1，内层 frame 动作 1/1；返回体 561–6554 bytes，结果与现场一致 |
+| 动作能力 | PASS | 中文 replace/insert、checkbox、选择上海、右键 1、双击 2、hover 1、文件上传 1、frame 拖动 down/up 各 1、滚轮 3 刻度、键盘和关闭标签各通过；未变化的 checkbox 派发 0 |
+| 目标与界面变化 | PASS | 旧 DOM 对象替换拒绝 1/1 并带当前观察；原生保存确认保留 1/1，DOM 模态、浏览器确认和页面导航分别在第 0 步后中断，后续输入 0；浏览器确认经 Escape 明确关闭 1/1 |
+| 期望与输入锁 | PASS | 文本期望命中采样 1 次；200 ms 期望超时保留已完成步骤 [0]，后续点击 0；两个 owner 的原生批次各保存自身值 1 次；等待中另一目标点击 1 次并完成，stop 后保留已完成步骤 [0] |
+| 持久身份与恢复 | PASS | 8 个并发同 call 请求派发 1 次，真实动作重放额外派发 0；实际子进程在派发前和第二步写入后分别终止 2 次，重启恢复 cancelled / unknown 各 1，已完成步骤 [0] 和 uncertain_step=1 保留；过期结果与请求摘要分别按 10 / 100 秒模拟验证 1/1 |
+| 取消、超时与并发 | PASS | 实际 apartment 阻塞超时后 worker_running=true，输入锁保持，释放后尾随输入 0、worker_running=false；队列取消不执行回调 1/1；原请求取消撤销执行 1/1，follow 取消不撤销执行 1/1；30 ms 同步预算返回 handle 1/1 |
+| 完整回归 | PASS | scripts/check.ps1，Node 83 PASS / 0 FAIL / 0 SKIP，1643.1866 ms；Python 299 PASS / 0 FAIL / 1 预期 SKIP / 28 subtests PASS，9.92 s；Host/Client 语法 2/2 PASS |
+| 发布检查 | PASS | npm dry-run 178 文件，压缩 27607899 bytes，解包 30583249 bytes；actions/conditions/journal/operations 4 个新增运行文件全部入包，第三方依赖新增 0，3 个 optional peers 保留 |
+
+实机 fixture 使用隔离 home、本地 HTTP 页面与独立原生窗口。17 次同步操作 p50 199.042 ms、p95 3082.903 ms，最近秩法，n=17，完整 fixture 15328 ms，证据位于 p4-evidence/actions-probe.json。浏览器原生确认框的 3 秒来自 Playwright 点击等待超时后保留 dialog 的路径。无模型调用、parser 初始化和 caption 请求均为 0。
+
+直接运行项目 venv 的可执行文件继承 Low Integrity 标签，前台连接返回 WinError 5。复用本机已安装 Python 加载隔离依赖后获得高完整性运行，未更改任何可执行文件标签。浏览器原生 dialog 使 Playwright 无法继续常规页面采集，观察改为返回保留的消息和类型，并由明确键操作处理。瞬态提示的预先 arm 及六工具框架传输在 P5 实施和验证。

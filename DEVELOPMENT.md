@@ -111,6 +111,14 @@ $env:TEMP = $env:TMP = Join-Path (Get-Location) '.runtime/test-temp'
 
 ## 5. 版本与 CHANGELOG
 
+P4 的真实输入验证使用本机原有 Python，并加载独立基础依赖目录。项目目录继承 Low Integrity 标签，直接运行其中的 venv 可执行文件会降低进程完整性，实测前台线程连接返回 WinError 5。下列入口沿用已安装解释器的原有权限，执行器与系统标签均保持原值。
+
+```powershell
+$env:PYTHONIOENCODING = 'utf-8'
+$env:TEMP = $env:TMP = Join-Path (Get-Location) '.runtime/test-temp'
+python scripts/run-live-probe.py test/actions_probe.py .runtime/p4-live-home
+```
+
 P2 的实机目标、几何与持久 profile 验收使用隔离 home。程序创建并清理自己的窗口、网页和测试浏览器，输出可归档 JSON。
 
 ```powershell

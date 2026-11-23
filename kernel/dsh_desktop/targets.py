@@ -63,7 +63,9 @@ class TargetRegistry:
 
     def refresh(self, target, metadata):
         with self._lock:
-            if target.metadata and target.metadata != metadata:
+            previous_geometry = {key: value for key, value in target.metadata.items() if key != 'active'}
+            current_geometry = {key: value for key, value in metadata.items() if key != 'active'}
+            if target.metadata and previous_geometry != current_geometry:
                 target.revision += 1
             target.metadata = dict(metadata)
 

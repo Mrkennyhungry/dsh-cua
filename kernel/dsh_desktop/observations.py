@@ -150,6 +150,10 @@ class ObservationService:
         from .web_tools import _SNAPSHOT_JS
         target = self.runtime.browser.resolve(owner, target_id)
         page, selected_frame = target.handle
+        dialog = self.runtime.browser.dialog_metadata(page)
+        if dialog:
+            trace['dom'] += 1
+            return [], dialog['message'], {'dialog': dialog}
         frames = page.frames if selected_frame is page.main_frame else [selected_frame]
         elements, bodies, children, warnings, versions = [], [], [], [], []
         trace['dom'] += 1
@@ -315,13 +319,16 @@ class ObservationService:
                                             for element in elements], ensure_ascii=False).encode()).hexdigest()
         view = (target.revision, layout)
         needs_image = image is True or (image is None and (coverage < 3 or region or self._last_views.get((owner, target_id)) != view))
+        if metadata.get('dialog'):
+            needs_image = False
+            warnings.append('BROWSER_DIALOG_OPEN: use Enter to accept or Escape to dismiss. Semantic dialog evidence is available')
         pixels = frame = None
-        if needs_image or (needle and not coverage) or region:
+        if not metadata.get('dialog') and (needs_image or (needle and not coverage) or region):
             capture_started = time.perf_counter()
             pixels, frame = self.runtime.capture_target(owner, target_id, max_dim=None if region else 1366, crop=crop)
             trace['capture'] += 1
             trace['capture_ms'] = round((time.perf_counter() - capture_started) * 1000, 3)
-        if (needle and not coverage) or region:
+        if not metadata.get('dialog') and ((needle and not coverage) or region):
             for backend in ('ocr', 'yolo'):
                 if backend == 'yolo' and coverage:
                     break
@@ -373,7 +380,8 @@ class ObservationService:
         self._last_views[(owner, target_id)] = view
         observation = Observation('o_' + uuid.uuid4().hex, owner, target_id, target.revision,
                                   semantic_at, matched, text,
-                                  {**metadata, 'title': target.metadata.get('title', '')[:512], 'url': (target.metadata.get('url') or '')[:2048],
+                                  {**metadata, 'document_id': target.metadata.get('document_id'),
+                                   'title': target.metadata.get('title', '')[:512], 'url': (target.metadata.get('url') or '')[:2048],
                                    'warnings': metadata.get('warnings', []) + warnings, 'query': query,
                                    'trace': {**trace, 'elapsed_ms': round((time.perf_counter() - started) * 1000, 3)},
                                    'evidence': {'semantic_at': semantic_at, 'image_at': timestamp() if images else None}},

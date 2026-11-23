@@ -4,6 +4,8 @@ from __future__ import annotations
 import ctypes
 import math
 import time
+import threading
+from contextlib import contextmanager
 
 import numpy as np
 import pyautogui
@@ -90,6 +92,16 @@ class InputService:
     def __init__(self, window_service: window.WindowService | None = None):
         self.window = window_service or window.WindowService()
         self.mouse = Controller()
+        self._dispatch = threading.local()
+
+    @contextmanager
+    def dispatch_context(self, before_input):
+        previous = getattr(self._dispatch, 'before_input', None)
+        self._dispatch.before_input = before_input
+        try:
+            yield
+        finally:
+            self._dispatch.before_input = previous
 
     @property
     def virtual(self):
@@ -117,6 +129,9 @@ class InputService:
         """Refuse input the session cannot receive, or input from a cancelled action."""
         from .. import input_gate
 
+        before = getattr(getattr(self, '_dispatch', None), 'before_input', None)
+        if before is not None:
+            before()
         return input_gate.guard()
     def right_click_screen(self, x, y, hwnd=None):
         blocked = self._gate()
@@ -127,6 +142,8 @@ class InputService:
         self._human_move_to(x, y)
         failed = self._verify_pointer_target(x,y)
         if failed: return failed
+        blocked = self._gate()
+        if blocked: return blocked
         self.mouse.press(Button.right)
         self.mouse.release(Button.right)
         return {'success': True, 'dispatch': 'physical', 'x': x, 'y': y}
@@ -146,9 +163,13 @@ class InputService:
             if i > 0:
                 time.sleep(0.12)   # fixed double-click gap, inside the OS threshold
             time.sleep(0.05)
+            blocked = self._gate()
+            if blocked: return blocked
             self.mouse.press(Button.left)
-            time.sleep(0.04)
-            self.mouse.release(Button.left)
+            try:
+                time.sleep(0.04)
+            finally:
+                self.mouse.release(Button.left)
 
         return {"success": True, "dispatch":"physical", "x": x, "y": y, "clicks": clicks}
 
@@ -161,6 +182,10 @@ class InputService:
         way, and made "the same script reproduces the same result" impossible.
         The eased curve is kept so the move still looks human, not teleporting.
         """
+        if getattr(getattr(self, '_dispatch', None), 'before_input', None) is not None:
+            self._gate()
+            self.mouse.position = (x, y)
+            return
         target = np.array([x, y], dtype=float)
         try:
             cur = np.array(self.mouse.position, dtype=float)
@@ -251,6 +276,8 @@ class InputService:
         if activate:
             self.window.ensure_foreground(hwnd)
             time.sleep(0.2)
+        blocked = self._gate()
+        if blocked: return blocked
         pyautogui.mouseDown(region.left + x, region.top + y)
         return {"success": True, "x": region.left + x, "y": region.top + y}
 
@@ -259,7 +286,10 @@ class InputService:
 
     def mouse_move_screen(self, x: int, y: int, hwnd=None):
         """Move mouse with human-like curved path and jitter."""
+        blocked = self._gate()
+        if blocked: return blocked
         self._human_move_to(x, y)
+        return self._verify_pointer_target(x, y) or {'success': True}
 
     def press_key(self, key: str, wait_time: float = 0.2, hwnd=None):
         blocked = self._gate()
@@ -306,6 +336,8 @@ class InputService:
         mouse_event.argtypes = [ctypes.c_uint32,ctypes.c_uint32,ctypes.c_uint32,ctypes.c_uint32,ctypes.c_size_t]
         mouse_event.restype = None
         for index in range(abs(clicks)):
+            blocked = self._gate()
+            if blocked: return blocked
             delta = sign * 120  # WHEEL_DELTA on Windows
             mouse_event(0x1000 if direction == 'horizontal' else 0x0800,
                         0,0,ctypes.c_uint32(delta).value,0)
@@ -369,15 +401,17 @@ class InputService:
             kernel32.GlobalFree(buf)
             return {"success": False, "error": "SetClipboardData failed"}
 
-        pyautogui.hotkey("ctrl", "v")
-        # Give the target a moment to actually consume the clipboard before it is
-        # replaced: several apps read it lazily on WM_PASTE, and restoring at
-        # 0.1s made the paste come out empty (observed 2026-11-02).
-        time.sleep(0.25)
         restored = False
-        if previous_clipboard is not None:
-            restored = _write_clipboard_text(previous_clipboard)
-            time.sleep(0.05)
+        try:
+            blocked = self._gate()
+            if blocked: return blocked
+            pyautogui.hotkey("ctrl", "v")
+            # Applications may consume WM_PASTE asynchronously.
+            time.sleep(0.25)
+        finally:
+            if previous_clipboard is not None:
+                restored = _write_clipboard_text(previous_clipboard)
+                time.sleep(0.05)
         return {"success": True, "length": len(text),
                 "clipboard_restored": restored,
                 **({} if previous_clipboard is not None
@@ -414,9 +448,13 @@ class InputService:
         failed = self._verify_pointer_target(*p1)
         if failed: return failed
         time.sleep(0.02)
+        blocked = self._gate()
+        if blocked: return blocked
         self.mouse.press(Button.left)
         try:
             for i in range(1, segments + 1):
+                blocked = self._gate()
+                if blocked: return blocked
                 t = i / segments
                 eased = t * t * (3 - 2 * t)
                 b = (1 - eased)**3 * p1 + \

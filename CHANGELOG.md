@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.4.18] - 2026-11-23
+
+### Added
+
+- Unified action validation, semantic and frame-point dispatch, short batches and post-action observations through DesktopRuntime.act.
+- Durable SQLite operation identities, write-ahead dispatch records, completed and uncertain steps, cancellation and bounded status following.
+- Shared text, element, window and target-state condition checks with physical input released during expectations.
+
+### Changed
+
+- Physical runtime movement uses a direct deterministic path. Input, selection, checkbox state, double/right click, hover, wheel, drag, file upload, key and close requests share reference and identity checks.
+- Target locks precede the global input lock. Backend threads retain locks during timed-out provider calls and cancel their input lease before further dispatch.
+- Browser dialogs stay available for explicit Enter/Escape handling. New dialogs, navigation, tabs and native modal windows interrupt remaining batch steps.
+
+### Fixed
+
+- Mouse clicks, wheel detents, clipboard paste and drag segments recheck cancellation at their actual input boundary.
+- Foreground-only changes preserve geometrically valid image frames. Browser closure during live validation produces a closed-target result.
+- Queued cancellations release operation capacity immediately. Runtime restart preserves request identities independently of full observation results.
+
 ## [0.4.17] - 2026-11-23
 
 ### Added
