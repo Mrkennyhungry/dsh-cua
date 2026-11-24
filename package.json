@@ -1,6 +1,6 @@
 {
   "name": "dsh-doraemon",
-  "version": "0.4.19",
+  "version": "0.5.0",
   "description": "Windows computer-use plugin for DeepSeek Harness (DSH): UIA, local OCR, window binding, browser automation and visual grounding.",
   "keywords": [
     "deepseek-harness",
@@ -28,6 +28,8 @@
   },
   "files": [
     "index.js",
+    "legacy-host.js",
+    "runtime-host.js",
     "client.js",
     "companion-state.js",
     "bridge-client.js",

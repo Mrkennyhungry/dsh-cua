@@ -85,6 +85,9 @@ class DesktopRuntime:
         self.capture = capture.CaptureService(self.window)
         self.input = input_mod.InputService(self.window)
         self._input_lock = threading.Lock()
+        self._transient_lock = threading.Lock()
+        from .worker import ApartmentWorker
+        self._transient_worker = ApartmentWorker('dsh-transient-uia')
         self._operations_lock = threading.Lock()
         self._operations = None
         self._parser_lock = threading.Lock()
@@ -111,6 +114,94 @@ class DesktopRuntime:
         dispatcher.validate(arguments)
         return self.operations.submit(owner, request_key, 'act', arguments,
                                       lambda context: dispatcher.run(context, arguments), budget_ms=budget_ms,
+                                      cancelled=cancelled)
+
+    def open(self, owner, request_key, arguments, *, budget_ms=5000, cancelled=None):
+        if not isinstance(arguments, dict) or set(arguments) - {'url', 'app', 'args', 'target_id', 'connect', 'image'}:
+            raise ValueError('Unknown open arguments')
+        for name in ('url', 'app', 'target_id', 'connect'):
+            if name in arguments and (not isinstance(arguments[name], str) or not arguments[name].strip()):
+                raise ValueError(name + ' must be a nonempty string')
+        if 'image' in arguments and not isinstance(arguments['image'], bool):
+            raise ValueError('image must be boolean')
+        args = arguments.get('args', [])
+        if not isinstance(args, list) or len(args) > 32 or any(not isinstance(arg, str) or len(arg) > 4096 for arg in args):
+            raise ValueError('args must be an array of at most 32 strings')
+        url, app = arguments.get('url'), arguments.get('app')
+        target_id, connect = arguments.get('target_id'), arguments.get('connect')
+        if (not any((url, app, target_id, connect)) or
+                (app and (url or target_id or connect)) or
+                (connect and (url or target_id)) or ('args' in arguments and not app)):
+            raise ValueError('Select an app, a connection, or a URL and/or existing target')
+
+        def open_on_backend(context):
+            from . import desktop_tools
+            context.check()
+            if connect:
+                if connect == 'configured':
+                    from .web_tools import _CDP_PORT
+                    endpoint = f'http://127.0.0.1:{_CDP_PORT}'
+                else:
+                    endpoint = connect
+                rows = self.browser.connect(owner, endpoint)
+                context.check()
+                if not rows:
+                    return self.observations.observe(owner)
+                selected = next((row for row in rows if row.get('active')), rows[0])
+                context.change(target_id=selected['target_id'])
+                observed = self.observations.observe(owner, selected['target_id'], image=arguments.get('image'))
+                return {**observed, 'target_id': selected['target_id'], 'targets': rows, 'outcome': 'opened'}
+            if app:
+                path = app
+                if not Path(path).is_absolute():
+                    found = desktop_tools.desktop_find_app(path)
+                    choices = [found.get('system_binary'), *found.get('registry_launchable', []),
+                               *(row.get('path') for row in found.get('shortcuts', []))]
+                    choices = list(dict.fromkeys(choice for choice in choices if choice))
+                    if len(choices) != 1:
+                        raise RuntimeFault('APP_AMBIGUOUS', 'Application name does not identify one launchable executable')
+                    path = choices[0]
+                with context.hold(self._input_lock):
+                    context.dispatch(0)
+                    launched = desktop_tools.desktop_launch_app(path, scope_owner=owner, arguments=args)
+                if not launched.get('success'):
+                    return launched
+                context.completed(0, launched.get('launch_method', 'launch'))
+                context.check()
+                target = self.open_target(owner, hwnd=launched['tracked_windows'][0]['hwnd'])
+            elif url:
+                from contextlib import nullcontext
+                current = self.resolve_target(owner, target_id) if target_id else None
+                lock = context.hold(self.operations.target_lock(current)) if current else nullcontext()
+                with lock:
+                    with context.hold(self._input_lock):
+                        context.dispatch(0)
+                        target = self.open_target(owner, url=url, target_id=target_id, call_id=request_key)
+                        context.completed(0, 'navigate')
+            else:
+                target = self.resolve_target(owner, target_id)
+                with context.hold(self.operations.target_lock(target)):
+                    with context.hold(self._input_lock):
+                        context.dispatch(0)
+                        if target.kind == 'browser':
+                            self.browser.call(lambda: target.handle[0].bring_to_front())
+                        elif target.kind == 'window' and not self.window.force_foreground(target.handle):
+                            raise RuntimeFault('TARGET_UNAVAILABLE', 'Could not activate the window')
+                        context.completed(0, 'activate')
+            context.check()
+            context.change(target_id=target.target_id)
+            with context.hold(self.operations.target_lock(target)):
+                observed = self.observations.observe(owner, target.target_id, image=arguments.get('image'))
+            return {**observed, 'target_id': target.target_id, 'outcome': 'opened'}
+
+        def run(context):
+            browser_target = bool(url or connect)
+            if target_id:
+                browser_target = self.resolve_target(owner, target_id).kind == 'browser'
+            call = self.browser.call if browser_target else self.observations.uia.call
+            return context.backend(call, lambda: open_on_backend(context), timeout=120)
+
+        return self.operations.submit(owner, request_key, 'open', arguments, run, budget_ms=budget_ms,
                                       cancelled=cancelled)
 
     def wait(self, owner, request_key, arguments, *, budget_ms=5000, cancelled=None):
@@ -195,6 +286,7 @@ class DesktopRuntime:
         watch.registry().stop_all()
         self.window_identities.shutdown()
         self.observations.shutdown()
+        self._transient_worker.shutdown()
         # Playwright cleanup must run on its owning bridge worker.
         try:
             self.browser.shutdown()

@@ -1,7 +1,179 @@
 """Finite, observable conditions shared by action expectations and waits."""
+import threading
 import time
+import uuid
+
+from .observations import timestamp
 
 from .targets import RuntimeFault
+
+
+_ARM_BROWSER = r'''({key, text, exact, interval, timeout}) => {
+  const matches = value => exact ? value === text : value.includes(text);
+  const body = () => document.body?.innerText || '';
+  const state = {baseline_present: matches(body()), seen_absent: !matches(body()),
+    armed: false, matched_at: null, samples: 0, dispatched_at: null};
+  const sample = records => {
+    const current = body();
+    state.samples++;
+    if (!state.armed || state.matched_at || performance.now() > state.deadline) return;
+    if (!matches(current)) state.seen_absent = true;
+    let found = matches(current);
+    if (!exact && records) found ||= records.some(record => Array.from(record.addedNodes).some(node => {
+      const element = node.nodeType === Node.ELEMENT_NODE ? node : node.parentElement;
+      return element?.isConnected && element.getClientRects().length && matches(element.innerText || '');
+    }));
+    if (state.seen_absent && found) state.matched_at = new Date().toISOString();
+  };
+  const observer = new MutationObserver(sample);
+  observer.observe(document, {subtree: true, childList: true, characterData: true});
+  const timer = setInterval(() => sample(), interval);
+  state.dispatch = () => {
+    observer.takeRecords();
+    state.seen_absent = !matches(body());
+    state.dispatched_at = new Date().toISOString();
+    state.deadline = performance.now() + timeout;
+    state.armed = true;
+  };
+  state.close = () => { clearInterval(timer); observer.disconnect(); delete window[key]; };
+  window[key] = state;
+  return {baseline_present: state.baseline_present};
+}'''
+
+
+class TransientWatcher:
+    """Collect text evidence from before dispatch until match, cancellation or timeout."""
+    def __init__(self, runtime, context, target, condition, *, lock_held=False):
+        self.runtime, self.context, self.target = runtime, context, target
+        self.condition = condition
+        self.timeout = condition.get('timeout_ms', 5000) / 1000
+        self.stopped = threading.Event()
+        self.dispatched = threading.Event()
+        self.thread = None
+        self.error = None
+        self.result = None
+        self.samples = 1
+        self.started = None
+        self.key = '__dsh_watch_' + uuid.uuid4().hex
+        if not lock_held:
+            while not runtime._transient_lock.acquire(timeout=0.05):
+                context.check()
+        try:
+            if target.kind == 'browser':
+                self.frame = target.handle[1]
+                baseline = self.frame.evaluate(_ARM_BROWSER, {'key': self.key, 'text': condition['text'],
+                    'exact': condition.get('match') == 'exact', 'interval': 100, 'timeout': self.timeout * 1000})
+                self.baseline = baseline['baseline_present']
+            elif target.kind == 'window':
+                self.baseline = self._sample_native()
+                self.thread = threading.Thread(target=self._poll_native, name='dsh-transient-watch', daemon=True)
+                self.thread.start()
+            else:
+                raise RuntimeFault('UNSUPPORTED_CONDITION', 'Transient text requires a window or browser target')
+            context.change(expectation={'status': 'pending', 'baseline_present': self.baseline, 'samples': 1})
+        except BaseException:
+            self.stopped.set()
+            if target.kind == 'browser' and hasattr(self, 'frame'):
+                try:
+                    self.frame.evaluate('key => window[key]?.close()', self.key)
+                except Exception:
+                    pass
+            if self.thread is not None:
+                self.thread.join(timeout=3.1)
+            runtime._transient_lock.release()
+            raise
+
+    def _sample_native(self):
+        def sample():
+            from pywinauto import Desktop
+            from .desktop_tools import _uia_batch_elements
+            target = self.runtime.resolve_target(self.context.owner, self.target.target_id)
+            root = Desktop(backend='uia').window(handle=target.handle).wrapper_object()
+            region = self.runtime.window.get_client_region(target.handle)
+            if region is None:
+                raise RuntimeFault('TARGET_CLOSED', 'Target client area is unavailable')
+            nodes = _uia_batch_elements(root, region, 12, 1500, time.monotonic() + 2, semantics=True)
+            text = '\n'.join(str(node.get('value') or node['name']) for node in nodes)[:60000]
+            needle = self.condition['text']
+            return text == needle if self.condition.get('match') == 'exact' else needle in text
+        return self.runtime._transient_worker.call(sample, timeout=3)
+
+    def _poll_native(self):
+        seen_absent = not self.baseline
+        try:
+            while not self.stopped.wait(0.1):
+                self.context.check()
+                if self.started is not None and time.monotonic() >= self.started + self.timeout:
+                    return
+                sampled_at = time.monotonic()
+                matched = self._sample_native()
+                self.samples += 1
+                if not self.dispatched.is_set() or sampled_at < self.started:
+                    continue
+                if time.monotonic() > self.started + self.timeout:
+                    return
+                if not matched:
+                    seen_absent = True
+                if seen_absent and matched:
+                    self.result = {'status': 'met', 'baseline_present': self.baseline, 'samples': self.samples,
+                                   'dispatched_at': self.dispatched_at, 'matched_at': timestamp(),
+                                   'evidence': {'source': 'uia', 'text': self.condition['text']}}
+                    self.context.change(expectation=self.result)
+                    return
+        except BaseException as error:
+            self.error = error
+
+    def dispatch(self, _index):
+        self.started = time.monotonic()
+        self.dispatched_at = timestamp()
+        if self.target.kind == 'browser':
+            self.frame.evaluate('''key => { const state = window[key];
+              if (!state) throw new Error('Transient watcher disappeared');
+              state.dispatch(); }''', self.key)
+        self.dispatched.set()
+
+    def wait(self):
+        deadline = (self.started or time.monotonic()) + self.timeout
+        while True:
+            self.context.check()
+            if self.error:
+                raise self.error
+            if self.target.kind == 'browser':
+                state = self.frame.evaluate('''key => { const s = window[key];
+                  return s && {baseline_present:s.baseline_present, samples:s.samples,
+                    dispatched_at:s.dispatched_at, matched_at:s.matched_at}; }''', self.key)
+                if state is None:
+                    raise RuntimeFault('TARGET_CHANGED', 'Transient watcher lost its document')
+                if state['matched_at']:
+                    self.result = {'status': 'met', **state,
+                                   'evidence': {'source': 'dom', 'text': self.condition['text']}}
+                    self.context.change(expectation=self.result)
+            if self.result:
+                return {'expectation': self.result, 'outcome': 'expectation_met'}
+            if time.monotonic() >= deadline:
+                break
+            self.context.cancelled.wait(min(0.1, max(0, deadline - time.monotonic())))
+        result = {'status': 'timeout', 'baseline_present': self.baseline,
+                  'samples': state['samples'] if self.target.kind == 'browser' else self.samples}
+        if self.started is not None:
+            result['dispatched_at'] = self.dispatched_at
+        self.context.change(expectation=result)
+        return {'expectation': result}
+
+    def close(self):
+        self.stopped.set()
+        try:
+            if self.target.kind == 'browser':
+                try:
+                    self.frame.evaluate('key => window[key]?.close()', self.key)
+                except Exception:
+                    pass
+            if self.thread is not None:
+                self.thread.join(timeout=3.1)
+            if self.context.cancelled.is_set() and self.result is None:
+                self.context.change(expectation={'status': 'cancelled', 'baseline_present': self.baseline})
+        finally:
+            self.runtime._transient_lock.release()
 
 
 def validate_condition(condition):

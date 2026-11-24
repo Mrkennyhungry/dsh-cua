@@ -325,3 +325,29 @@ open 在导航前登记 call 身份，失败导航的重试保留原 target 和�
 ## 15. P5 进行中记录
 
 独立等待接入 operation journal，覆盖参数校验、超时证据和同请求重放。新增会话隔离的 JPEG 资源端点，Host 二进制读取使用 4 MiB 上限。act、wait、status、stop 的内核桥接入口已初步接线，尚需与 Host 六工具及取消路径完成端到端验证。完整检查 scripts/check.ps1 实测 Node 84 PASS，Python 302 PASS、1 预期 SKIP、32 subtests PASS。此记录不代表 P5 验收通过。
+
+### 本机续接实测（2026-11-24）
+
+起点 bdae18d，分支 codex/agent-runtime-refactor。用户要求保留的两份本机交接文档已单独提交为 08e1e2e，观察桥接补充提交为 29634d2。开工干净基线 scripts/check.ps1 为 Node 84 PASS，Python 302 PASS、1 预期 SKIP、32 subtests PASS。当前 P5 改动包含六工具 Host、原生附件 renderer、open 初始观察、瞬态监听、取消与后台状态跟踪，版本统一为 0.5.0。阶段闸门仍待指定的双模型验收及最终独立提交。
+
+| P5 验证项 | 状态 | 实测结果 |
+| --- | --- | --- |
+| 默认六工具发现 | PASS | 已安装的 cua-refactor bundle 为 link 指向本 worktree，插件页显示 0.5.0、1 个组件运行中。新会话模型请求的实际工具轨迹确认 open/observe/act/wait/status/stop 共 6 个 doraemon 工具 |
+| 独立 status | PASS | 新会话仅调用一次 status({})，success=true、version=0.5.0、build=778b47b8965e6bc7；windows/capture/input 初始化，browser_initialized/uia_running/transient_uia_running 全 false，input_busy=false，operations=[]。该回合 2 个模型请求、1 个工具、UI 总时长 8 s、聚合 23.7K token |
+| 瞬态提示与清理 | PASS | actions_probe 两次完整复验均成功。第一轮原生 600 ms 提示采样 3 次、派发至命中 340.003 ms，浏览器 120 ms 提示采样 4 次、命中 25 ms。第二轮对应为 3 次/383.921 ms 和 4 次/26 ms。act/status 捕获证据相同，取消清理 1/1，parser 初始化 0、caption 0 |
+| 原生和浏览器操作 | PASS | 完整实机 probe 两轮各 19 个同步操作，4 步原生表单、8 步 DOM 表单、两 owner 各保存自身值 1 次，open 初始观察与同请求重放通过，额外导航 0。两轮整体耗时 31719/35610 ms，证据 actions-probe.json |
+| Host 原生图片补充闭环 | PASS | 当前可用 DeepSeek 官方路由、High，在新 DSH 会话完成 open→status→observe，3 个工具调用、4 个模型请求，图像独有随机字符 CMSULQDN 8/8 正确，1/1。DOM text 为空、elements=[]，OCR/YOLO/caption 均 0。JPEG 1366×854、28476 bytes，observe DOM 33.062 ms、截图 147.683 ms、总体 214.489 ms，UI 回合 17 s、聚合 54.4K token。此项是附加通路验证 |
+| 指定双模型图片闭环 | 环境阻塞 | cua-refactor UI 当前只列出 DeepSeek 账号和 DeepSeek 官方提供方下的 Flash/Pro。wb/cn:deepseek-v4.1-flash 与 wb/cn:hy4std 可选项均缺失，本阶段两条指定路由各执行 0 次。已请求用户配置其本机实际路由 |
+| 包与 peers | PASS | npm pack --dry-run 为 186 文件、压缩 112136150 bytes、解包 127274796 bytes，index/runtime-host/legacy-host/actions/conditions/worker 全部入包。三个 SDK peers 保持 optional。包内现有 YOLO 80.4 MB 权重及历史静态文件清理归 P6 |
+
+独立内核采用已验证的 create_app 工厂在 8767 启动，进程 49632，更新源码后重启为 45112，source_root 指向本 worktree，home/state 在本项目 .runtime 内。DSH 由本次进程环境注入临时 bridge token 后启动 cua-refactor，以 health 能力握手接管该内核。该验证方式复用了 P1 的工厂入口，CLI 全局单实例启动路径仍需在发行验收中覆盖。全局 elevated task 与共享 kernel-boot.json 的冲突尚未通过正常启动路径复验。
+
+第一次实机复验在双 owner 原生并发处失败，第二请求返回 BACKEND_BUSY。定位到 ApartmentWorker 线程启动前的队列容量竞争，改为同时限定在途与排队总数为 2，并增加确定性延迟 COM 初始化回归。修改后的两轮实机并发均通过。
+
+首次 DSH 表单流程因模型遗漏 input.mode 被 422 拒绝。旧 Host 返回泛化错误，模型随后读取旧工作区源码并偏离验收步骤，该回合已停止，未计为成功。已给 mode 增加 replace/insert 枚举和必填说明，桥接返回至多 4096 bytes 内的具体校验原因，新增正常及超长错误回归。修正后的流程另行复验。
+
+修正后在独立新 DSH 会话复验两条流程。open→act→act 完成 1/1，open 为 op_ce4c292647b2455cb5a9e7508380e175，input 为 op_a9c0b1b52d2c47f8b12b8eb4305e7e47，Save 为 op_996db1ff8be74d2a8afe3f6b74a6ef6d，现场读回 Saved P5-flow。第二条初次 wait 因模型把 timeout_ms 放在 condition 内被 SDK 拒绝，派发 0；说明中补充顶层 timeout_ms 位置后复验 observe→act→wait 完成 1/1，act 为 op_a71240cf1d8e400cb36e85e52bfc2fa8，wait 为 op_ae3efe86a12644e6b3dd6af36221314a，expectation=met、samples=1、dispatch=none、worker_running=false。复验时页面已含目标文本，此数值只验证条件满足路径，实际等待和取消由实机 probe 覆盖。首次新会话回合 7 个模型步骤、UI 22 s、107K 聚合 token；第二回合 4 个模型请求、3 个工具调用、UI 13 s、84.4K 聚合 token。费用未知，当前两条指定 wb 路由的成本与对照仍未测量。
+
+提交前最终 scripts/check.ps1 结果为 Node 89 PASS、0 FAIL、0 SKIP、6577.5482 ms；Python 308 PASS、0 FAIL、1 预期 SKIP、37 subtests PASS、22.33 s，Host/Client 语法检查通过。该轮包含六工具公开描述、companion 对 observe/wait/act 的状态映射与回归，以及覆盖实际 runtime 模块的 build 指纹。Client chips 与原生附件插槽的现有兼容测试通过。
+
+只读复核本机模型目录后，cua-refactor 仍缺少指定的两条路由。desktop 中可见 workbuddy/global:deepseek-v4.1-flash 和 hy4/hy4、hy4/hy4-flash，路由标识和配置归属均需用户确认与配置到独立 profile。本次提交保存已完成的 P5 实现和实测证据，P5 的双模型图片退出项继续待验，P6/P7 按阶段闸门继续待实施。

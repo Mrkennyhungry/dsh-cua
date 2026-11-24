@@ -22,4 +22,10 @@ test('finishing one task does not hide another owner; dispose hides remaining',a
 })
 test('spell poses cover typing, scrolling and dragging',()=>{
  assert.equal(actionForTool('doraemon_type'),'type');assert.equal(actionForTool('doraemon_scroll'),'scroll');assert.equal(actionForTool('doraemon_swipe'),'drag')
+ assert.equal(actionForTool('doraemon_observe'), 'observe')
+ assert.equal(actionForTool('doraemon_wait'), 'observe')
+ assert.equal(actionForTool('doraemon_act', { steps: [{ action: 'input', text: 'hello', mode: 'replace' }] }), 'type')
+ assert.equal(actionForTool('doraemon_act', { steps: [{ action: 'click', button: 'right' }] }), 'right_click')
+ assert.equal(actionForTool('doraemon_act', { steps: [{ action: 'drag' }] }), 'drag')
+ assert.equal(actionForTool('doraemon_act', { steps: [] }), 'thinking')
 })

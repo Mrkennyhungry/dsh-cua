@@ -28,6 +28,7 @@ class OperationContext:
         self.backend_running = False
         self.orchestrator_done = False
         self.future = None
+        self.before_dispatch = None
 
     def check(self):
         if self.cancelled.is_set():
@@ -56,6 +57,9 @@ class OperationContext:
         self.guard_input()
         self.change(in_flight_step=index, dispatch='sent', uncertain_step=index)
         # Persistence can block. Recheck cancellation after the durable write.
+        self.guard_input()
+        if self.before_dispatch is not None:
+            self.before_dispatch(index)
         self.guard_input()
 
     def completed(self, index, method):

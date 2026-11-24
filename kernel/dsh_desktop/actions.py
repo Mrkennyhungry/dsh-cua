@@ -4,7 +4,7 @@ from pathlib import Path
 import time
 
 from .operations import Cancelled
-from .conditions import Conditions, validate_condition
+from .conditions import Conditions, TransientWatcher, validate_condition
 from .targets import RuntimeFault
 
 
@@ -85,9 +85,10 @@ class ActionDispatcher:
                 raise ValueError('expect.after_step is outside this batch')
             if not _integer(expect.get('timeout_ms', 5000), 100, 30000):
                 raise ValueError('expect.timeout_ms must be 100..30000')
-            if expect.get('transient'):
-                # P5 installs the pre-armed watcher through this same hook.
-                raise RuntimeFault('UNSUPPORTED_CONDITION', 'Transient condition watcher is unavailable')
+            if 'transient' in expect and not isinstance(expect['transient'], bool):
+                raise ValueError('expect.transient must be boolean')
+            if expect.get('transient') and expect['kind'] != 'text':
+                raise ValueError('Transient expectations require a text condition')
             validate_condition({key: value for key, value in expect.items() if key not in ('after_step', 'timeout_ms', 'transient')})
 
     def run(self, context, arguments):
@@ -111,7 +112,16 @@ class ActionDispatcher:
         with context.hold(runtime.operations.target_lock(target)):
             previous = self._boundary(owner, target_id)
             for index, step in enumerate(arguments['steps']):
+                watcher = None
+                watcher_slot = False
                 try:
+                    expect = arguments.get('expect')
+                    watch_step = (expect and expect.get('transient') and
+                                  index == expect.get('after_step', len(arguments['steps']) - 1))
+                    if watch_step:
+                        while not runtime._transient_lock.acquire(timeout=0.05):
+                            context.check()
+                        watcher_slot = True
                     with context.hold(runtime._input_lock):
                         context.check()
                         target = runtime.resolve_target(owner, target_id)
@@ -119,6 +129,10 @@ class ActionDispatcher:
                             from .game.window import is_foreground_target
                             if not is_foreground_target(target.handle):
                                 runtime.window.force_foreground(target.handle)
+                        if watch_step:
+                            watcher_slot = False
+                            watcher = TransientWatcher(runtime, context, target, expect, lock_held=True)
+                            context.before_dispatch = watcher.dispatch
                         method = self._step(context, target, oid, index, step)
                         context.completed(index, method)
                         time.sleep(0.03)
@@ -134,18 +148,18 @@ class ActionDispatcher:
                         last = index == len(arguments['steps']) - 1
                         if last or current != previous:
                             result.update(self._readback(owner, target_id, baseline))
-                    if current != previous and not last:
-                        result.update(outcome='interrupted', dispatch='partial', stopped_at=index + 1,
-                                      reason='target_boundary_changed', next_action='observe')
-                        break
                     expect = arguments.get('expect')
                     if expect and index == expect.get('after_step', len(arguments['steps']) - 1):
                         # Keep target order, release physical input while waiting.
-                        result.update(self._expect(context, target_id, oid, expect))
+                        result.update(watcher.wait() if watcher else self._expect(context, target_id, oid, expect))
                         if result['expectation']['status'] != 'met':
                             result.update(success=False, outcome='interrupted', dispatch='partial' if not last else 'sent',
                                           stopped_at=index + 1, error={'code': 'EXPECTATION_TIMEOUT', 'message': 'Condition did not become true'})
                             break
+                    if current != previous and not last:
+                        result.update(outcome='interrupted', dispatch='partial', stopped_at=index + 1,
+                                      reason='target_boundary_changed', next_action='observe')
+                        break
                     previous = current
                 except Cancelled:
                     result.update(self._readback(owner, target_id, baseline))
@@ -155,6 +169,12 @@ class ActionDispatcher:
                     result.update(self._readback(owner, target_id, baseline))
                     context.change(result=result, stopped_at=index)
                     raise
+                finally:
+                    context.before_dispatch = None
+                    if watcher is not None:
+                        watcher.close()
+                    elif watcher_slot:
+                        runtime._transient_lock.release()
         return result
 
     def _readback(self, owner, target_id, baseline):

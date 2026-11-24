@@ -20,7 +20,7 @@ const POLL_INTERVAL_MS = 500
 // /health.protocol: the plugin refuses to drive a kernel that speaks an older
 // contract, because the missing endpoints would surface as bare 404s.
 export const REQUIRED_PROTOCOL = 2
-const REQUIRED_CAPABILITIES = ['runtime', 'windows', 'capture', 'uia', 'web', 'lazy_vision']
+const REQUIRED_CAPABILITIES = ['runtime', 'windows', 'capture', 'uia', 'web', 'lazy_vision', 'unified_runtime']
 
 function packageRoot() {
   // The plugin ships flat: kernel.js sits at the package root, so the package

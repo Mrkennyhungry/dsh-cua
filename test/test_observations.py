@@ -91,6 +91,34 @@ class ObservationTests(unittest.TestCase):
 
 
 class WorkerTests(unittest.TestCase):
+    def test_apartment_startup_accepts_two_calls_with_bounded_admission(self):
+        import pythoncom
+        initialize = pythoncom.CoInitialize
+        entered, release = threading.Event(), threading.Event()
+        worker = ApartmentWorker('startup-uia')
+        def delayed_initialize():
+            entered.set()
+            release.wait(2)
+            initialize()
+        try:
+            with mock.patch.object(pythoncom, 'CoInitialize', side_effect=delayed_initialize):
+                with ThreadPoolExecutor(max_workers=2) as pool:
+                    first = pool.submit(worker.call, lambda: 1)
+                    self.assertTrue(entered.wait(1))
+                    second = pool.submit(worker.call, lambda: 2)
+                    deadline = time.monotonic() + 1
+                    while worker._queue.qsize() < 2 and time.monotonic() < deadline:
+                        time.sleep(0.001)
+                    self.assertEqual(worker._queue.qsize(), 2)
+                    with self.assertRaises(RuntimeFault) as error:
+                        worker.call(lambda: 3)
+                    self.assertEqual(error.exception.code, 'BACKEND_BUSY')
+                    release.set()
+                    self.assertEqual([first.result(timeout=1), second.result(timeout=1)], [1, 2])
+        finally:
+            release.set()
+            worker.shutdown()
+
     def test_blocked_provider_uses_one_thread_and_one_bounded_queue(self):
         worker = ApartmentWorker('test-uia')
         started, release = threading.Event(), threading.Event()

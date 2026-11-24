@@ -29,6 +29,13 @@ def child_window(unique, event_log):
             with open(event_log, 'a', encoding='utf-8') as stream:
                 stream.write(json.dumps({'saved': value}) + '\n')
             return 0
+        if message == win32con.WM_COMMAND and (wparam & 65535) == 105:
+            win32gui.SetWindowText(win32gui.GetDlgItem(hwnd, 106), 'Native transient saved')
+            threading.Timer(0.6, lambda: win32gui.PostMessage(hwnd, win32con.WM_APP + 18, 0, 0)).start()
+            return 0
+        if message == win32con.WM_APP + 18:
+            win32gui.SetWindowText(win32gui.GetDlgItem(hwnd, 106), 'Native transient idle')
+            return 0
         if message == win32con.WM_CLOSE:
             win32gui.MessageBox(hwnd, 'Preserved fixture changes', 'P4 save prompt ' + unique, win32con.MB_OKCANCEL)
             return 0
@@ -59,6 +66,9 @@ def child_window(unique, event_log):
     win32gui.CreateWindow('Button', 'Save fixture', style, 20, 155, 160, 32, hwnd, 103, window.hInstance, None)
     win32gui.CreateWindow('Static', 'Pending', win32con.WS_CHILD | win32con.WS_VISIBLE,
                           20, 210, 500, 32, hwnd, 104, window.hInstance, None)
+    win32gui.CreateWindow('Button', 'Show native toast', style, 300, 155, 180, 32, hwnd, 105, window.hInstance, None)
+    win32gui.CreateWindow('Static', 'Native transient idle', win32con.WS_CHILD | win32con.WS_VISIBLE,
+                          300, 195, 220, 32, hwnd, 106, window.hInstance, None)
     win32gui.ShowWindow(hwnd, win32con.SW_SHOWNORMAL)
     win32gui.PumpMessages()
 
@@ -82,6 +92,7 @@ HTML = '''<!doctype html><meta charset="utf-8"><title>P4 form</title>
 <button id="click" onclick="count++; document.querySelector('output').textContent='saved '+count"
  oncontextmenu="event.preventDefault(); right++;">保存</button>
 <button id="hover" onmouseover="hovered++">悬停</button><output>pending</output>
+<button id="toast" onclick="const el=document.createElement('div');el.textContent='Browser transient saved';document.body.append(el);setTimeout(()=>el.remove(),120)">短提示</button>
 <button id="modal" onclick="document.querySelector('dialog').showModal()">弹窗</button>
 <dialog><p>确认内容</p><button onclick="this.parentElement.close()">关闭弹窗</button></dialog>
 <button id="nav" onclick="location.href='/next'">导航</button>
@@ -156,14 +167,22 @@ def act(target, observed, steps, **extra):
 
 
 try:
+    native = None
     for _ in range(100):
         hwnd = win32gui.FindWindow(None, 'P4 actions ' + unique)
         if hwnd:
-            break
+            try:
+                native = runtime.open_target('a', hwnd=hwnd)
+                break
+            except RuntimeFault as error:
+                if error.code != 'TARGET_CLOSED':
+                    raise
         time.sleep(0.1)
-    assert hwnd
-    native = runtime.open_target('a', hwnd=hwnd)
-    native_observed = observe(native)
+    assert native is not None, 'Owned fixture window did not become available'
+    native_open = runtime.open('a', 'open-native', {'target_id': native.target_id, 'image': False})
+    assert native_open['status'] == 'completed' and native_open['target_id'] == native.target_id, native_open
+    native_observed = native_open['observation']
+    report['open_native_initial_observation'] = 1
     result, _ = act(native, native_observed, [
         {'action': 'input', 'target': ref(native_observed, role='textbox'), 'text': '中文内容', 'mode': 'replace'},
         {'action': 'check', 'target': ref(native_observed, 'Urgent'), 'checked': True},
@@ -174,6 +193,13 @@ try:
     assert win32gui.SendMessage(win32gui.GetDlgItem(hwnd, 101), win32con.BM_GETCHECK, 0, 0) == 1
     assert win32gui.SendMessage(win32gui.GetDlgItem(hwnd, 102), win32con.CB_GETCURSEL, 0, 0) == 1
     assert 'Saved 中文内容' in result['observation']['text'], result
+    observed = observe(native)
+    toast, _ = act(native, observed, [{'action': 'click', 'target': ref(observed, 'Show native toast')}],
+                   expect={'kind': 'text', 'text': 'Native transient saved', 'transient': True, 'timeout_ms': 3000})
+    native_status = runtime.operations.status('a', toast['operation_id'])
+    assert toast['expectation']['status'] == native_status['expectation']['status'] == 'met', toast
+    assert toast['expectation']['evidence']['source'] == 'uia', toast
+    report['native_transient'] = toast['expectation']
     report['native_form_steps'] = 4
     native_b = runtime.open_target('b', hwnd=hwnd)
     first_observation = observe(native)
@@ -185,7 +211,8 @@ try:
                 {'target_id': selected.target_id, 'observation_id': snapshot['observation_id'], 'steps': [
                     {'action': 'input', 'target': ref(snapshot, role='textbox'), 'text': owner, 'mode': 'replace'},
                     {'action': 'click', 'target': ref(snapshot, 'Save fixture')}]}))
-        assert all(request.result()['status'] == 'completed' for request in requests)
+        concurrent = [request.result() for request in requests]
+        assert all(result['status'] == 'completed' for result in concurrent), concurrent
     logs = [json.loads(line)['saved'] for line in (home / 'native-events.jsonl').read_text(encoding='utf-8').splitlines()]
     assert sorted(logs[-2:]) == ['a', 'b'], logs
     report['concurrent_native_owner_values'] = logs[-2:]
@@ -207,8 +234,16 @@ try:
     assert prompt and win32gui.IsWindow(hwnd)
     win32gui.PostMessage(prompt, win32con.WM_COMMAND, win32con.IDCANCEL, 0)
     report['native_modal_preserved'] = 1
-    target = runtime.open_target('a', url=f'http://127.0.0.1:{server.server_port}/', call_id='browser')
-    observed = observe(target)
+    browser_args = {'url': f'http://127.0.0.1:{server.server_port}/'}
+    opened = runtime.open('a', 'open-browser', browser_args)
+    while opened['status'] in ('accepted', 'running'):
+        opened = runtime.operations.status('a', opened['operation_id'], follow_ms=1000)
+    assert opened['status'] == 'completed' and opened['outcome'] == 'opened', opened
+    replay = runtime.open('a', 'open-browser', browser_args)
+    assert replay['operation_id'] == opened['operation_id'] and replay['target_id'] == opened['target_id']
+    target = runtime.resolve_target('a', opened['target_id'])
+    observed = opened['observation']
+    report['open_browser_initial_observation_and_replay'] = 1
     attachment = home / 'upload.txt'
     attachment.write_text('fixture attachment', encoding='utf-8')
     result, arguments = act(target, observed, [
@@ -254,6 +289,30 @@ try:
                     expect={'kind': 'text', 'text': 'saved 3', 'timeout_ms': 1000})
     assert result['expectation']['status'] == 'met'
     report['expectation_samples'] = result['expectation']['samples']
+    observed = observe(target)
+    toast, _ = act(target, observed, [{'action': 'click', 'target': ref(observed, '短提示')}],
+                   expect={'kind': 'text', 'text': 'Browser transient saved', 'transient': True, 'timeout_ms': 3000})
+    browser_status = runtime.operations.status('a', toast['operation_id'])
+    assert toast['expectation']['status'] == browser_status['expectation']['status'] == 'met', toast
+    assert toast['expectation']['evidence']['source'] == 'dom', toast
+    report['browser_transient'] = toast['expectation']
+    observed = observe(target)
+    cancelled_watch = runtime.act('a', 'cancel-transient', {'target_id': target.target_id,
+        'observation_id': observed['observation_id'], 'steps': [{'action': 'hover', 'target': ref(observed, '悬停')}],
+        'expect': {'kind': 'text', 'text': 'never-transient-fixture', 'transient': True, 'timeout_ms': 5000}}, budget_ms=0)
+    deadline = time.monotonic() + 5
+    while True:
+        running_watch = runtime.operations.status('a', cancelled_watch['operation_id'])
+        if running_watch['completed_steps']:
+            break
+        assert time.monotonic() < deadline, running_watch
+        time.sleep(0.02)
+    runtime.operations.stop('a', cancelled_watch['operation_id'])
+    stopped_watch = runtime.operations.status('a', cancelled_watch['operation_id'], follow_ms=5000)
+    assert stopped_watch['status'] == 'cancelled', stopped_watch
+    remaining = runtime.browser.call(lambda: target.handle[1].evaluate("Object.keys(window).filter(k => k.startsWith('__dsh_watch_')).length"))
+    assert remaining == 0, remaining
+    report['transient_cancelled_and_cleaned'] = 1
     before = runtime.browser.call(browser_state)['count']
     observed = observe(target)
     timeout_args = {'target_id': target.target_id, 'observation_id': observed['observation_id'], 'steps': [
@@ -338,6 +397,7 @@ try:
 except BaseException:
     import traceback
     (home / 'failure.txt').write_text(traceback.format_exc(), encoding='utf-8')
+    (home / 'partial-report.json').write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')
     raise
 finally:
     prompt = win32gui.FindWindow(None, 'P4 save prompt ' + unique)

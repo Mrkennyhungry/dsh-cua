@@ -26,7 +26,9 @@ from . import ledger
 # Captured once at import: the health response must describe loaded code, not
 # whatever files happen to be on disk after an update.
 _SOURCE_ROOT = Path(__file__).resolve().parent
-_BUILD = hashlib.sha256(b"".join((_SOURCE_ROOT / name).read_bytes() for name in ("runtime.py", "dsh_bridge.py", "desktop_tools.py"))).hexdigest()[:16]
+_BUILD = hashlib.sha256(b"".join((_SOURCE_ROOT / name).read_bytes() for name in
+    ("runtime.py", "dsh_bridge.py", "desktop_tools.py", "actions.py", "conditions.py", "observations.py",
+     "operations.py", "worker.py", "browser.py", "version.py"))).hexdigest()[:16]
 _INPUT_REVISION = hashlib.sha256((_SOURCE_ROOT / 'game' / 'input.py').read_bytes()).hexdigest()[:16]
 
 # Playwright is thread-affine inside web_tools: every web call must run on the
@@ -807,6 +809,10 @@ def create_router(runtime, *, legacy=None) -> APIRouter:
             if not task.done():
                 cancelled.set()
 
+    @router.post('/runtime/open')
+    async def runtime_open(request: Request, payload: dict, owner: str = Depends(authorize)):
+        return await runtime_request(request, owner, 'open', payload)
+
     @router.post('/runtime/act')
     async def runtime_act(request: Request, payload: dict, owner: str = Depends(authorize)):
         return await runtime_request(request, owner, 'act', payload)
@@ -834,7 +840,13 @@ def create_router(runtime, *, legacy=None) -> APIRouter:
         operation_id = payload.get('operation_id')
         request_key = payload.get('request_key')
         if not operation_id and not request_key:
-            return {'success': True, 'epoch': runtime.epoch, 'initialized_backends': runtime.initialized_backends(),
+            from .version import __version__
+            return {'success': True, 'epoch': runtime.epoch, 'version': __version__, 'build': _BUILD,
+                    'initialized_backends': runtime.initialized_backends(),
+                    'workers': {'browser_initialized': runtime.browser.thread_id is not None,
+                                'uia_running': runtime.observations.uia.running,
+                                'transient_uia_running': runtime._transient_worker.running},
+                    'input_busy': runtime._input_lock.locked(),
                     'operations': runtime.operations.journal.active(owner)}
         cancelled = threading.Event()
         task = asyncio.create_task(asyncio.to_thread(runtime.operations.status, owner, operation_id,
@@ -885,7 +897,7 @@ def create_router(runtime, *, legacy=None) -> APIRouter:
                 "execution_enabled": True,
                 "delegated_tasks": legacy is not None,
                 "build": _BUILD, "epoch": runtime.epoch,
-                "capabilities": ["runtime", "windows", "capture", "uia", "web", "lazy_vision"],
+                "capabilities": ["runtime", "windows", "capture", "uia", "web", "lazy_vision", "unified_runtime"],
                 "initialized_backends": runtime.initialized_backends(),
                 "parser_initializations": runtime.parser_initializations,
                   "bridge": {"pid": os.getpid(), "source_root": str(_SOURCE_ROOT),

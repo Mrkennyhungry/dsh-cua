@@ -1,7 +1,13 @@
 import { ownerOf } from './bridge-client.js'
 
 export function actionForTool(name, args = {}) {
+  if (name === 'doraemon_act' && args.steps?.length) {
+    const step = args.steps[0]
+    return actionForTool(`doraemon_${step.action}`, step)
+  }
+  if (name === 'doraemon_observe' || name === 'doraemon_wait') return 'observe'
   if (args.button === 'right' && name.includes('click')) return 'right_click'
+  if (name === 'doraemon_input') return 'type'
   for (const [part, action] of [['right_click','right_click'],['click','click'],['invoke','click'],['type','type'],['key','key'],['scroll','scroll'],['swipe','drag'],['drag','drag'],['analyze','observe'],['uia','observe'],['web','observe']]) {
     if (name.includes(part)) return action
   }

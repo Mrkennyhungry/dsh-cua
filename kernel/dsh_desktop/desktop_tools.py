@@ -3507,7 +3507,7 @@ def _window_process_ids(hwnd: int, pid: int) -> set[int]:
 
 
 @tool("启动已安装的应用，并等待可归属的新窗口；无法确认时返回 launch_uncertain，不要盲目重复启动。")
-def desktop_launch_app(shortcut_path: str, *, scoped: bool = False, scope_owner: str = "") -> dict:
+def desktop_launch_app(shortcut_path: str, *, scoped: bool = False, scope_owner: str = "", arguments: list[str] | None = None) -> dict:
     p = Path(shortcut_path or "").expanduser()
     if p.suffix.lower() not in (".lnk", ".exe"):
         return {"success": False, "error": "仅允许启动 .lnk 快捷方式或系统内置 .exe"}
@@ -3533,6 +3533,10 @@ def desktop_launch_app(shortcut_path: str, *, scoped: bool = False, scope_owner:
             return {"success": False, "error": f"快捷方式解析失败: {exc}"}
         if not target_exe or not _launch_target_allowed(target_exe):
             return {"success": False, "error": f"TARGET_NOT_ALLOWED: 快捷方式目标不在允许目录: {target_exe}"}
+
+    if arguments:
+        import subprocess
+        lnk_args = ' '.join(filter(None, (lnk_args, subprocess.list2cmdline(arguments))))
 
     started = time.monotonic()
     wall_started = time.time()

@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.5.0] - 2026-11-24
+
+### Added
+
+- Add six unified desktop tools with operation tracking, initial and post-action observations, and DSH image attachments.
+- Capture action-triggered transient text through a pre-armed DOM observer or bounded UIA sampling.
+
+### Changed
+
+- Require the unified runtime capability when adopting a kernel and report its loaded build and version in runtime status.
+- Move legacy Host tool registrations behind a separate migration module while the default entry registers six tools.
+
+### Fixed
+
+- Track open operations on their backend thread so cancellation keeps in-flight navigation and input locks observable.
+- Admit two UIA calls consistently during apartment startup while preserving bounded backpressure.
+- Return bounded argument validation details and document the required input mode and top-level wait timeout.
+- Map unified observations, waits and action steps to the companion's existing feedback poses.
+
 ## [0.4.19] - 2026-11-24
 
 ### Added

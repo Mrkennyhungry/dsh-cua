@@ -41,7 +41,32 @@ export function extractFrames(buffer) {
  * A 404 almost always means the endpoint postdates the running kernel. Say that
  * instead of leaving a bare status for the user to interpret.
  */
-function httpFailure(status, path) {
+async function httpFailure(response, path) {
+  const status = response.status
+  if (status === 422 && response.body) {
+    const reader = response.body.getReader()
+    const chunks = []
+    let size = 0
+    try {
+      while (true) {
+        const { value, done } = await reader.read()
+        if (done) break
+        size += value.byteLength
+        if (size > 4096) break
+        chunks.push(value)
+      }
+      if (size <= 4096) {
+        const detail = JSON.parse(Buffer.concat(chunks)).detail
+        if (typeof detail === 'string') return new Error(`Desktop bridge HTTP 422; ${detail}`)
+      }
+    } catch {
+      // Keep the stable HTTP error when an invalid response has no usable detail.
+    } finally {
+      await reader.cancel().catch(() => {})
+    }
+  } else {
+    await response.body?.cancel().catch(() => {})
+  }
   const hint = status === 404
     ? `; ${path} does not exist on the running kernel, which usually means the kernel is older than this plugin — upgrade it with \`update the DSH plugin package\``
     : ''
@@ -73,8 +98,7 @@ export function createBridge(config, transport = fetch, options = {}) {
       body: payload, signal: combined, redirect: 'error',
     })
     if (!response.ok) {
-      await response.body?.cancel()
-      throw httpFailure(response.status, path)
+      throw await httpFailure(response, path)
     }
     if (image && response.headers.get('content-type')?.split(';')[0].trim().toLowerCase() !== 'image/jpeg') {
       await response.body?.cancel()
@@ -162,8 +186,7 @@ export function createBridge(config, transport = fetch, options = {}) {
       redirect: 'error',
     })
     if (!response.ok) {
-      await response.body?.cancel()
-      throw httpFailure(response.status, path)
+      throw await httpFailure(response, path)
     }
     const reader = response.body.getReader()
     const decoder = new TextDecoder()

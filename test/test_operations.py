@@ -1,4 +1,5 @@
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import nullcontext
 from pathlib import Path
 import tempfile
 import threading
@@ -12,7 +13,7 @@ from unittest import mock
 
 from dsh_desktop import input_gate
 from dsh_desktop.actions import ActionDispatcher
-from dsh_desktop.conditions import Conditions, validate_condition
+from dsh_desktop.conditions import Conditions, TransientWatcher, validate_condition
 from dsh_desktop.journal import OperationJournal
 from dsh_desktop.operations import OperationManager, Cancelled
 from dsh_desktop.targets import RuntimeFault
@@ -123,6 +124,60 @@ class OperationTests(unittest.TestCase):
         self.manager.shutdown()
         self.directory.cleanup()
 
+    def test_open_navigates_once_and_returns_initial_observation(self):
+        self.runtime.operations = self.manager
+        self.runtime._input_lock = threading.Lock()
+        self.runtime.browser = SimpleNamespace(call=lambda function, **kwargs: function())
+        self.runtime.open_target = mock.Mock(return_value=SimpleNamespace(target_id='t1', kind='browser', identity=('tab',)))
+        self.runtime.observations = mock.Mock()
+        self.runtime.observations.observe.return_value = {'success': True, 'observation': {'observation_id': 'o1'}}
+        arguments = {'url': 'https://example.test', 'image': False}
+        first = DesktopRuntime.open(self.runtime, 'a', 'open-key', arguments)
+        replay = DesktopRuntime.open(self.runtime, 'a', 'open-key', arguments)
+        self.assertEqual(first['status'], 'completed')
+        self.assertEqual(first['outcome'], 'opened')
+        self.assertEqual(first['target_id'], 't1')
+        self.assertEqual(first['observation']['observation_id'], 'o1')
+        self.assertEqual(first['operation_id'], replay['operation_id'])
+        self.runtime.open_target.assert_called_once_with('a', url='https://example.test', target_id=None, call_id='open-key')
+        self.runtime.observations.observe.assert_called_once_with('a', 't1', image=False)
+
+    def test_open_rejects_conflicting_or_invalid_arguments(self):
+        self.runtime.operations = self.manager
+        for arguments in ({}, {'app': 'notepad', 'url': 'https://example.test'},
+                          {'connect': 'configured', 'target_id': 't'}, {'args': []},
+                          {'url': 'https://example.test', 'image': 1}):
+            with self.subTest(arguments=arguments), self.assertRaises(ValueError):
+                DesktopRuntime.open(self.runtime, 'a', 'key', arguments)
+
+    def test_open_tracks_cancelled_backend_until_navigation_returns(self):
+        self.runtime.operations = self.manager
+        self.runtime._input_lock = threading.Lock()
+        entered, release = threading.Event(), threading.Event()
+        worker = ApartmentWorker('open-fixture')
+        self.runtime.browser = SimpleNamespace(call=worker.call)
+        self.runtime.observations = mock.Mock()
+        def navigate(*args, **kwargs):
+            entered.set()
+            release.wait(3)
+            return SimpleNamespace(target_id='t1', kind='browser', identity=('tab',))
+        self.runtime.open_target = navigate
+        try:
+            opened = DesktopRuntime.open(self.runtime, 'a', 'open-cancel', {'url': 'https://example.test'}, budget_ms=30)
+            self.assertTrue(entered.wait(1))
+            context = self.manager._contexts[opened['operation_id']]
+            self.assertTrue(context.backend_running)
+            self.manager.stop('a', opened['operation_id'])
+            self.assertTrue(self.runtime._input_lock.locked())
+            release.set()
+            result = self.manager.status('a', opened['operation_id'], follow_ms=2000)
+            self.assertEqual(result['status'], 'cancelled')
+            self.assertEqual(result['completed_steps'], [0])
+            self.runtime.observations.observe.assert_not_called()
+        finally:
+            release.set()
+            worker.shutdown()
+
     def test_wait_timeout_and_idempotent_replay(self):
         self.runtime.operations = self.manager
         arguments = {'target_id': 't', 'condition': {'kind': 'text', 'text': 'done'}, 'timeout_ms': 100}
@@ -188,6 +243,7 @@ class OperationTests(unittest.TestCase):
 
     def test_backend_timeout_revokes_actual_worker_and_keeps_input_lock_until_return(self):
         worker = ApartmentWorker('operation-test-uia')
+        worker.call(lambda: None)
         started, release = threading.Event(), threading.Event()
         lock, late_inputs = threading.Lock(), []
         def execute(context):
@@ -344,6 +400,55 @@ class OperationTests(unittest.TestCase):
 
 
 class ActionValidationTests(unittest.TestCase):
+    def test_transient_watcher_is_armed_before_dispatch_and_closed(self):
+        order = []
+        runtime = mock.Mock()
+        target = SimpleNamespace(kind='browser')
+        runtime.resolve_target.return_value = target
+        runtime.observations.get.return_value = SimpleNamespace(metadata={})
+        context = mock.Mock()
+        context.owner = 'a'
+        context.hold.side_effect = lambda _lock: nullcontext()
+        dispatcher = ActionDispatcher(runtime)
+        dispatcher._boundary = mock.Mock(return_value=('unchanged',))
+        dispatcher._readback = mock.Mock(return_value={})
+        def step(*_args):
+            order.append('step')
+            context.before_dispatch(0)
+            return 'dom_click'
+        dispatcher._step = step
+        watcher = mock.Mock()
+        watcher.dispatch.side_effect = lambda _index: order.append('dispatch')
+        watcher.wait.return_value = {'expectation': {'status': 'met'}}
+        watcher.close.side_effect = lambda: order.append('closed')
+        def arm(*_args, **_kwargs):
+            order.append('armed')
+            return watcher
+        arguments = {'target_id': 't', 'observation_id': 'o', 'steps': [{'action': 'click', 'target': {'ref': 'e'}}],
+                     'expect': {'kind': 'text', 'text': 'saved', 'transient': True}}
+        with mock.patch('dsh_desktop.actions.TransientWatcher', side_effect=arm):
+            result = dispatcher._batch(context, arguments)
+        self.assertEqual(result['expectation']['status'], 'met')
+        self.assertEqual(order, ['armed', 'step', 'dispatch', 'closed'])
+        self.assertIsNone(context.before_dispatch)
+
+    def test_transient_native_watcher_records_reappearance_after_dispatch(self):
+        runtime = SimpleNamespace(_transient_lock=threading.Lock())
+        context = mock.Mock()
+        context.cancelled = threading.Event()
+        target = SimpleNamespace(kind='window')
+        with mock.patch.object(TransientWatcher, '_sample_native', side_effect=[True, False, True]):
+            watcher = TransientWatcher(runtime, context, target, {'kind': 'text', 'text': 'saved', 'timeout_ms': 1000})
+            try:
+                watcher.dispatch(0)
+                result = watcher.wait()
+            finally:
+                watcher.close()
+        self.assertEqual(result['expectation']['status'], 'met')
+        self.assertTrue(result['expectation']['baseline_present'])
+        self.assertEqual(result['expectation']['evidence']['source'], 'uia')
+        self.assertFalse(runtime._transient_lock.locked())
+
     def test_invalid_batch_and_point_inputs_fail_before_execution(self):
         base = {'target_id': 't', 'observation_id': 'o'}
         invalid = [[], [{'action': 'close'}] * 9, [{'action': 'click', 'target': {'ref': 'e', 'x': 1}}],

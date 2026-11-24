@@ -1,0 +1,270 @@
+{
+  "operations": [
+    {
+      "id": "op_28be1a25544a41fb8cf2633e33f97f3d",
+      "status": "completed",
+      "steps": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "dispatch": "sent",
+      "elapsed_ms": 2426.32,
+      "response_bytes": 6344
+    },
+    {
+      "id": "op_10ac16cd177d45738c542b195fc6a7d6",
+      "status": "completed",
+      "steps": [
+        0
+      ],
+      "dispatch": "sent",
+      "elapsed_ms": 606.764,
+      "response_bytes": 6356
+    },
+    {
+      "id": "op_9b2fa4084fd64849ba65d93b9c5c90a9",
+      "status": "completed",
+      "steps": [
+        0
+      ],
+      "dispatch": "sent",
+      "elapsed_ms": 1299.653,
+      "response_bytes": 3284
+    },
+    {
+      "id": "op_a28d52f54d9c4ae2ae13a53e63d93ef2",
+      "status": "completed",
+      "steps": [
+        0
+      ],
+      "dispatch": "sent",
+      "elapsed_ms": 381.977,
+      "response_bytes": 3283
+    },
+    {
+      "id": "op_d0b55f917027452495fb6cd4fda61473",
+      "status": "completed",
+      "steps": [
+        0
+      ],
+      "dispatch": "partial",
+      "elapsed_ms": 339.716,
+      "response_bytes": 7139
+    },
+    {
+      "id": "op_50bb390c670a4324ac30ee32091183a9",
+      "status": "completed",
+      "steps": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+      ],
+      "dispatch": "sent",
+      "elapsed_ms": 1775.422,
+      "response_bytes": 6043
+    },
+    {
+      "id": "op_d4b262c08b424604af9a4521fe127fbf",
+      "status": "completed",
+      "steps": [
+        0
+      ],
+      "dispatch": "sent",
+      "elapsed_ms": 485.314,
+      "response_bytes": 5588
+    },
+    {
+      "id": "op_76f17fe00f3a42a093eb438778793548",
+      "status": "completed",
+      "steps": [
+        0
+      ],
+      "dispatch": "sent",
+      "elapsed_ms": 461.022,
+      "response_bytes": 5605
+    },
+    {
+      "id": "op_1c747329c2124cc0a5684515f104f6b8",
+      "status": "completed",
+      "steps": [
+        0
+      ],
+      "dispatch": "none",
+      "elapsed_ms": 301.591,
+      "response_bytes": 3340
+    },
+    {
+      "id": "op_08e4ee44091348f6bac51494d654883a",
+      "status": "completed",
+      "steps": [
+        0
+      ],
+      "dispatch": "sent",
+      "elapsed_ms": 595.432,
+      "response_bytes": 3340
+    },
+    {
+      "id": "op_ee0d29f8602546f3b0aa8d07420e556b",
+      "status": "completed",
+      "steps": [
+        0
+      ],
+      "dispatch": "sent",
+      "elapsed_ms": 327.882,
+      "response_bytes": 810
+    },
+    {
+      "id": "op_41cd7c287f9e411a8594539fe617743d",
+      "status": "completed",
+      "steps": [
+        0
+      ],
+      "dispatch": "sent",
+      "elapsed_ms": 502.497,
+      "response_bytes": 5596
+    },
+    {
+      "id": "op_3ca129e51c204e94bc0a30185cf111e8",
+      "status": "completed",
+      "steps": [
+        0
+      ],
+      "dispatch": "sent",
+      "elapsed_ms": 406.306,
+      "response_bytes": 3340
+    },
+    {
+      "id": "op_2573c497fdfe490d880d6139e092c380",
+      "status": "completed",
+      "steps": [
+        0
+      ],
+      "dispatch": "sent",
+      "elapsed_ms": 455.01,
+      "response_bytes": 2349
+    },
+    {
+      "id": "op_dd71973cd6a94cb188dced075d64f20c",
+      "status": "completed",
+      "steps": [
+        0
+      ],
+      "dispatch": "partial",
+      "elapsed_ms": 423.961,
+      "response_bytes": 6011
+    },
+    {
+      "id": "op_94fa2a0dfbb34dbaae7675a9fc0c5b19",
+      "status": "completed",
+      "steps": [
+        0
+      ],
+      "dispatch": "partial",
+      "elapsed_ms": 3166.063,
+      "response_bytes": 1569
+    },
+    {
+      "id": "op_64afd59f01824587b97c9a55b0eea85d",
+      "status": "completed",
+      "steps": [
+        0
+      ],
+      "dispatch": "sent",
+      "elapsed_ms": 306.892,
+      "response_bytes": 5601
+    },
+    {
+      "id": "op_5e40afb2f4b74a23b40c0ebeee934dcf",
+      "status": "completed",
+      "steps": [
+        0
+      ],
+      "dispatch": "partial",
+      "elapsed_ms": 353.695,
+      "response_bytes": 1978
+    },
+    {
+      "id": "op_b0496ba74a254bdd9408b3418e15002c",
+      "status": "completed",
+      "steps": [
+        0
+      ],
+      "dispatch": "sent",
+      "elapsed_ms": 80.397,
+      "response_bytes": 561
+    }
+  ],
+  "models": 0,
+  "caption": 0,
+  "open_native_initial_observation": 1,
+  "native_transient": {
+    "status": "met",
+    "baseline_present": false,
+    "samples": 3,
+    "dispatched_at": "2026-11-24T05:59:20.644225+00:00",
+    "matched_at": "2026-11-24T05:59:20.984228+00:00",
+    "evidence": {
+      "source": "uia",
+      "text": "Native transient saved"
+    }
+  },
+  "native_form_steps": 4,
+  "concurrent_native_owner_values": [
+    "a",
+    "b"
+  ],
+  "native_frame_point_input": 1,
+  "native_modal_preserved": 1,
+  "open_browser_initial_observation_and_replay": 1,
+  "dom_form": {
+    "text": "中文追加",
+    "checked": true,
+    "selected": "上海",
+    "files": 1,
+    "count": 2,
+    "right": 1,
+    "hovered": 1
+  },
+  "response_loss_replay_extra_dispatches": 0,
+  "nested_frame_action": 1,
+  "browser_frame_point_input": 1,
+  "expectation_samples": 1,
+  "browser_transient": {
+    "status": "met",
+    "baseline_present": false,
+    "samples": 4,
+    "dispatched_at": "2026-11-24T05:59:37.775Z",
+    "matched_at": "2026-11-24T05:59:37.800Z",
+    "evidence": {
+      "source": "dom",
+      "text": "Browser transient saved"
+    }
+  },
+  "transient_cancelled_and_cleaned": 1,
+  "expect_timeout_completed_steps": [
+    0
+  ],
+  "input_available_while_waiting": 1,
+  "cancelled_wait_completed_steps": [
+    0
+  ],
+  "frame_drag": {
+    "down": 1,
+    "up": 1
+  },
+  "scroll_ticks": 3,
+  "stale_ref_rejected": 1,
+  "dom_modal_stopped_at": 1,
+  "browser_dialog_preserved_and_dismissed_explicitly": 1,
+  "navigation_stopped_at": 1,
+  "tab_closed": 1,
+  "parser_initializations": 0,
+  "elapsed_ms": 31719.0
+}
