@@ -30,7 +30,9 @@ C:\Users\Admin\Documents\deepseek-harness\default-workspace\dsh-cua
 - 用户很少使用内置自主 Agent、独立工作台、IM、WeCom 和 cron，接受将它们迁出默认运行链和默认发布包。迁移需记录旧入口与数据去向。
 - 用户沿用本机已有的大权限。实现约束集中于真实定位、取消、结果读回、部分完成和恢复，遵循现有插件框架与安装规则。
 
-从 PHASES.md 的 P0 开始。补查每阶段相关源码后实施，按阶段更新进度表及 ACCEPTANCE.md 的执行记录。优先读取真实 DSH 工具 DSL 与图片 renderer 合同，验证图像实际进入模型请求。处理项目测试依赖缺失，保留 optional peers 的包装方式。
+当前进度：P0–P4 已通过验收并提交，P5 进行中（已有独立条件等待、操作桥接与有界图片读取的基础实现），P6、P7 未开始。以 PHASES.md 顶部的阶段表为唯一进度来源。
+
+从 PHASES.md 的 P5 继续，不要从 P0 重做。先读 ACCEPTANCE.md 中 P4 与 P5 的执行记录，确认已通过和仍缺的部分，再补查相关源码后实施。优先读取真实 DSH 工具 DSL 与图片 renderer 合同，验证图像实际进入模型请求。保留 optional peers 的包装方式。
 
 开工前先建立测试基线，不要在全红或无法运行的测试环境上改代码。
 
