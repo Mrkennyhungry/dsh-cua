@@ -1147,12 +1147,16 @@ test('bootstrap installation is discovered without changing PATH or a profile', 
     const python = join(root, 'dsh-desktop', 'venv', 'Scripts', 'python.exe')
     mkdirSync(path.dirname(python), { recursive: true })
     writeFileSync(python, '')
-    // A checkout's real development venv takes priority over the bootstrap.
-    // Give this fixture its own absent development interpreter.
+    const developmentPython = join(root, 'checkout', '.venv', 'Scripts', 'python.exe')
+    mkdirSync(path.dirname(developmentPython), { recursive: true })
+    writeFileSync(developmentPython, '')
     const kernel = createKernel({ port: 65018, tokenEnv: 'DSH_DESKTOP_BRIDGE_TOKEN', repoRoot: join(root, 'checkout'), homeDir: join(root, 'dsh-desktop') })
     assert.equal(kernel.executable().command, python)
     assert.equal(kernel.executable().source, 'bootstrap venv')
     assert.equal(kernel.paths.home, join(root, 'dsh-desktop'))
+    const explicit = createKernel({ port: 65018, tokenEnv: 'DSH_DESKTOP_BRIDGE_TOKEN', pythonPath: developmentPython })
+    assert.equal(explicit.executable().command, developmentPython)
+    assert.equal(explicit.executable().source, 'config.pythonPath')
   } finally {
     if (oldLocal === undefined) delete process.env.LOCALAPPDATA
     else process.env.LOCALAPPDATA = oldLocal

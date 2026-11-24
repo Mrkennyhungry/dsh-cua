@@ -79,3 +79,35 @@ test('an image storage failure preserves dispatched operation data without unusa
   assert.deepEqual(result.observation.frames, [])
   assert.deepEqual(result.observation.elements, [{ ref: 'e1' }])
 })
+
+test('a lost operation response is reconciled by request key without redispatch', async () => {
+  const tools = new Map(), calls = []
+  const signal = new AbortController().signal
+  registerRuntimeTools({}, { async request(path, owner, options) {
+    calls.push({ path, owner, ...options })
+    if (path === '/runtime/act') throw new TypeError('fetch failed after dispatch')
+    return { success: true, operation_id: 'op-original', status: 'completed', completed_steps: [0] }
+  } }, tool => tools.set(tool.name, tool))
+  const result = await tools.get('doraemon_act').execute({ target_id: 't', observation_id: 'o', steps: [{ action: 'close' }] },
+    { callId: 'lost-call', signal, agent: { session: { id: 'session' } } })
+  assert.equal(result.operation_id, 'op-original')
+  assert.deepEqual(calls.map(call => call.path), ['/runtime/act', '/runtime/status'])
+  assert.deepEqual(calls[1].body, { request_key: 'lost-call', follow_ms: 0 })
+  assert.equal(calls[1].owner, calls[0].owner)
+  assert.equal(calls[1].signal, signal)
+})
+
+test('argument failures and caller cancellation never trigger response reconciliation', async () => {
+  for (const cancelled of [false, true]) {
+    const tools = new Map(), controller = new AbortController()
+    let count = 0
+    registerRuntimeTools({}, { async request() {
+      count++
+      if (cancelled) controller.abort()
+      throw cancelled ? new TypeError('fetch aborted') : new Error('Desktop bridge HTTP 422; invalid action')
+    } }, tool => tools.set(tool.name, tool))
+    await assert.rejects(tools.get('doraemon_act').execute({ target_id: 't', observation_id: 'o', steps: [{ action: 'close' }] },
+      { callId: 'call', signal: controller.signal, agent: { session: { id: 'session' } } }))
+    assert.equal(count, 1)
+  }
+})

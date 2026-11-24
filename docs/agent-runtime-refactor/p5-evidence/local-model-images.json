@@ -1,0 +1,206 @@
+{
+  "phase": "P5",
+  "version": "0.5.1",
+  "date": "2026-11-25",
+  "source_commit": "6dd5563",
+  "build": "00cc76531cb0130d",
+  "epoch": "effa36e6ee954638b631f89835a0aab4",
+  "entry": "Installed linked bundle, normal automatic bootstrap interpreter, fresh DSH sessions",
+  "fixture": "Two independent local HTML pages contain only a PNG image with empty alt. Random eight-character strings are present only in image pixels.",
+  "position": "The source 1000x650 card is bottom-right. In the captured 1440x900 browser viewport it is near the horizontal centre and below the vertical centre.",
+  "limitations": [
+    "Each route has one image smoke sample. P7 comparative trials remain pending.",
+    "UI turn tokens, seconds and CNY are rounded display values. Precise billing and separate image price are unavailable.",
+    "Image-request token usage covers the whole request including prior context."
+  ],
+  "results": [
+    {
+      "provider": "wb",
+      "model": "cn:deepseek-v4.1-flash",
+      "expected": "UFHM8K8V",
+      "actual": "UFHM8K8V",
+      "tool_calls": 1,
+      "model_requests": 2,
+      "ui_turn_seconds": 10,
+      "ui_turn_tokens_rounded": 25700,
+      "ui_cost_cny_rounded": 0,
+      "image_request": {
+        "input_tokens": 13461,
+        "cache_read_tokens": 11776,
+        "other_input_tokens": 1685,
+        "output_tokens": 374,
+        "seconds": 4.18,
+        "ttft_seconds": 2.16,
+        "generation_seconds": 2.02,
+        "tokens_per_second": 184.8,
+        "started_at": "2026-11-25T00:31:35.067+08:00"
+      },
+      "status": "PASS",
+      "samples": 1,
+      "correct_characters": 8,
+      "total_characters": 8,
+      "operation_id": "op_084b94277f7c4c5f9f3d035a80f1a856",
+      "observation_id": "o_aece59dacbb543eea703bcc55ce78509",
+      "captured_at": "2026-11-24T16:31:34.499083+00:00",
+      "trace": {
+        "dom": 1,
+        "dom_frames": 1,
+        "uia": 0,
+        "capture": 1,
+        "ocr": 0,
+        "yolo": 0,
+        "caption": 0,
+        "dom_ms": 12.75,
+        "uia_ms": 0,
+        "capture_ms": 54.795,
+        "ocr_ms": 0,
+        "yolo_ms": 0,
+        "elapsed_ms": 78.359
+      },
+      "frames": [
+        {
+          "frame_id": "f_effa36e6ee954638b631f89835a0aab4_30abccc61b1f4a1cb3c06a1ee6527122",
+          "target_id": "t_effa36e6ee954638b631f89835a0aab4_339b7b3bc24647a1a86f99dcec8c6849",
+          "revision": 2,
+          "width": 1366,
+          "height": 854,
+          "source_rect": [
+            0,
+            0,
+            1440,
+            900
+          ],
+          "image_size": [
+            1366,
+            854
+          ],
+          "client_rect": null,
+          "window_rect": null,
+          "crop": null,
+          "dpi": [
+            96,
+            96
+          ],
+          "virtual_origin": [
+            0,
+            0
+          ],
+          "method": "playwright",
+          "coordinate_space": "browser_css",
+          "model_rect": [
+            0,
+            0,
+            1366,
+            854
+          ],
+          "scale": [
+            0.9486111111111111,
+            0.9488888888888889
+          ],
+          "screen_rect": null
+        }
+      ],
+      "dom_elements": 0,
+      "dom_text_characters": 0,
+      "image_count": 1,
+      "image_pixel_area": 1166564,
+      "image_bytes": null,
+      "exact_cost_cny": null,
+      "separate_image_cost_cny": null
+    },
+    {
+      "provider": "wb",
+      "model": "cn:hy4std",
+      "expected": "BZCPAMNX",
+      "actual": "BZCPAMNX",
+      "tool_calls": 2,
+      "model_requests": 3,
+      "ui_turn_seconds": 20,
+      "ui_turn_tokens_rounded": 36100,
+      "ui_cost_cny_rounded": 0.02,
+      "image_request": {
+        "input_tokens": 13200,
+        "cache_read_tokens": 10944,
+        "other_input_tokens": 2256,
+        "output_tokens": 556,
+        "seconds": 11.6,
+        "ttft_seconds": 2.95,
+        "generation_seconds": 8.61,
+        "tokens_per_second": 64.6,
+        "started_at": "2026-11-25T00:33:56.268+08:00"
+      },
+      "status": "PASS",
+      "samples": 1,
+      "correct_characters": 8,
+      "total_characters": 8,
+      "operation_id": "op_a1f02abaf7014f7d869262fa41302381",
+      "observation_id": "o_10fc7b7933a94297998d1fd9f66cbf6e",
+      "captured_at": "2026-11-24T16:33:56.124153+00:00",
+      "trace": {
+        "dom": 1,
+        "dom_frames": 1,
+        "uia": 0,
+        "capture": 1,
+        "ocr": 0,
+        "yolo": 0,
+        "caption": 0,
+        "dom_ms": 11.676,
+        "uia_ms": 0,
+        "capture_ms": 92.109,
+        "ocr_ms": 0,
+        "yolo_ms": 0,
+        "elapsed_ms": 112.017
+      },
+      "frames": [
+        {
+          "frame_id": "f_effa36e6ee954638b631f89835a0aab4_888ccc6b617c4fed95299bb75973fd36",
+          "target_id": "t_effa36e6ee954638b631f89835a0aab4_5910d949a1684aa286691fbf654a84c2",
+          "revision": 2,
+          "width": 1366,
+          "height": 854,
+          "source_rect": [
+            0,
+            0,
+            1440,
+            900
+          ],
+          "image_size": [
+            1366,
+            854
+          ],
+          "client_rect": null,
+          "window_rect": null,
+          "crop": null,
+          "dpi": [
+            96,
+            96
+          ],
+          "virtual_origin": [
+            0,
+            0
+          ],
+          "method": "playwright",
+          "coordinate_space": "browser_css",
+          "model_rect": [
+            0,
+            0,
+            1366,
+            854
+          ],
+          "scale": [
+            0.9486111111111111,
+            0.9488888888888889
+          ],
+          "screen_rect": null
+        }
+      ],
+      "dom_elements": 0,
+      "dom_text_characters": 0,
+      "image_count": 1,
+      "image_pixel_area": 1166564,
+      "image_bytes": null,
+      "exact_cost_cny": null,
+      "separate_image_cost_cny": null
+    }
+  ]
+}

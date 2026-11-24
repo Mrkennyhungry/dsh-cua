@@ -269,11 +269,14 @@ export function createKernel(config, options = {}) {
       }
       return { command: paths.python, args: ['-m', 'dsh_desktop.dsh_bridge_cli'], source: 'config.pythonPath' }
     }
-    if (existsSync(paths.python)) {
-      return { command: paths.python, args: ['-m', 'dsh_desktop.dsh_bridge_cli'], source: 'repoRoot venv' }
-    }
+    // A test venv can inherit the checkout's Low Integrity label on Windows.
+    // Prefer the bootstrap runtime so normal state writes and foreground input
+    // use the interpreter installed for desktop automation.
     if (existsSync(paths.installedPython)) {
       return { command: paths.installedPython, args: ['-m', 'dsh_desktop.dsh_bridge_cli'], source: 'bootstrap venv' }
+    }
+    if (existsSync(paths.python)) {
+      return { command: paths.python, args: ['-m', 'dsh_desktop.dsh_bridge_cli'], source: 'repoRoot venv' }
     }
     throw new Error(
       `Desktop kernel Python environment not found: tried ${paths.python} and ${paths.installedPython}. `

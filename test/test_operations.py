@@ -142,6 +142,45 @@ class OperationTests(unittest.TestCase):
         self.runtime.open_target.assert_called_once_with('a', url='https://example.test', target_id=None, call_id='open-key')
         self.runtime.observations.observe.assert_called_once_with('a', 't1', image=False)
 
+    def test_slow_observe_returns_handle_and_retains_cancelled_worker(self):
+        self.runtime.operations = self.manager
+        self.runtime.targets = mock.Mock()
+        self.runtime.targets.get.return_value = SimpleNamespace(kind='window')
+        worker = ApartmentWorker('observe-fixture')
+        entered, release = threading.Event(), threading.Event()
+        def collect(*args, **kwargs):
+            entered.set()
+            release.wait(3)
+            return {'success': True, 'observation': {'observation_id': 'late'}}
+        self.runtime.observations = SimpleNamespace(uia=worker, observe=mock.Mock(side_effect=collect))
+        try:
+            result = DesktopRuntime.observe(self.runtime, 'a', 'read', {'target_id': 't'}, budget_ms=30)
+            self.assertTrue(entered.wait(1))
+            self.assertEqual(result['status'], 'running')
+            self.assertEqual(result['dispatch'], 'none')
+            self.assertTrue(result['worker_running'])
+            replay = DesktopRuntime.observe(self.runtime, 'a', 'read', {'target_id': 't'}, budget_ms=0)
+            self.assertEqual(result['operation_id'], replay['operation_id'])
+            self.manager.stop('a', result['operation_id'])
+            self.assertEqual(self.manager.status('a', result['operation_id'])['status'], 'cancelling')
+            release.set()
+            final = self.manager.status('a', result['operation_id'], follow_ms=2000)
+            self.assertEqual(final['status'], 'cancelled')
+            self.assertFalse(final['worker_running'])
+            self.assertNotIn('observation', final)
+            self.runtime.observations.observe.assert_called_once()
+        finally:
+            release.set()
+            worker.shutdown()
+
+    def test_observe_rejects_invalid_arguments_before_operation_registration(self):
+        self.runtime.operations = self.manager
+        for arguments in ({'unknown': 1}, {'image': 1}, {'target_id': ''}, {'query': ''},
+                          {'region': {}}, {'cursor': 'o.0.0', 'image': True}):
+            with self.subTest(arguments=arguments), self.assertRaises(ValueError):
+                DesktopRuntime.observe(self.runtime, 'a', 'invalid-read', arguments)
+        self.assertEqual(self.manager.journal.active('a'), [])
+
     def test_open_rejects_conflicting_or_invalid_arguments(self):
         self.runtime.operations = self.manager
         for arguments in ({}, {'app': 'notepad', 'url': 'https://example.test'},
@@ -504,16 +543,17 @@ class ActionValidationTests(unittest.TestCase):
             self.assertEqual(response.headers['content-type'], 'image/jpeg')
             self.assertEqual(client.get('/api/dsh/runtime/frames/f_1', headers={**headers, 'X-DSH-Owner': 'b' * 64}).status_code, 404)
             self.assertEqual(client.get('/api/dsh/runtime/frames/f_1', headers={**headers, 'Authorization': 'Bearer wrong'}).status_code, 401)
-            runtime.observations.observe.return_value = {'success': True, 'targets': []}
-            response = client.post('/api/dsh/runtime/observe', headers=headers, json={'image': False})
+            runtime.observe.return_value = {'success': True, 'targets': []}
+            payload = {'request_key': 'read-1', 'arguments': {'image': False}}
+            response = client.post('/api/dsh/runtime/observe', headers=headers, json=payload)
             self.assertEqual(response.json(), {'success': True, 'targets': []})
-            runtime.observations.observe.assert_called_once_with(owner, image=False)
+            self.assertEqual(runtime.observe.call_args.args, (owner, 'read-1', {'image': False}))
             self.assertEqual(client.post('/api/dsh/runtime/observe', headers=headers, json={'unknown': 1}).status_code, 422)
             self.assertEqual(client.post('/api/dsh/runtime/observe', headers={**headers, 'Authorization': 'Bearer wrong'}, json={}).status_code, 401)
-            runtime.observations.observe.side_effect = ValueError('invalid observation')
-            self.assertEqual(client.post('/api/dsh/runtime/observe', headers=headers, json={}).status_code, 422)
-            runtime.observations.observe.side_effect = RuntimeFault('TARGET_CLOSED', 'fixture closed')
-            response = client.post('/api/dsh/runtime/observe', headers=headers, json={'target_id': 't'})
+            runtime.observe.side_effect = ValueError('invalid observation')
+            self.assertEqual(client.post('/api/dsh/runtime/observe', headers=headers, json=payload).status_code, 422)
+            runtime.observe.side_effect = RuntimeFault('TARGET_CLOSED', 'fixture closed')
+            response = client.post('/api/dsh/runtime/observe', headers=headers, json=payload)
             self.assertEqual(response.json()['error']['code'], 'TARGET_CLOSED')
             runtime.wait.return_value = {'success': True, 'status': 'completed'}
             response = client.post('/api/dsh/runtime/wait', headers=headers,

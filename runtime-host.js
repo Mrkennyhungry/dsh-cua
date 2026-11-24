@@ -34,7 +34,17 @@ export function registerRuntimeTools(ctx, bridge, register) {
     const body = operation ? { request_key: exec.callId, arguments: args } : args
     let result
     try {
-      result = await bridge.request(path, owner, { body, signal: exec.signal, timeoutMs: 70_000 })
+      try {
+        result = await bridge.request(path, owner, { body, signal: exec.signal, timeoutMs: 70_000 })
+      } catch (error) {
+        if (!operation || exec.signal?.aborted ||
+            !(error instanceof TypeError || error instanceof SyntaxError || error?.name === 'TimeoutError')) throw error
+        // A missing response can follow a completed dispatch. Reconcile its
+        // durable identity before offering the caller any further action.
+        result = await bridge.request('/runtime/status', owner, {
+          body: { request_key: exec.callId, follow_ms: 0 }, signal: exec.signal,
+        })
+      }
       const frames = result?.observation?.frames || []
       if (!frames.length) return result
       const store = ctx.get?.('attachments')
@@ -89,7 +99,7 @@ export function registerRuntimeTools(ctx, bridge, register) {
           frame_id: { type: 'string', required: true }, x: { type: 'number', required: true }, y: { type: 'number', required: true },
           width: { type: 'number', required: true }, height: { type: 'number', required: true },
         } },
-      }, path: '/runtime/observe',
+      }, path: '/runtime/observe', operation: true,
     },
     {
       name: 'doraemon_act',

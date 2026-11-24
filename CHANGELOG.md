@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.5.1] - 2026-11-25
+
+### Fixed
+
+- Prefer the bootstrap Python runtime during automatic startup so a checkout test interpreter cannot silently reduce desktop input and state-directory access. Explicit pythonPath retains precedence.
+- Return queryable operations for slow observations and retain truthful worker state through cancellation.
+- Recover lost operation responses by querying the durable request identity before returning their result.
+
 ## [0.5.0] - 2026-11-24
 
 ### Added

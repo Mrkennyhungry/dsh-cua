@@ -116,6 +116,27 @@ class DesktopRuntime:
                                       lambda context: dispatcher.run(context, arguments), budget_ms=budget_ms,
                                       cancelled=cancelled)
 
+    def observe(self, owner, request_key, arguments, *, budget_ms=5000, cancelled=None):
+        ObservationService.validate_arguments(arguments)
+        target_id = arguments.get('target_id')
+        target = self.targets.get(owner, target_id) if target_id else None
+
+        def run(context):
+            call = self.browser.call if target is not None and target.kind == 'browser' else self.observations.uia.call
+
+            def collect():
+                context.check()
+                result = self.observations.observe(owner, **arguments)
+                # A blocked read may finish after stop. Its late result must not
+                # replace the cancellation recorded for this operation.
+                context.check()
+                return result
+
+            return context.backend(call, collect, timeout=120)
+
+        return self.operations.submit(owner, request_key, 'observe', arguments, run,
+                                      budget_ms=budget_ms, cancelled=cancelled)
+
     def open(self, owner, request_key, arguments, *, budget_ms=5000, cancelled=None):
         if not isinstance(arguments, dict) or set(arguments) - {'url', 'app', 'args', 'target_id', 'connect', 'image'}:
             raise ValueError('Unknown open arguments')

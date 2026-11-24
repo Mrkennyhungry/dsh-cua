@@ -263,11 +263,35 @@ class ObservationService:
         right, bottom = left + width / scale_x, top + height / scale_y
         return (math.floor(left), math.floor(top), math.ceil(right) - math.floor(left), math.ceil(bottom) - math.floor(top))
 
-    def observe(self, owner, target_id=None, *, query=None, region=None, cursor=None, image=None):
+    @staticmethod
+    def validate_arguments(arguments):
+        if not isinstance(arguments, dict) or set(arguments) - {'target_id', 'query', 'region', 'cursor', 'image'}:
+            raise ValueError('Unknown observe arguments')
+        image, query = arguments.get('image'), arguments.get('query')
         if image is not None and not isinstance(image, bool):
             raise ValueError('Image must be boolean')
         if query is not None and (not isinstance(query, str) or not query.strip() or len(query) > 500):
             raise ValueError('Query must contain 1 to 500 characters')
+        for key in ('target_id', 'cursor'):
+            if key in arguments and (not isinstance(arguments[key], str) or not arguments[key]):
+                raise ValueError(key + ' must be a nonempty string')
+        region = arguments.get('region')
+        if region is not None:
+            if not isinstance(region, dict) or set(region) != {'frame_id', 'x', 'y', 'width', 'height'}:
+                raise ValueError('Region requires frame_id, x, y, width and height')
+            if not isinstance(region['frame_id'], str) or not region['frame_id']:
+                raise ValueError('Region frame_id must be a nonempty string')
+            if not all(isinstance(region[key], (int, float)) and not isinstance(region[key], bool) and math.isfinite(region[key])
+                       for key in ('x', 'y', 'width', 'height')):
+                raise ValueError('Region coordinates must be finite numbers')
+            if min(region['x'], region['y']) < 0 or min(region['width'], region['height']) <= 0:
+                raise ValueError('Region requires nonnegative origin and positive size')
+        if arguments.get('cursor') and any(arguments.get(key) is not None for key in ('query', 'region', 'image')):
+            raise ValueError('Cursor cannot be combined with query, region or image')
+
+    def observe(self, owner, target_id=None, *, query=None, region=None, cursor=None, image=None):
+        self.validate_arguments({key: value for key, value in dict(target_id=target_id, query=query, region=region,
+                                                                  cursor=cursor, image=image).items() if value is not None})
         if cursor:
             if query is not None or region is not None or image is not None:
                 raise ValueError('Cursor cannot be combined with query, region or image')

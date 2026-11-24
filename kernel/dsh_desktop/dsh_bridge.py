@@ -773,16 +773,8 @@ def create_router(runtime, *, legacy=None) -> APIRouter:
         return Response(content=data, media_type='image/jpeg', headers={'Cache-Control': 'no-store'})
 
     @router.post('/runtime/observe')
-    def runtime_observe(payload: dict, owner: str = Depends(authorize)):
-        from .targets import RuntimeFault
-        if set(payload) - {'target_id', 'query', 'region', 'cursor', 'image'}:
-            raise HTTPException(422, 'Unknown observe arguments')
-        try:
-            return runtime.observations.observe(owner, **payload)
-        except ValueError as error:
-            raise HTTPException(422, str(error)) from error
-        except RuntimeFault as error:
-            return {'success': False, 'error': {'code': error.code, 'message': str(error)}}
+    async def runtime_observe(request: Request, payload: dict, owner: str = Depends(authorize)):
+        return await runtime_request(request, owner, 'observe', payload)
 
     async def runtime_request(request, owner, kind, payload):
         from .operations import Cancelled

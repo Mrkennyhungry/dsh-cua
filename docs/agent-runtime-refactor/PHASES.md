@@ -21,7 +21,7 @@
 | P2 | 专用持久浏览器、目标/帧身份与统一坐标 | P1 | PASS，c5ed0ec |
 | P3 | 统一观察、元素 ref、按需感知 | P2 | PASS，24ba0ca |
 | P4 | 统一动作、读回、短批量与恢复 | P3 | PASS，数值见 ACCEPTANCE 第 14 节 |
-| P5 | 六工具 Host、图片输出、条件等待与管理 | P0、P4 | 实施中，六工具与独立会话已验证，指定双模型路由待配置 |
+| P5 | 六工具 Host、图片输出、条件等待与管理 | P0、P4 | PASS，0.5.1，本机双模型与完整实测见 ACCEPTANCE 第 15 节 |
 | P6 | 默认依赖与历史实现清理、安装迁移 | P5 | 待实施 |
 | P7 | 两模型回归、性能记录、发行验收 | P6 | 待实施 |
 
@@ -163,10 +163,10 @@
 ### 完成条件
 
 - [x] 新 DSH 会话只发现六个默认模型工具，cua-refactor 的实际工具轨迹核对 6 个。
-- [x] doraemon_status 独立返回 0.5.0/build，browser/UIA/transient worker 均未初始化。
+- [x] doraemon_status 独立返回 0.5.1/build，正常自动启动且 browser/UIA/transient worker 初始均未初始化。
 - [x] 新 DSH 会话两条流程各完成 1/1，具体操作及首次参数错误见 ACCEPTANCE 第 15 节。
 - [x] 原生 600 ms 与浏览器 120 ms 提示捕获成功，act/status 证据一致，取消清理 1/1。
-- [ ] renderer、Host 与实际模型输入形成已验证的图文闭环。
+- [x] 两个指定 wb 路由各 1/1 正确读取图片独有字符 8/8；最终代码重载后新会话 open→observe→stop 再次通过。
 
 ## P6 清理历史链路、依赖与发布内容
 

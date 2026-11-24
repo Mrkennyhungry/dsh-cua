@@ -322,7 +322,7 @@ open 在导航前登记 call 身份，失败导航的重试保留原 target 和�
 
 直接运行项目 venv 的可执行文件继承 Low Integrity 标签，前台连接返回 WinError 5。复用本机已安装 Python 加载隔离依赖后获得高完整性运行，未更改任何可执行文件标签。浏览器原生 dialog 使 Playwright 无法继续常规页面采集，观察改为返回保留的消息和类型，并由明确键操作处理。瞬态提示的预先 arm 及六工具框架传输在 P5 实施和验证。
 
-## 15. P5 进行中记录
+## 15. P5 执行记录
 
 独立等待接入 operation journal，覆盖参数校验、超时证据和同请求重放。新增会话隔离的 JPEG 资源端点，Host 二进制读取使用 4 MiB 上限。act、wait、status、stop 的内核桥接入口已初步接线，尚需与 Host 六工具及取消路径完成端到端验证。完整检查 scripts/check.ps1 实测 Node 84 PASS，Python 302 PASS、1 预期 SKIP、32 subtests PASS。此记录不代表 P5 验收通过。
 
@@ -351,3 +351,25 @@ open 在导航前登记 call 身份，失败导航的重试保留原 target 和�
 提交前最终 scripts/check.ps1 结果为 Node 89 PASS、0 FAIL、0 SKIP、6577.5482 ms；Python 308 PASS、0 FAIL、1 预期 SKIP、37 subtests PASS、22.33 s，Host/Client 语法检查通过。该轮包含六工具公开描述、companion 对 observe/wait/act 的状态映射与回归，以及覆盖实际 runtime 模块的 build 指纹。Client chips 与原生附件插槽的现有兼容测试通过。
 
 只读复核本机模型目录后，cua-refactor 仍缺少指定的两条路由。desktop 中可见 workbuddy/global:deepseek-v4.1-flash 和 hy4/hy4、hy4/hy4-flash，路由标识和配置归属均需用户确认与配置到独立 profile。本次提交保存已完成的 P5 实现和实测证据，P5 的双模型图片退出项继续待验，P6/P7 按阶段闸门继续待实施。
+
+### 本机阶段闸门（2026-11-25）
+
+从干净的 bdae18d 获取 origin 后，快进合入 08e1e2e、29634d2 和 6dd5563，保留公司提交及原有文件。恢复后的基线为 Node 89 PASS、Python 308 PASS、1 预期 SKIP、37 subtests PASS。本机 DSH 已有用户确认的两个 wb 路由，前述公司环境缺少路由的阻塞现已解除。
+
+正常自动启动首次复现 status HTTP 500，kernel.err.log 为 sqlite3 unable to open database file。定位为 kernel.js 优先选择项目测试 .venv，其可执行文件继承 Low Integrity 标签，无法写入默认 stateDir。改为显式 pythonPath 优先、bootstrap 安装解释器次之、项目 venv 后备，增加两个解释器同时存在的回归。实测正常启动采用 bootstrap runtime，版本 0.5.1。解释器和系统的权限标签保持原值。
+
+| P5 退出项 | 状态 | 实测结果 |
+| --- | --- | --- |
+| 正常安装入口与新会话 | PASS | DSH 插件管理页既有 link 安装指向本目录，经管理页停用/启用重载；新会话 status 1/1 成功，version=0.5.1、初始 browser/UIA/transient 均 false、operations=[]、input_busy=false；模型列出默认工具 6/6 |
+| DeepSeek 原生图片 | PASS | wb/cn:deepseek-v4.1-flash，独立新会话 1/1，图片独有 UFHM8K8V 8/8 正确；open 1 次直接带图，模型请求 2 次，UI 回合 10 s、25.7K 聚合 token；DOM 1、截图 1、OCR/YOLO/caption 0，DOM 12.750 ms、截图 54.795 ms、观察 78.359 ms |
+| Hy4 原生图片 | PASS | wb/cn:hy4std，独立新会话 1/1，图片独有 BZCPAMNX 8/8 正确；status+open 共 2 工具，模型请求 3 次，UI 回合 20 s、36.1K 聚合 token；DOM 1、截图 1、OCR/YOLO/caption 0，DOM 11.676 ms、截图 92.109 ms、观察 112.017 ms |
+| 图片实际请求用量 | PASS | 两条路由均从 DSH 请求详情确认 provider/model。DeepSeek 图片后请求输入 13461、缓存 11776、输出 374 token，总时长 4.18 s、TTFT 2.16 s；Hy4 输入 13200、缓存 10944、输出 556 token，总时长 11.6 s、TTFT 2.95 s。两张实际图片均 1366×854，每张 1166564 pixels，DOM text 长度 0、元素 0 |
+| 最终代码与 renderer 复验 | PASS | 重载最终 build=58220ee4f3e259ff、epoch=d51ec01a7fdf469396e55c81867c150e，新 Hy4 会话 status→open→observe→stop 共 4 工具、5 模型请求，图片字符再次 8/8；observe 直接 completed，stop operations=[]，UI 43 s、67.9K 聚合 token |
+| 慢观察与首响应丢失 | PASS | 30 ms 观察预算返回 running handle 1/1，同 request 重试采集总数 1；stop 显示 cancelling，阻塞返回后 cancelled、worker_running=false，迟到结果替换 0。Host 注入动作响应丢失后派发 1、按相同 owner/request_key 查询 1、重复派发 0；422 和调用取消各额外恢复查询 0 |
+| 本机真实动作与瞬态 | PASS | actions_probe 完整成功，同步操作 19、总耗时 18344 ms，工具 p50 222.490 ms、p95 3086.680 ms，n=19 最近秩；原生 600 ms 提示 2 次采样、命中 124.756 ms，浏览器 120 ms 提示 4 次采样、命中 13 ms；取消清理 1/1、重复派发 0、parser 初始化 0、caption 0 |
+| 完整检查 | PASS | scripts/check.ps1，Node 91 PASS、0 FAIL、0 SKIP、1747.9128 ms；Python 310 PASS、0 FAIL、1 预期 SKIP、43 subtests PASS、12.04 s；Host/Client 语法 2/2，git diff --check 通过 |
+| 本机发布清单 | PASS | npm pack --dry-run 为 181 文件、压缩 27619700 bytes、解包 30625815 bytes，runtime-host 与所有新增 kernel runtime 文件入包，3 个 optional SDK peers 保留；公司快照中的 80 MB YOLO 文件在本 checkout 缺席，体积按本机实际记录 |
+
+图片 smoke 证据为 p5-evidence/local-model-images.json，完整操作证据为 p5-evidence/local-actions-probe.json。图片卡片在源 1000×650 图片右下区域，映射到 1440×900 浏览器视口后处于水平中央偏下，两模型的位置描述符合实际输出。两路 UI 费用显示分别为 ¥0.00、¥0.02，属于取整显示。精确费用、图片独立计价和资源字节量未知。图片后请求的 token 含整段请求上下文。每模型图片 smoke 样本量为 1，P7 的多次旧新对照仍待执行。
+
+常规 Python 跳过项仍为受 DSH_LIVE_DIALOG_TEST 开关控制的真实窗口测试，P0 已单独执行通过，本轮原生模态能力另经 actions_probe 验证。存在的 invalid escape docstring warning 为历史桥接说明字符串，测试失败数为 0。P5 的所有退出项现为 PASS。
