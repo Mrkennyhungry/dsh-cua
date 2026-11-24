@@ -1,6 +1,6 @@
 # DSH 默认电脑操作协议
 
-本文是重构后的目标契约，供实现、联调和验收使用。文中的新接口需要逐阶段实现。现有插件的工具和返回格式仍以当前代码为准。
+本文记录 0.5 系列的六工具契约，供实现、联调和验收使用。P0–P6 已完成，当前实现和实测记录分别见源码与 ACCEPTANCE。
 
 ## 1. 面向模型的入口
 
@@ -155,7 +155,7 @@ owner 只能读取自身操作和观察。全局健康摘要可以包含设备�
 | --- | --- | --- |
 | `url` | string | 打开网址 |
 | `app` | string | 已注册应用标识或可执行文件绝对路径 |
-| `args` | string[] | 启动参数，只能与 `app` 一起使用 |
+| `args` | string[] | 启动参数，与 `app` 一起使用。app=notepad 时可传文件绝对路径直接打开 |
 | `target_id` | string | 激活已有窗口或标签页 |
 | `connect` | string | 显式连接已有浏览器的 CDP endpoint，或使用约定的 `configured` 配置值 |
 | `image` | boolean | 显式决定初始观察是否附图，缺省使用观察策略 |
@@ -179,12 +179,12 @@ owner 只能读取自身操作和观察。全局健康摘要可以包含设备�
 | 参数 | 类型 | 规则 |
 | --- | --- | --- |
 | `target_id` | string | 缺省列举可用窗口、浏览器标签页和桌面目标 |
-| `query` | string | 提取与当前任务相关的文字和元素，例如“保存按钮和错误提示” |
+| `query` | string | 大小写无关的字面子串，匹配观察正文或元素字段，例如“保存”。读取完整内容可省略 |
 | `region` | object | 使用先前帧定义局部采集范围 |
 | `cursor` | string | 继续读取已返回观察的下一页文字和元素，与 query/region/image 互斥 |
 | `image` | boolean | `true` 强制附图，`false` 明确只要语义，缺省自动决定 |
 
-`query` 用于采集过滤和排序。内核使用可解释的文本匹配与结构信息，返回查询摘要和截断信息。
+`query` 用于过滤观察正文和元素字段，无匹配时可能触发 OCR/YOLO。浏览器正文取可见页面文字，表单输入值通过 elements[].value 读回。目录读取可省略 query。
 
 无目标调用返回紧凑目标列表，每项包含 `target_id`、`kind`、`title`、可用的 `url` 或应用名，以及 `active`。同时返回当前桌面目标 ID。无目标且 `image: true` 时可附桌面图，该图归属返回的桌面目标。
 
@@ -278,7 +278,7 @@ DOM ref 使用文档内 WeakMap 身份与 WeakRef 对象索引，内部完整 se
 | --- | --- | --- |
 | `click` | `target`，可选 `button`、`count` | button 缺省 left，count 缺省 1，允许 1 或 2 |
 | `input` | `target`、`text`、`mode` | mode 必填 `replace` 或 `insert`，分别替换全部内容或在插入点输入 |
-| `key` | `keys` | 键名数组，例如 `["CTRL", "S"]`，作用于目标当前焦点 |
+| `key` | `keys` | 每个键为独立字符串，例如 `["CTRL", "S"]`。数组组成一个组合键，作用于目标当前焦点 |
 | `scroll` | `target`、`direction`、`amount` | direction 为 up/down/left/right，amount 为正整数滚轮刻度，缺省 3 |
 | `drag` | `from`、`to` | 起点和终点均为引用或帧点 |
 | `select` | `target`、`values` | values 为精确选项标签数组，单选目标只接受一项 |

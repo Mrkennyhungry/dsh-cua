@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.4] - 2026-11-25
+
+### Fixed
+
+- Explain direct file opening, literal observation filters, editable-value readback and supported condition states in the six-tool schema.
+- Show separate key names for shortcuts in both the action schema and validation errors after repeated live-model argument failures.
+
 ## [0.5.3] - 2026-11-25
 
 ### Fixed

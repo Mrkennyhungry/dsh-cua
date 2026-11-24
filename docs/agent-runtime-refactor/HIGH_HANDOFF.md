@@ -8,7 +8,7 @@
 项目目录是
 C:\Users\Admin\Documents\deepseek-harness\default-workspace\dsh-cua
 
-开发分支已创建为 codex/agent-runtime-refactor，方案起点提交为 8bea14227945420771f20b348ce777fad0d9f749。先检查实际分支和工作树，保留已有改动。根目录的 AGENTS.md 和 DEVELOPMENT.md 是本轮新增的未跟踪文件，属于交付内容，必须保留并遵循。
+开发分支为 codex/agent-runtime-refactor，方案起点提交为 8bea14227945420771f20b348ce777fad0d9f749。先检查实际分支、工作树和远端更新，保留已有改动。根目录的 AGENTS.md 和 DEVELOPMENT.md 已纳入版本控制，必须保留并遵循。
 
 按顺序读取这些绝对路径文件
 
@@ -30,15 +30,15 @@ C:\Users\Admin\Documents\deepseek-harness\default-workspace\dsh-cua
 - 用户很少使用内置自主 Agent、独立工作台、IM、WeCom 和 cron，接受将它们迁出默认运行链和默认发布包。迁移需记录旧入口与数据去向。
 - 用户沿用本机已有的大权限。实现约束集中于真实定位、取消、结果读回、部分完成和恢复，遵循现有插件框架与安装规则。
 
-当前进度：P0–P4 已通过验收并提交，P5 进行中（已有独立条件等待、操作桥接与有界图片读取的基础实现），P6、P7 未开始。以 PHASES.md 顶部的阶段表为唯一进度来源。
+以 PHASES.md 顶部的阶段表为唯一进度来源。P0–P6 已通过验收并提交，P7 的旧新双模型正式尝试共 84 次，修复版本为 0.5.4。逐次结果、修复后复验和剩余环境条件见 ACCEPTANCE.md 第 17 节及 p7-evidence。
 
-从 PHASES.md 的 P5 继续，不要从 P0 重做。先读 ACCEPTANCE.md 中 P4 与 P5 的执行记录，确认已通过和仍缺的部分，再补查相关源码后实施。优先读取真实 DSH 工具 DSL 与图片 renderer 合同，验证图像实际进入模型请求。保留 optional peers 的包装方式。
+先读 ACCEPTANCE.md 第 17 节并核对 PHASES.md 的阻塞原因。0.5.4 的 18 次受影响任务复验已结束，真实异 DPI/负原点多屏矩阵需要补齐对应显示器条件。所有已完成阶段以实测记录和提交为依据。真实 DSH 工具 DSL 与图片 renderer 合同已通过实际 SDK 和两条 wb 路由验证，保留 optional peers 的包装方式。
 
 开工前先建立测试基线，不要在全红或无法运行的测试环境上改代码。
 
-- 创建 .venv 并安装 pytest：python -m venv .venv，然后 .\.venv\Scripts\python.exe -m pip install --upgrade pip pytest。
-- 跑 npm test 记录起点。当前已知 16 项通过，plugin.test.js 因缺少 @deepseek-ai/schemastery 无法加载。
-- 这个已知加载失败必须处理：能修就修，不能修就显式 skip，并在 ACCEPTANCE.md 写明原因和影响。不允许当成没看见。
+- 已有测试环境先运行 pwsh -File scripts/check.ps1 并记录实际基线。
+- 新机器按 DEVELOPMENT.md 创建 .venv、安装 pytest，并运行 prepare-test-peers.mjs 和 prepare-test-python.ps1。
+- 起点的 schemastery 加载失败已在 P0 修复。0.5.4 常规基线为 Node 94 PASS，Python 314 PASS、1 项显式真实窗口 SKIP、43 subtests PASS。
 
 严格执行 DEVELOPMENT.md 的阶段闸门。每个阶段必须同时满足三条才允许进入下一阶段：该阶段交付项全部存在；ACCEPTANCE.md 对应项全部 PASS 且填写了实测结果（填数值，不是打勾）；该阶段已有一个独立 commit 且工作树干净。禁止跨阶段累积改动，禁止五个阶段做完再一起测。
 

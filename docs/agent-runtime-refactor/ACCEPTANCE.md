@@ -162,15 +162,15 @@ DSH / Node / Python / peer / 浏览器版本
 
 最终交付检查清单如下。
 
-- [ ] 常规 Node/Python 套件完整执行，失败、跳过及环境阻塞有记录。
-- [ ] 六工具通过实际 DSH 新会话发现，参数与图片链路实测通过。
-- [ ] 无 Hermes、无 key、无视觉权重的对应路径通过。
-- [ ] 目标引用、坐标、frame、取消、幂等、并发、瞬时反馈矩阵通过。
-- [ ] 专用持久化 profile 重启恢复，首次登录与过期状态有验证。
-- [ ] companion 可选运行及卸载行为通过。
-- [ ] 发布白名单与依赖检查通过，安装后新会话状态正常。
-- [ ] 两模型旧新对照与逐次结果已保存，性能结论可追溯。
-- [ ] 用户可按交付说明在 High 实施记录中找到未验证项和剩余条件。
+- [x] 常规 Node/Python 套件完整执行，失败、跳过及环境阻塞有记录，见第 17 节。
+- [x] 六工具通过实际 DSH 新会话发现，参数与图片链路实测通过。
+- [x] 无 Hermes、无 key、无视觉权重的对应路径通过。
+- [ ] 目标引用、坐标、frame、取消、幂等、并发、瞬时反馈矩阵全部通过。可执行部分已通过，真实异 DPI/负原点多屏仍受硬件条件阻塞。
+- [x] 专用持久化 profile 重启恢复，首次登录与过期状态有验证。
+- [x] companion 可选运行及卸载行为通过。
+- [x] 发布白名单与依赖检查通过，安装后新会话状态正常。
+- [x] 两模型旧新对照与逐次结果已保存，性能结论可追溯。
+- [x] 用户可按交付说明在 High 实施记录中找到未验证项和剩余条件。
 
 本文件中的现有源码与测试名称来自调研时版本，实施后按实际路径与契约复查。
 
@@ -418,4 +418,174 @@ Hy4 首次同 URL 标签任务在 180 秒超时，fixture 点击 0 次。定位�
 
 DeepSeek 补充 smoke 中 notepad 文件正文核对通过，116079.526 ms、23 工具。原提示要求额外关闭文件标签，模型重复核查菜单并打开最近日志标签，业务保存之后的动作明显过长。正式提示收敛为保存并读回未修改状态，明确只操作本次文件。两会话并发 smoke 31391.037 ms、11 工具通过，A 取消之后无输入事件，B 在确认 A 取消后保存自身值 1 次。此项包含两个独立真实 DSH 会话。
 
-本阶段仍在执行。实机仅有 1 屏、96×96 DPI，真实异 DPI 跨屏及负原点屏幕缺少硬件条件，现有 96/144 DPI 与负原点确定性测试继续保留。旧新版本每模型每任务 3 次正式对照、浏览器进程级重启、最终安装复验与证据汇总尚未完成。P7 退出条件尚未全部 PASS。
+本阶段仍在执行。实机仅有 1 屏、96×96 DPI，真实异 DPI 跨屏及负原点屏幕缺少硬件条件，现有 96/144 DPI 与负原点确定性测试继续保留。P7 退出条件尚未全部 PASS。
+
+### 正式重复与继续开发核对
+
+继续开发时再次 fetch origin，HEAD 相对 FETCH_HEAD 为 ahead 3 / behind 0，远端仍为 6dd5563，已有公司提交完整保留。恢复检查为 Node 93 PASS、0 FAIL、0 SKIP、945.317 ms，Python 314 PASS、1 预期 SKIP、43 subtests PASS、11.82 s。0.4.14 对照源码保存在忽略目录 .runtime/p7-legacy，index.js 和 dsh_bridge.py 的 Git blob 分别为 4d6f6a64fb8d26a88c08a8d6b1b2ab44920fd7a2 和 8526f6007e5421576521c1eb72f5f58b9e2aa1cb，均与 8bea142 的对象一致。旧版通过官方 CLI 的 plugin add link 安装到新建 cua-p7-legacy profile。
+
+正式任务集共 7 类，每类独立运行 3 次。并发任务包含取消方 A 和继续保存的 B 两个真实 DSH 会话，持久化任务包含退出前和重新打开后的两个新会话。单轮超时固定 300000 ms。fixture ID、文件和页面均逐次新建，模型、maxTokens、系统与工具 schema 哈希、实际图片请求、逐工具到达时间和 usage 保留在 JSON 证据。工具延迟使用 CLI 事件到达时间，p50/p95 采用最近秩法。图片次数包含上下文中再次发送的同一图片。
+
+DeepSeek 0.5.3 的正式结果已完成 21 次，通过 20 次。三次的逐任务汇总如下，完整数值位于 p7-evidence/deepseek-formal.json。
+
+| 任务 | 完成 | 成功端到端 p50 / p95 ms | 工具 p50 / p95 ms | 工具样本 | 模型请求 | 送入 provider 的图片 | 聚合 totalTokens |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 表单 | 3/3 | 15611.952 / 20094.783 | 205.231 / 417.612 | 13 | 16 | 21 | 217929 |
+| 附件 | 3/3 | 15303.864 / 19318.108 | 198.608 / 972.666 | 12 | 15 | 17 | 187014 |
+| 同 URL 标签与嵌套 frame | 3/3 | 32489.967 / 36285.046 | 172.961 / 1759.085 | 21 | 24 | 35 | 367029 |
+| 120 ms 短提示 | 3/3 | 13459.391 / 14072.552 | 208.043 / 224.788 | 9 | 12 | 18 | 152092 |
+| 记事本保存 | 3/3 | 74955.945 / 89638.616 | 447.623 / 2463.049 | 39 | 41 | 121 | 1625343 |
+| 双会话取消 | 2/3 | 35829.016 / 43566.269 | 1625.718 / 10014.893 | 50 | 56 | 84 | 813667 |
+| 浏览器进程重启与登录态 | 3/3 | 54148.963 / 58571.568 | 227.154 / 2401.930 | 32 | 38 | 59 | 612608 |
+
+并发第 2 次失败完整保留，耗时 152370.629 ms。B 模型收到的 URL 包含 fixture ID 尾部 b，实际 open 参数漏写该字符，打开了 A fixture 下的 cancellation_b 页面。B 的输入因此记录到 A fixture，该页面读取了另一份 gate 状态并持续等待。A 自身的等待已经 cancelled，worker_running=false。此失败属于模型打开错误地址，未计为成功，也未以重跑覆盖。其余两次均在 A 取消之后由 B 保存一次，A 取消后的输入事件为 0。
+
+三次持久化均验证旧 browser PID 退出、新 PID 使用同一 profile、Cookie 与 localStorage 恢复，随后分别读回模拟登录失效和验证码的用户介入提示。该恢复任务每次包含两个新 DSH 会话。源 profile 与用户数据保留。
+
+默认 caption 合计 0。少数 query 使用自然语言句子或 UIA 控件类别名，实际 query 为大小写无关的子串匹配，因此产生额外 OCR/YOLO 和补查。记事本三次共 39 工具、121 次上下文图片发送，作为后续预算评估的实测依据。完整会话对账补齐了 CLI 截断结果中的失败、帧和 token 信息。精确费用、图片独立 token 与独立计费仍未知。
+
+### 续接检查与对照适配
+
+本轮再次经本机代理 fetch，FETCH_HEAD 为 6dd5563，HEAD 为 3a526e4，ahead 3 / behind 0。该 checkout 的 fetch 配置只更新 FETCH_HEAD，因此用 HEAD...FETCH_HEAD 核对远端。工作树中已有基准脚本与文档改动均保留。修改前完整检查为 Node 93 PASS、0 FAIL、0 SKIP、903.1658 ms，Python 314 PASS、1 预期 SKIP、43 subtests PASS、11.40 s。
+
+旧版取消证据按原协议判定。先确认同 task_id 的 stop_requested=true，再确认 status=finished、result.status=stopped、result.reason=interrupted。单独的停止请求、另一个 task 的结束、正常完成均不算取消通过。新版要求 cancelled 且 worker_running 不是 true。针对两种实际协议的回归为 1 PASS，共 7 个断言。旧版缺少统一 observation trace 时后端统计记为 null。超时尝试仅保留已完成请求的 usage_observed，完整 usage 记为 null。
+
+Hy4 0.5.3 正式尝试为 17/21 通过，详细数据位于 p7-evidence/hy4-formal.json。
+
+| 任务 | 完成 | 成功端到端 p50 / p95 ms | 工具 p50 / p95 ms | 工具样本 | 模型请求 | provider 图片 | 完整 totalTokens |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 表单 | 3/3 | 60876.821 / 71103.720 | 292.661 / 1394.067 | 15 | 18 | 37 | 280815 |
+| 附件 | 3/3 | 33007.296 / 35573.256 | 240.261 / 277.867 | 9 | 12 | 18 | 156954 |
+| 同 URL 标签与嵌套 frame | 3/3 | 73422.150 / 77775.675 | 213.203 / 372.385 | 23 | 25 | 60 | 422733 |
+| 120 ms 短提示 | 3/3 | 55409.307 / 85029.142 | 241.451 / 308.487 | 9 | 12 | 18 | 159522 |
+| 记事本保存 | 0/3 | 无成功样本 | 235.944 / 1322.923 | 57 | 60 | 296 | 未知，已完成请求累计 3042542 |
+| 双会话取消 | 3/3 | 133960.531 / 198807.643 | 1554.312 / 6973.853 | 42 | 47 | 105 | 770763 |
+| 浏览器进程重启与登录态 | 2/3 | 214583.459 / 250359.959 | 136.522 / 1027.985 | 62 | 63 | 145 | 未知，已完成请求累计 1167022 |
+
+Hy4 失败耗时合计 1286176.403 ms。记事本三次分别在 300256.210、301111.338、300229.008 ms 超时，第 2 次文件已正确保存，第 1/3 次文件正文未达标。轨迹出现 keys=["ctrl+o"] 校验失败和自然语言 query 无匹配后反复补查。持久化第 2 次第一会话 300 秒超时，第二恢复会话完成，合计 384579.847 ms，原 browser PID 19708 退出，新 PID 23084 使用同 profile，Cookie、站点设置和模拟登录提示均达标。第一会话在关闭成功后仍重复核查，保留为 FAIL。其余两次进程退出和重开验证通过。21 次 caption 总数为 0。
+
+针对实测参数错误，0.5.4 补充 args 直接打开文件、query 字面子串、组合键拆分、正文和输入值读回说明，并在 state schema 列出内核已有允许值。键名校验错误提供 ["CTRL", "O"] 示例，支持的键名规则沿用原实现。Node 真实 SDK pipeline 验证合法 closed 状态可派发，非法 browser_closed 在桥接前拒绝，图片附件仍保持原生输出。修正后完整检查为 Node 94 PASS、0 FAIL、0 SKIP、962.8456 ms，Python 314 PASS、1 预期 SKIP、43 subtests PASS、11.22 s，追加的 pipeline 断言单独 6/6 通过。
+
+旧内核首次启动等待报告超时，实际 HTTP 服务已就绪。核对 Win32 进程后确认 venv launcher PID 23012 启动工作进程 PID 2944，health 报告后者。确认父子关系、原版源码路径和 protocol=1 后校正独立测试 home 的状态 PID，继续旧版 smoke。health.execution_enabled=false，原版因缺少 DEEPSEEK_API_KEY 拒绝独立 Agent 委托，主 DSH 模型和直接工具正常可用，该限制纳入旧版对照。
+
+旧版 smoke 各任务各 1 次。DeepSeek 表单、附件、标签/frame、记事本分别 PASS，耗时 43289.130 / 58338.081 / 66414.353 / 56011.189 ms。120 ms 提示在 watch 启动后仅触发 1 次，采样 431 次、保留帧 0、OCR 命中 0，FAIL，69774.295 ms。并发 FAIL，301137.543 ms、77 工具，直接 web_wait 同步等待结束才返回 action_id，独立 Agent 委托因缺 Key 返回 503，取消证据缺失。持久化 smoke 69665.317 ms，Cookie 与站点设置恢复，但 runner 在第一个工具返回时过早保存空进程列表，process_exit=false、same_profile=false，按原记录 FAIL。修正后 runner 每个工具返回时累积本次专用 profile 的 PID，正式对照使用修正版。
+
+旧版 Hy4 smoke 为 1/7 PASS。表单 PASS，206152.767 ms、16 工具。附件 300252.388 ms 超时，上传 SHA256 已达标；frame 301128.656 ms 超时且业务未达标；toast 300236.858 ms 超时且文字证据缺失；记事本 300234.117 ms 超时且文件未达标；并发 300236.318 ms 超时且取消证据缺失。持久化两个会话均超时，合计 603789.669 ms，原 PID 20872 退出、新 PID 21656 使用同 profile、恢复和模拟登录状态均达标，仍保留 FAIL。两份 smoke 已完整对账为 7/7 会话证据，脱敏报告位于 p7-evidence/legacy-deepseek-smoke.json 和 legacy-hy4-smoke.json。
+
+0.5.4 最后一次完整检查为 Node 94 PASS、0 FAIL、0 SKIP、1133.2008 ms，Python 314 PASS、1 预期 SKIP、43 subtests PASS、11.88 s。npm pack dry-run 为 104 文件、压缩 2594813 bytes、解包 3236082 bytes，基准及证据入包 0。基准拒绝复用非空输出目录的实测为退出码 1，既有尝试记录保留。
+
+### 旧版正式对照
+
+DeepSeek 0.4.14 正式对照完成 21 次，14 次 PASS。每类均为 3 次，原始失败继续保留，脱敏数值位于 p7-evidence/legacy-deepseek-formal.json。
+
+| 任务 | 完成 | 成功端到端 p50 / p95 ms | 总工具 | 模型请求 | provider 图片 |
+| --- | --- | --- | --- | --- | --- |
+| 表单 | 3/3 | 47796.426 / 52499.466 | 55 | 54 | 6 |
+| 附件 | 3/3 | 54025.729 / 55899.193 | 54 | 54 | 21 |
+| 同 URL 标签与嵌套 frame | 3/3 | 88461.220 / 107850.103 | 56 | 56 | 34 |
+| 120 ms 短提示 | 0/3 | 无成功样本 | 71 | 73 | 15 |
+| 记事本保存 | 3/3 | 106253.538 / 205483.596 | 112 | 112 | 26 |
+| 双会话取消 | 0/3 | 无成功样本 | 229 | 222 | 27 |
+| 浏览器进程重启与登录态 | 2/3 | 79998.489 / 101652.525 | 93 | 90 | 17 |
+
+旧版持久化第 1 次 fixture 状态恢复和模拟登录提示均通过，旧 PID 15252 已退出。恢复会话在结束前调用 cleanup，runner 结束时读取 reopened=[]，无法证实新 PID 与 profile，因此保留 FAIL。第 2/3 次通过。runner 已补充恢复会话每个工具返回后的进程采集，随后独立复验该任务，原 3 次数据继续保留。旧版每观察的后端计数缺少统一 trace，记为 null。旧 renderer 返回本地图片路径，个别会话调用 DSH read_image 读取同一工具产生的图片，provider 图片据实际请求统计。
+
+Hy4 0.4.14 正式对照完成 21 次，8 次 PASS，脱敏数值位于 p7-evidence/legacy-hy4-formal.json。
+
+| 任务 | 完成 | 成功端到端 p50 / p95 ms | 总工具 | 模型请求 | provider 图片 |
+| --- | --- | --- | --- | --- | --- |
+| 表单 | 3/3 | 131708.739 / 132010.904 | 67 | 65 | 0 |
+| 附件 | 3/3 | 139678.731 / 249072.966 | 77 | 75 | 17 |
+| 同 URL 标签与嵌套 frame | 1/3 | 241331.494 / 241331.494 | 72 | 66 | 29 |
+| 120 ms 短提示 | 0/3 | 无成功样本 | 83 | 61 | 30 |
+| 记事本保存 | 0/3 | 无成功样本 | 104 | 102 | 89 |
+| 双会话取消 | 0/3 | 无成功样本 | 149 | 140 | 0 |
+| 浏览器进程重启与登录态 | 1/3 | 362737.081 / 362737.081 | 164 | 139 | 0 |
+
+Hy4 旧版记事本三次均超过 300 秒。持久化三次业务恢复均达标，第 1/3 次第一会话超时，整体分别 450133.181 / 526445.238 ms，第 2 次两个会话合计 362737.081 ms 成功。三个轮次均观测到专用 profile 的旧 PID 退出和新的 PID。全部正式 84 次原始尝试现已完成，其中新版 DeepSeek 20/21、Hy4 17/21，旧版 DeepSeek 14/21、Hy4 8/21。旧版存在缺独立 Agent Key、历史 renderer 需 read_image、PID 采样不足的记录，对照局限按上述具体任务保留。修复后复验将单独记录版本及样本。
+
+### 正式对照汇总与图像开销
+
+下表汇总原始 84 次正式尝试。新版正式样本版本为 0.5.3，修复版本 0.5.4 的受影响任务另表记录。每组 7 类任务、每类 3 次，原始失败均计入工具、请求、图片和耗时总量。
+
+| 路由与版本 | 任务完成 | 工具总数 | 模型请求 | provider 图片次数 | 全部耗时 ms | 失败耗时 ms | 已观测 totalTokens |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| wb/cn:deepseek-v4.1-flash，0.4.14 | 14/21 | 670 | 661 | 146 | 2544130.260 | 1383937.367 | 20820390，完整 usage 19/21 |
+| wb/cn:deepseek-v4.1-flash，0.5.3 | 20/21 | 176 | 202 | 355 | 849611.235 | 152370.629 | 3975682，完整 usage 21/21 |
+| wb/cn:hy4std，0.4.14 | 8/21 | 716 | 648 | 165 | 5776683.552 | 4283086.690 | 17008657，完整 usage 8/21 |
+| wb/cn:hy4std，0.5.3 | 17/21 | 217 | 237 | 679 | 2854611.321 | 1286176.403 | 6000351，完整 usage 17/21 |
+
+totalTokens 来自实际 provider usage，包含提供方报告的缓存量。usage 不完整组的数值仅累计已结束请求，缺失请求的消耗未知。精确金额、图片独立 token、图片单独计费和缓存价格均未知，本机 wb 路由未提供这些字段。各任务成功样本的端到端和工具 p50/p95 见前表与对应 JSON。
+
+新版 DeepSeek 的 355 次图像发送共 14038692 bytes、383161052 pixels，Hy4 的 679 次共 23277245 bytes、674199628 pixels。相同图片随上下文再次发送时重复计数。实际尺寸分别覆盖 7 和 10 种，完整窗口最长边 1366，局部最小 68×41。旧 renderer 部分任务仅传图片路径，旧版图片数受模型是否调用 read_image 影响，原生图片投递增加的上下文开销保留在记录中。
+
+从完整会话结果按 observation_id 去重，DeepSeek 112 份观察、Hy4 148 份观察，DOM/UIA/capture/OCR/YOLO 在同一观察中调用超过一次的计数各为 0，caption 合计 0。两模型分别实际发起 10 和 3 次含 frame_id 图片点的 act，图片帧和坐标继续由 runtime 验证。DOM 的 dom_frames 计数包含嵌套 frame 的独立读取。
+
+### 固定运行参数
+
+保留已经过正式任务验证的默认值。全图最长边 1366、单图 JPEG 上限 4 MiB、元素页 80 项、正文页 6000 字、元素 JSON 上限 45000 bytes、批次上限 8 步。ROI 保留源分辨率。首次目标和布局变化附图，语义稳定动作使用轻量读回。普通表单、附件、frame 和 120 ms 提示两模型各 3/3，通过样本支持当前预算。记事本的额外观察和图片发送已定位到 query 误用、快捷键参数与重复核查，0.5.4 先修正文义和允许值说明。
+
+open/observe/act/wait 同步预算 5000 ms，wait/expect 默认 5000 ms、范围 100–30000 ms，status follow 上限 10000 ms，瞬态采样间隔 100 ms。正式尝试每会话上限 300000 ms。两模型请求的 temperature 未显式覆盖，使用 DSH 路由默认，实际请求记录为 null。DeepSeek maxTokens 为 393216、Hy4 为 64000，均沿用本机配置。每次请求保存实际系统提示和工具 schema 的 SHA256，工具 schema 按对应版本记录。
+
+### 续接检查与安装复核
+
+再次经本机代理 fetch origin，并用 ls-remote 核对全部远端分支。开发分支仍为 6dd5563137cecd264b84609b6732af6f60f67310，main 为方案起点 8bea14227945420771f20b348ce777fad0d9f749。本地 HEAD 3a526e4 相对开发分支 ahead 3 / behind 0，拉取新增提交 0。本轮接续工作树已有的 11 个修改文件和 P7 未跟踪脚本、证据全部保留。AGENTS.md 与 DEVELOPMENT.md 已跟踪。
+
+修改前再次完整检查，Node 94 PASS、0 FAIL、0 SKIP、996.0321 ms，Python 314 PASS、1 显式真实窗口 SKIP、43 subtests PASS、11.42 s。补查真实 SDK ToolExecutionPipeline、原生附件 renderer、provider 的 prepareRequestImages 路径及实际请求图像统计。
+
+官方 CLI 的 plugin add link 已通过插件管理机制重装当前目录，安装日志位于 .runtime/p7-054-install.log。新会话 session-6db5c6a0-1d2b-4cc5-9b0a-ad99fd171869 实际调用 status 一次，返回 success=true、version=0.5.4、build=ce3fad10e131cdab、operations=[]、input_busy=false，browser/UIA/transient worker 初始均为 false。六工具清单通过该会话及基准会话实际 request/header 核对。
+
+六个基准 JavaScript 入口分别 node --check 全部通过，reconcile-benchmark.py 编译通过。0.5.4 npm pack --dry-run 实测 104 文件、压缩 2594813 bytes、解包 3236082 bytes，基准脚本和 p7-evidence 入包 0。对比 P0 压缩 27570384 bytes、162 文件，当前发行白名单保持三个 optional peers。
+
+旧版 DeepSeek 持久化在补齐恢复阶段 PID 采样后独立复验 3/3，成功端到端 p50/p95 为 94741.306/97570.795 ms，98 工具、96 模型请求、provider 图片 0，完整 totalTokens 2130087。证据为 legacy-deepseek-persistence-recheck.json，原正式对照的 2/3 继续保留。
+
+### 0.5.4 受影响任务复验
+
+记事本、附件、持久化分别重新独立执行 3 次，两模型合计 18 次，使用原任务提示与业务完成标准。DeepSeek 完成 8/9，Hy4 完成 9/9。完整会话对账各 9/9，归档为 deepseek-054-recheck.json 与 hy4-054-recheck.json。
+
+| 路由 | 任务 | 完成 | 成功端到端 p50 / p95 ms | 工具 p50 / p95 ms | 工具样本 | 模型请求 | provider 图片 | 完整 totalTokens |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| DeepSeek | 记事本 | 2/3 | 32050.086 / 33512.103 | 465.815 / 5048.514 | 19 | 22 | 13 | 未知，已完成请求累计 360988 |
+| DeepSeek | 附件 | 3/3 | 12370.045 / 17522.276 | 301.238 / 2913.106 | 8 | 11 | 10 | 133847 |
+| DeepSeek | 持久化 | 3/3 | 47160.662 / 52094.004 | 231.665 / 2342.753 | 33 | 39 | 59 | 650802 |
+| Hy4 | 记事本 | 3/3 | 66949.359 / 136291.575 | 343.139 / 5059.975 | 29 | 32 | 54 | 916254 |
+| Hy4 | 附件 | 3/3 | 22250.318 / 24869.934 | 313.634 / 720.725 | 9 | 12 | 16 | 156980 |
+| Hy4 | 持久化 | 3/3 | 176148.236 / 302940.907 | 205.140 / 923.813 | 58 | 60 | 169 | 1396238 |
+
+DeepSeek 记事本第 2 次在 19041.749 ms 结束，最终 reason=error、code=MALFORMED_RESPONSE，提供方返回的 doraemon_act 参数 JSON 在 expect 字段处截断，未进入插件 execute。该次文件正文未达标，继续计为 FAIL，完整 usage 记为未知。此前 open 返回 LAUNCH_UNCONFIRMED，模型已通过目录与指定文件标题恢复到正确窗口。现代记事本复用既有进程时缺少新进程归属证据，运行时保留实际启动不确定状态，后续操作经新观察与 ref 校验。Hy4 的 3 次记事本均保存正确文件，并读回未修改状态。
+
+两模型此次分别使用 60/96 工具、72/104 模型请求、82/239 次上下文图片发送，caption 均为 0。Hy4 持久化第 1 次两个会话合计 302940.907 ms，各单会话均在 300000 ms 上限内。三次均确认旧 browser PID 退出、新 PID 使用同 profile、Cookie/localStorage 恢复及模拟登录失效和验证码提示。模型仍可能重复核查关闭状态，实际耗时及图片开销已保留。
+
+### 最后回归、启动与阶段闸门
+
+真实 actions_probe 在本机已有 Python 权限下执行，通过 19 个操作样本，工具 p50/p95 为 191.932/3086.074 ms，响应 561–7132 bytes，总计 15765 ms。覆盖中文 replace/insert、checkbox、select、附件、右键/双击、hover、DOM 嵌套 frame、原生与浏览器图片点、drag、滚动、失效 ref、模态与导航中断、双 owner 输入、取消及重放。重放额外派发 0、取消后尾随输入 0、parser 初始化 0。600 ms 原生提示采样 2 次、命中 118.102 ms，120 ms 浏览器提示采样 3 次、命中 13 ms，act/status 证据一致。显式真实保存提示测试独立执行 1 PASS、2.053 s，测试窗口和提示均按 fixture 的 finally 清理。
+
+无可选栈 runtime_probe 再次通过，health/目录合计 125 ms、13 个窗口、退役路由 5/5 返回不存在，禁止的 standalone/视觉模块实际导入 0、parser 初始化 0、释放 runtime 1/1。此处 health_ms 包含工厂生命周期、鉴权、路由与目录检查。
+
+先只读核对主运行时 journal，活跃/仍运行操作 0，已保留记录 856。核对专用 profile 的唯一可见窗口为 about:blank 后正常关闭，随后沿用 createKernel 的正式启动入口重启空闲内核。旧 PID 15024、新 PID 23404，cold ready 为 2121.415 ms，首个有效目录观察距启动 2351.325 ms、目标 14，样本 1。browser/UIA/transient worker 初始均未启动，profile 与用户数据保留。factory probe 和真实动作 probe 使用各自隔离 home。
+
+重启后的首次新 DSH status 试验沿用了 headless 的外管内核配置，未注入 token，实际返回 BRIDGE_UNAVAILABLE，该日志保留在 .runtime/p7-final-new-session-status.jsonl。随后在 CLI 的临时 launch overlay 中显式采用默认 manageKernel=true、autoStart=true，真实新会话 session-9ab470a6-2b05-40a6-916c-2d5dee88738b 独立成功，状态 version=0.5.4、build=ce3fad10e131cdab、input_busy=false、operations=[]。该路径自动接管已启动内核，request/header 的六工具发现 6/6，凭据和 profile 文件均经既有机制管理。
+
+| P7 退出项 | 状态 | 最终实测 |
+| --- | --- | --- |
+| 完整回归与版本 | PASS | scripts/check.ps1，Node 94 PASS、0 FAIL、0 SKIP、991.9607 ms，Python 314 PASS、1 显式真实窗口 SKIP、43 subtests PASS、10.83 s；显式窗口补验 1 PASS；Host/Client 语法 2/2 |
+| 六工具、图片与单一规划入口 | PASS | 新版正式会话 request/header 54/54 只含六个 doraemon 工具，重启后新 managed 会话再次发现 6/6、status 1/1，provider 原生图片正式投递 DeepSeek 355 次、Hy4 679 次 |
+| 观察、引用与可执行动作矩阵 | PASS | 260 份正式观察重复后端采集 0、caption 0；最后实机动作样本 19，取消清理、幂等重放、图片点与窗口/标签/frame 归属均通过 |
+| 持久化与模型对照 | PASS | 旧新正式尝试 84 次，受影响任务复验 18 次，旧版持久化另行复验 3 次，逐次失败保留；0.5.4 持久化两个模型均 3/3 |
+| 发布、依赖与迁移 | PASS | 0.5.4 打包 104 文件、2594813 bytes，3 个 SDK optional peers，开发基准和证据入包 0，P6 数据迁移与只读包记录保留 |
+| 真实异 DPI / 负原点多屏 | BLOCKED | 再次 EnumDisplayMonitors 实测 1 屏，矩形 [0,0,2560,1440]，GetDpiForMonitor=96×96、HRESULT 0；混合 DPI 可用 false、负原点可用 false，实际跨屏场景 0 次 |
+
+P7 保留 BLOCKED，受 DEVELOPMENT 阶段闸门约束。已执行的数值和断言见 p7-evidence/release-verification.json。真实多屏矩阵需要至少两个不同 DPI 的显示器，并将其中一个配置到主屏左侧或上方，再按第 7 节执行移动、resize、同语义引用和图片点读回。当前 test/test_dpi.py 与 test/test_runtime_targets.py 的确定性变换和失效用例均随完整套件通过，真实多屏项继续保持未通过。精确费用与图片独立计费按协议允许值记为未知。
+
+复现最后实机检查可在项目根目录执行以下命令，使用新的隔离 home 目录保留已有证据。
+
+```powershell
+pwsh -File scripts/check.ps1
+$env:PYTHONIOENCODING = 'utf-8'
+$env:TEMP = $env:TMP = Join-Path (Get-Location) '.runtime/test-temp'
+python scripts/run-live-probe.py test/actions_probe.py .runtime/p7-actions-reproduce-home
+$env:DSH_LIVE_DIALOG_TEST = '1'
+python scripts/run-live-probe.py test/test_cleanup_dialog_live.py
+```
+
+受影响模型任务的命令沿用 README 的基准入口，增加 --tasks=notepad,upload,persistence，每次使用空输出目录。原始会话和请求日志继续位于本机忽略目录，归档 JSON 排除工具全文、模型全文、凭据和图片原文。更新 HIGH_HANDOFF 中过期的 P5 状态与测试基线，后续进度以 PHASES 顶部表为准。

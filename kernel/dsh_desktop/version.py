@@ -1,4 +1,4 @@
 """Version and metadata for the DSH desktop automation kernel."""
 
-__version__ = "0.5.3"
+__version__ = "0.5.4"
 __description__ = "DSH Windows desktop automation kernel."

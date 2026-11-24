@@ -498,6 +498,10 @@ class ActionValidationTests(unittest.TestCase):
             with self.subTest(steps=steps), self.assertRaises(ValueError):
                 ActionDispatcher.validate({**base, 'steps': steps})
         ActionDispatcher.validate({**base, 'steps': [{'action': 'input', 'target': {'ref': 'e'}, 'text': '', 'mode': 'replace'}]})
+        with self.assertRaisesRegex(ValueError, r'Provide each key separately.*CTRL.*O'):
+            ActionDispatcher.validate({**base, 'steps': [{'action': 'key', 'keys': ['ctrl+o']}]})
+        ActionDispatcher.validate({**base, 'steps': [{'action': 'key', 'keys': ['CTRL', 'O']}]})
+        ActionDispatcher.validate({**base, 'steps': [{'action': 'key', 'keys': ['CTRL', 'S']}]})
 
     def test_condition_validation_prevents_incomplete_post_dispatch_checks(self):
         for condition in ({'kind': 'text'}, {'kind': 'window', 'title': ''}, {'kind': 'state', 'state': 'imaginary'},

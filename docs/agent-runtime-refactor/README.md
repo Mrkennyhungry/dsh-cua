@@ -20,7 +20,7 @@
 | 方案起点提交 | `8bea14227945420771f20b348ce777fad0d9f749` |
 | 起点版本 | `0.4.14` |
 | 本轮交付 | 分阶段实现、验收记录与独立提交 |
-| 产品代码状态 | P0–P6 已通过验收，当前版本 0.5.3，P7 双模型回归与发行验收进行中 |
+| 产品代码状态 | P0–P6 已通过验收，当前版本 0.5.4，P7 的双模型对照及可执行验证完成，异 DPI/负原点多屏实机条件阻塞阶段闸门 |
 
 创建本方案时，根目录 `AGENTS.md` 是已有未跟踪文件。新会话应先读取工作树状态，识别既有改动。
 
@@ -116,12 +116,12 @@ Host 保持 ESM 和既有插件合同，Python 保留现有包名与 Windows 适
 
 | 模块 | 最终职责 |
 |---|---|
-| `index.js` | 六工具声明、参数适配、结果 renderer、Cordis 生命周期 |
+| `index.js`、`host-config.js`、`runtime-host.js` | 插件入口、配置、六工具声明、参数适配、图片 renderer 和 Cordis 生命周期 |
 | `bridge-client.js` | HTTP、图像资源、有限 follow、取消传递、传输错误 |
 | `kernel.js` | 启动、接管、build/capability 检查、进程生命周期 |
 | `kernel/dsh_desktop/runtime.py` | 具体 Windows 服务、输入锁、上下文与资源生命周期 |
 | `kernel/dsh_desktop/contracts.py` | 轻量数据对象、统一状态与坐标合同 |
-| `kernel/dsh_desktop/observation.py` | 感知选择、结果复用、引用、正文、图片选择 |
+| `kernel/dsh_desktop/observations.py` | 感知选择、结果复用、引用、正文、图片选择 |
 | `kernel/dsh_desktop/actions.py` | 路由、批量、逐步结果、读回、条件等待、取消 |
 | 现有 `game/` 与适量感知模块 | Windows、截图、输入、DOM、UIA、OCR 的具体实现 |
 | companion 与 Host mirrors | 可选的运行事件订阅、窗口选择和取消入口 |
@@ -170,9 +170,51 @@ Host 保持 ESM 和既有插件合同，Python 保留现有包名与 Windows 适
 
 ## 当前验证边界
 
-此前 `npm test` 有 16 项通过，`plugin.test.js` 因缺少 `@deepseek-ai/schemastery` 未能加载。系统 Python 与已有桌面 venv 都缺少 pytest。实现阶段先建立可重复的项目测试环境，再取得新基线。
+P0 已恢复测试依赖并处理原有 schemastery 加载失败，DSH 的三个 SDK 包继续作为 optional peers。P0–P6 的逐阶段实测与提交记录见 PHASES 和 ACCEPTANCE。0.5.4 完整检查为 Node 94 PASS、Python 314 PASS、1 项显式真实窗口 SKIP、43 subtests PASS，该真实窗口用例已单独执行通过 1/1。
 
-当前结论主要来自源码与相关测试阅读。尚未测量两个目标模型的识图效果、图像 token、端到端成功率与时延。图片尺寸、元素预算、等待窗口属于需要实测的默认初值。
+用户确认的 wb/cn:deepseek-v4.1-flash 与 wb/cn:hy4std 均已通过原生图片字符读取与六工具闭环。P7 已完成旧新版本共 84 次正式尝试，DeepSeek 旧版 14/21、新版 20/21，Hy4 旧版 8/21、新版 17/21。0.5.4 对记事本、附件、持久化各复验三次，DeepSeek 8/9、Hy4 9/9。图片实际尺寸、字节量、上下文 token 与耗时由请求和会话证据统计。精确费用与图片独立计费暂不可获取。真实异 DPI 跨屏及负原点屏幕测试需要对应硬件，当前机器为单屏 96×96 DPI，P7 按 DEVELOPMENT 闸门保留 BLOCKED。
+
+## P7 基准复现
+
+在项目根目录运行。DSH profile 需要已配置本机 wb 凭据，两条模型路由使用用户已确认的配置。CLI 包装入口调用安装内官方 runDesktopCli，普通 Node 入口会通过 Electron Node 模式加载。先通过插件管理器安装到 headless 验证 profile。
+
+```powershell
+node scripts/dsh-benchmark-entry.mjs --version
+node scripts/dsh-benchmark-entry.mjs plugin --profile headless add 'link:C:/Users/Admin/Documents/deepseek-harness/default-workspace/dsh-cua'
+```
+
+基准要求正常内核已启动，默认检查 8766 端口的版本。输出目录必须为空，每次重试使用新的目录，原失败记录继续保留。默认运行 7 类任务，单会话 300000 ms，每类 3 次。并发和持久化任务各包含两个新 DSH 会话。
+
+```powershell
+$runTag = Get-Date -Format yyyyMMdd-HHmmss
+node scripts/benchmark-agent-runtime.mjs --model=cn:deepseek-v4.1-flash --attempts=3 "--output=.runtime/p7-$runTag-deepseek"
+node scripts/benchmark-agent-runtime.mjs --model=cn:hy4std --attempts=3 "--output=.runtime/p7-$runTag-hy4"
+.\.venv\Scripts\python.exe scripts/reconcile-benchmark.py ".runtime/p7-$runTag-deepseek/results.json"
+.\.venv\Scripts\python.exe scripts/reconcile-benchmark.py ".runtime/p7-$runTag-hy4/results.json"
+node scripts/summarize-benchmark.mjs ".runtime/p7-$runTag-report.json" ".runtime/p7-$runTag-deepseek/results.json" ".runtime/p7-$runTag-hy4/results.json"
+```
+
+reconcile 使用开发 venv 的 zstandard 0.25.0 读取 DSH 原始会话。超时或不完整 usage 保留已完成请求累计，完整总量记为 null。summarize 排除模型全文、工具参数和工具正文，保留逐次测量、业务事件、模型请求形状和图片哈希。原始 results.json 与会话日志位于本机忽略目录和 DSH 会话目录。
+
+旧版对照源码取自 8bea14227945420771f20b348ce777fad0d9f749，独立归档到 .runtime/p7-legacy，通过同一安装入口装入 cua-p7-legacy profile。首次归档和安装命令如下。
+
+```powershell
+git archive --format=zip --output=.runtime/p7-baseline-8bea142.zip 8bea14227945420771f20b348ce777fad0d9f749
+Expand-Archive -LiteralPath .runtime/p7-baseline-8bea142.zip -DestinationPath .runtime/p7-legacy
+node scripts/dsh-benchmark-entry.mjs --profile cua-p7-legacy --from-default-profile headless --help
+node scripts/dsh-benchmark-entry.mjs plugin --profile cua-p7-legacy add 'link:C:/Users/Admin/Documents/deepseek-harness/default-workspace/dsh-cua/.runtime/p7-legacy'
+node scripts/start-legacy-benchmark.mjs
+node scripts/start-legacy-benchmark.mjs --check
+```
+
+旧版使用原安装 Python 的完整历史依赖，独立 home 为 %LOCALAPPDATA%/dsh-p7-legacy，端口 8768，CDP 9334。启动器核对 health 源路径、协议和实际工作进程 PID，支持 Windows venv launcher 的父子进程。旧新内核的单实例 mutex 要求顺序运行。原版独立 Agent 需要 DEEPSEEK_API_KEY，缺少时会如实拒绝，DSH 直接工具仍可执行。
+
+旧版基准在相同命令中追加以下参数，两个模型分别使用新的输出目录。完成对照后通过 --restore 关闭隔离测试浏览器、核对并停止旧版 worker，再恢复正常新版自动启动入口。
+
+```powershell
+node scripts/benchmark-agent-runtime.mjs --legacy --version=0.4.14 --port=8768 "--bridge-state=$env:LOCALAPPDATA/dsh-p7-legacy/kernel-state.json" "--browser-profile=$env:LOCALAPPDATA/dsh-p7-legacy/web_profile_edge" --model=cn:deepseek-v4.1-flash --attempts=3 "--output=.runtime/p7-$runTag-legacy-deepseek"
+node scripts/start-legacy-benchmark.mjs --restore
+```
 
 ## 外部参考
 

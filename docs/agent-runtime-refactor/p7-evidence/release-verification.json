@@ -1,0 +1,386 @@
+{
+  "phase": "P7",
+  "version": "0.5.4",
+  "phase_gate": "BLOCKED",
+  "blocker": "Physical mixed-DPI and negative-origin multi-monitor hardware is unavailable.",
+  "display": {
+    "monitor_count": 1,
+    "monitors": [
+      {
+        "rect": [
+          0,
+          0,
+          2560,
+          1440
+        ],
+        "dpi": [
+          96,
+          96
+        ],
+        "dpi_hresult": 0
+      }
+    ],
+    "mixed_dpi_available": false,
+    "negative_origin_available": false
+  },
+  "tests": {
+    "node_pass": 94,
+    "node_fail": 0,
+    "node_skip": 0,
+    "node_ms": 991.9607,
+    "python_pass": 314,
+    "python_skip": 1,
+    "python_subtests_pass": 43,
+    "python_seconds": 10.83,
+    "explicit_live_save_prompt_pass": 1,
+    "explicit_live_save_prompt_seconds": 2.053
+  },
+  "fresh_managed_session": {
+    "session_id": "session-9ab470a6-2b05-40a6-916c-2d5dee88738b",
+    "tools": [
+      "doraemon_act",
+      "doraemon_observe",
+      "doraemon_open",
+      "doraemon_status",
+      "doraemon_stop",
+      "doraemon_wait"
+    ],
+    "status": {
+      "success": true,
+      "epoch": "7567aaa427be424891f858315510ba99",
+      "version": "0.5.4",
+      "build": "ce3fad10e131cdab",
+      "initialized_backends": [
+        "windows",
+        "capture",
+        "input"
+      ],
+      "workers": {
+        "browser_initialized": false,
+        "uia_running": false,
+        "transient_uia_running": false
+      },
+      "input_busy": false,
+      "operations": []
+    }
+  },
+  "formal_header_audit": {
+    "sessions": 54,
+    "six_tool_sessions": 54
+  },
+  "formal_observation_audit": {
+    "unique_observations": 260,
+    "repeated_backend_scans": 0,
+    "caption_requests": 0
+  },
+  "runtime_without_optional_stack": {
+    "protocol": 2,
+    "parser_initializations": 0,
+    "forbidden_imports_loaded": 0,
+    "windows": 13,
+    "retired_routes_absent": 5,
+    "health_ms": 125.0,
+    "released_runtime": true
+  },
+  "live_actions": {
+    "operations": [
+      {
+        "id": "op_315437bcb0994f9fa31d46e112dc9c03",
+        "status": "completed",
+        "steps": [
+          0,
+          1,
+          2,
+          3
+        ],
+        "dispatch": "sent",
+        "elapsed_ms": 1827.805,
+        "response_bytes": 6338
+      },
+      {
+        "id": "op_935ceab01cf94199b50e3a939a706bcd",
+        "status": "completed",
+        "steps": [
+          0
+        ],
+        "dispatch": "sent",
+        "elapsed_ms": 248.453,
+        "response_bytes": 6349
+      },
+      {
+        "id": "op_f3dff9bd788e4a429d4fdf6961ea4975",
+        "status": "completed",
+        "steps": [
+          0
+        ],
+        "dispatch": "sent",
+        "elapsed_ms": 937.952,
+        "response_bytes": 3284
+      },
+      {
+        "id": "op_b1bb46a71d9a4c5f898de2518e1bbccd",
+        "status": "completed",
+        "steps": [
+          0
+        ],
+        "dispatch": "sent",
+        "elapsed_ms": 205.215,
+        "response_bytes": 3281
+      },
+      {
+        "id": "op_56ef9c0e1d7c4a0089650365476d00c1",
+        "status": "completed",
+        "steps": [
+          0
+        ],
+        "dispatch": "partial",
+        "elapsed_ms": 128.377,
+        "response_bytes": 7132
+      },
+      {
+        "id": "op_5d64edbe2ccc49939eb587b4a0b74c40",
+        "status": "completed",
+        "steps": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7
+        ],
+        "dispatch": "sent",
+        "elapsed_ms": 677.093,
+        "response_bytes": 6086
+      },
+      {
+        "id": "op_7d27c7a06e584fcb98c80022696e766d",
+        "status": "completed",
+        "steps": [
+          0
+        ],
+        "dispatch": "sent",
+        "elapsed_ms": 208.483,
+        "response_bytes": 5631
+      },
+      {
+        "id": "op_fe504db77cbd44d4afd3b55a0aaac249",
+        "status": "completed",
+        "steps": [
+          0
+        ],
+        "dispatch": "sent",
+        "elapsed_ms": 178.004,
+        "response_bytes": 5649
+      },
+      {
+        "id": "op_8208af586a884036a5b44b8c50caf09b",
+        "status": "completed",
+        "steps": [
+          0
+        ],
+        "dispatch": "none",
+        "elapsed_ms": 123.31,
+        "response_bytes": 3385
+      },
+      {
+        "id": "op_6b1b8ac1cc0b4c628bed3b99fc609fb4",
+        "status": "completed",
+        "steps": [
+          0
+        ],
+        "dispatch": "sent",
+        "elapsed_ms": 221.42,
+        "response_bytes": 3385
+      },
+      {
+        "id": "op_ca670d3a75084efaabead24eac183447",
+        "status": "completed",
+        "steps": [
+          0
+        ],
+        "dispatch": "sent",
+        "elapsed_ms": 185.412,
+        "response_bytes": 802
+      },
+      {
+        "id": "op_22999ad0df7e4918b7f03ebb0289f778",
+        "status": "completed",
+        "steps": [
+          0
+        ],
+        "dispatch": "sent",
+        "elapsed_ms": 196.353,
+        "response_bytes": 5639
+      },
+      {
+        "id": "op_485d8270020b46458d99ca7edf3d3774",
+        "status": "completed",
+        "steps": [
+          0
+        ],
+        "dispatch": "sent",
+        "elapsed_ms": 186.374,
+        "response_bytes": 3386
+      },
+      {
+        "id": "op_b7f12461041043f2829ae6d61ffbd58a",
+        "status": "completed",
+        "steps": [
+          0
+        ],
+        "dispatch": "sent",
+        "elapsed_ms": 191.932,
+        "response_bytes": 2393
+      },
+      {
+        "id": "op_1c54269392f442649869956509e06c8c",
+        "status": "completed",
+        "steps": [
+          0
+        ],
+        "dispatch": "partial",
+        "elapsed_ms": 176.817,
+        "response_bytes": 6054
+      },
+      {
+        "id": "op_d4d49a0c09a14c25957b607390c6b79a",
+        "status": "completed",
+        "steps": [
+          0
+        ],
+        "dispatch": "partial",
+        "elapsed_ms": 3086.074,
+        "response_bytes": 1569
+      },
+      {
+        "id": "op_c886b2a496f44805b0fe17614f0808a8",
+        "status": "completed",
+        "steps": [
+          0
+        ],
+        "dispatch": "sent",
+        "elapsed_ms": 179.731,
+        "response_bytes": 5645
+      },
+      {
+        "id": "op_bedfb951dbe74143b881ecd0389c663d",
+        "status": "completed",
+        "steps": [
+          0
+        ],
+        "dispatch": "partial",
+        "elapsed_ms": 171.163,
+        "response_bytes": 1976
+      },
+      {
+        "id": "op_368d4ad7eccf4651b6078bd5c073a4ec",
+        "status": "completed",
+        "steps": [
+          0
+        ],
+        "dispatch": "sent",
+        "elapsed_ms": 59.796,
+        "response_bytes": 561
+      }
+    ],
+    "models": 0,
+    "caption": 0,
+    "open_native_initial_observation": 1,
+    "native_transient": {
+      "status": "met",
+      "baseline_present": false,
+      "samples": 2,
+      "dispatched_at": "2026-11-24T22:55:09.012073+00:00",
+      "matched_at": "2026-11-24T22:55:09.130175+00:00",
+      "evidence": {
+        "source": "uia",
+        "text": "Native transient saved"
+      }
+    },
+    "native_form_steps": 4,
+    "concurrent_native_owner_values": [
+      "b",
+      "a"
+    ],
+    "native_frame_point_input": 1,
+    "native_modal_preserved": 1,
+    "open_browser_initial_observation_and_replay": 1,
+    "dom_form": {
+      "text": "中文追加",
+      "checked": true,
+      "selected": "上海",
+      "files": 1,
+      "count": 2,
+      "right": 1,
+      "hovered": 1
+    },
+    "response_loss_replay_extra_dispatches": 0,
+    "nested_frame_action": 1,
+    "browser_frame_point_input": 1,
+    "expectation_samples": 1,
+    "browser_transient": {
+      "status": "met",
+      "baseline_present": false,
+      "samples": 3,
+      "dispatched_at": "2026-11-24T22:55:16.031Z",
+      "matched_at": "2026-11-24T22:55:16.044Z",
+      "evidence": {
+        "source": "dom",
+        "text": "Browser transient saved"
+      }
+    },
+    "transient_cancelled_and_cleaned": 1,
+    "expect_timeout_completed_steps": [
+      0
+    ],
+    "input_available_while_waiting": 1,
+    "cancelled_wait_completed_steps": [
+      0
+    ],
+    "frame_drag": {
+      "down": 1,
+      "up": 1
+    },
+    "scroll_ticks": 3,
+    "stale_ref_rejected": 1,
+    "dom_modal_stopped_at": 1,
+    "browser_dialog_preserved_and_dismissed_explicitly": 1,
+    "navigation_stopped_at": 1,
+    "tab_closed": 1,
+    "parser_initializations": 0,
+    "elapsed_ms": 15765.0
+  },
+  "cold_start": {
+    "version": "0.5.4",
+    "build": "ce3fad10e131cdab",
+    "previous_pid": 15024,
+    "restarted_pid": 23404,
+    "new_process": true,
+    "cold_ready_ms": 2121.415,
+    "first_directory_observation_ms": 2351.325,
+    "targets": 14,
+    "workers_before_observation": {
+      "browser_initialized": false,
+      "uia_running": false,
+      "transient_uia_running": false
+    },
+    "active_operations_before_observation": 0,
+    "samples": 1
+  },
+  "pack": {
+    "name": "dsh-doraemon",
+    "version": "0.5.4",
+    "size": 2594813,
+    "unpackedSize": 3236082,
+    "entryCount": 104
+  },
+  "optional_peers": [
+    "@deepseek-ai/cordis",
+    "@deepseek-ai/dsh-tools",
+    "@deepseek-ai/schemastery"
+  ],
+  "exact_cost": null,
+  "separate_image_cost": null
+}

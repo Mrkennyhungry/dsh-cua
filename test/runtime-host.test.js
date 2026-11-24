@@ -35,6 +35,11 @@ test('runtime adapter registers six tools and forwards operation identity and ca
   assert.deepEqual([...tools.keys()], ['doraemon_open', 'doraemon_observe', 'doraemon_act', 'doraemon_wait', 'doraemon_status', 'doraemon_stop'])
   const signal = new AbortController().signal
   const exec = { callId: 'call-1', signal, agent: { session: { id: 'session-1' } } }
+  assert.match(tools.get('doraemon_open').parameters.properties.args.description, /absolute path/)
+  assert.match(tools.get('doraemon_observe').parameters.properties.query.description, /Literal, case-insensitive substring/)
+  assert.match(tools.get('doraemon_act').parameters.properties.steps.items.properties.keys.description, /\["CTRL", "S"\]/)
+  assert.deepEqual(tools.get('doraemon_wait').parameters.properties.condition.properties.state.enum,
+    ['ready', 'closed', 'url_changed', 'visible', 'hidden', 'enabled', 'disabled', 'checked', 'unchecked', 'focused'])
   await tools.get('doraemon_open').execute({ url: 'https://example.test' }, exec)
   assert.deepEqual(calls[0].body, { request_key: 'call-1', arguments: { url: 'https://example.test' } })
   assert.equal(calls[0].signal, signal)
@@ -58,6 +63,17 @@ test('runtime observation emits an actual DSH image attachment through the tool 
   assert.deepEqual(result.content[1], { type: 'image', attachment })
   assert.equal(calls[1].path, '/runtime/frames/f_1')
   assert.equal(calls[1].signal, signal)
+  const invalid = await pipeline.prepare({ name: 'doraemon_wait',
+    arguments: { condition: { kind: 'state', state: 'browser_closed' } }, callId: 'invalid-state', signal,
+    agent: { session: { id: 'session-1' } } })
+  const rejected = await pipeline.complete(invalid.exec, await pipeline.dispatch(invalid.exec))
+  assert.equal(rejected.isError, true)
+  assert.equal(calls.length, 2)
+  const valid = await pipeline.prepare({ name: 'doraemon_wait',
+    arguments: { condition: { kind: 'state', state: 'closed' } }, callId: 'valid-state', signal,
+    agent: { session: { id: 'session-1' } } })
+  const accepted = await pipeline.complete(valid.exec, await pipeline.dispatch(valid.exec))
+  assert.equal(accepted.isError, false)
 })
 
 test('an image storage failure preserves dispatched operation data without unusable coordinates', async () => {

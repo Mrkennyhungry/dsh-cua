@@ -13,8 +13,11 @@ const condition = {
   type: 'object', additionalProperties: false,
   properties: {
     kind: { type: 'string', required: true, enum: ['text', 'element', 'window', 'state'] },
-    text: { type: 'string' }, match: { type: 'string', enum: ['contains', 'exact'] }, ref: { type: 'string' },
-    title: { type: 'string' }, state: { type: 'string' },
+    text: { type: 'string', description: 'Match observation.text. Browser text comes from the visible page body. Read editable values from observation.elements[].value.' },
+    match: { type: 'string', enum: ['contains', 'exact'] }, ref: { type: 'string' },
+    title: { type: 'string' },
+    state: { type: 'string', enum: ['ready', 'closed', 'url_changed', 'visible', 'hidden', 'enabled', 'disabled', 'checked', 'unchecked', 'focused'],
+      description: 'For kind=state use ready, closed or url_changed. For kind=element use visible, hidden, enabled, disabled, checked, unchecked or focused.' },
   },
 }
 const output = {
@@ -82,7 +85,8 @@ export function registerRuntimeTools(ctx, bridge, register) {
       description: 'Open an application or URL, connect to an existing browser, or activate a desktop target and return its initial observation.',
       parameters: {
         url: { type: 'string', description: 'URL to open in the dedicated persistent browser, or navigate target_id to.' },
-        app: { type: 'string', description: 'Installed application name or executable path.' }, args: strings,
+        app: { type: 'string', description: 'Installed application name or executable path.' },
+        args: { ...strings, description: 'Application arguments. To open a file directly, set app to notepad and args to an array containing its absolute path.' },
         target_id: { type: 'string', description: 'Existing target to activate.' },
         connect: { type: 'string', description: 'Explicit CDP endpoint for an existing browser.' }, image: { type: 'boolean' },
       }, path: '/runtime/open', operation: true,
@@ -92,7 +96,7 @@ export function registerRuntimeTools(ctx, bridge, register) {
       description: 'List desktop targets or read a target, returning elements, observation references and an optional image.',
       parameters: {
         target_id: { type: 'string', description: 'Omit to list available targets.' },
-        query: { type: 'string', description: 'Semantic filter or visual query for a target.' },
+        query: { type: 'string', description: 'Literal, case-insensitive substring of observed text or element fields. Omit to read all content or list targets. An unmatched query can trigger OCR/YOLO.' },
         cursor: { type: 'string', description: 'Continue a paginated observation without rescanning.' },
         image: { type: 'boolean', description: 'Request an image explicitly, otherwise use the runtime image policy.' },
         region: { type: 'object', additionalProperties: false, properties: {
@@ -112,7 +116,8 @@ export function registerRuntimeTools(ctx, bridge, register) {
           from: point, to: point,
           text: { type: 'string', description: 'Required for input, at most 12000 characters.' },
           mode: { type: 'string', enum: ['replace', 'insert'], description: 'Required for input. Choose replace or insert explicitly.' },
-          button: { type: 'string', enum: ['left', 'right'] }, count: { type: 'integer' }, keys: strings,
+          button: { type: 'string', enum: ['left', 'right'] }, count: { type: 'integer' },
+          keys: { ...strings, description: 'For key actions, provide each key separately. Ctrl+O is ["CTRL", "O"], Ctrl+S is ["CTRL", "S"]. All keys in the array form one shortcut.' },
           direction: { type: 'string', enum: ['up', 'down', 'left', 'right'] },
           amount: { type: 'integer' }, values: strings, checked: { type: 'boolean' }, files: strings,
         } } }, expect: { ...condition, properties: {

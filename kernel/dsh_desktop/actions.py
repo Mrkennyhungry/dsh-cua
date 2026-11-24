@@ -76,7 +76,7 @@ class ActionDispatcher:
                 if action == 'key':
                     from .game.input import pyautogui
                     if any(_KEY_ALIASES.get(value.lower(), value.lower()) not in pyautogui.KEYBOARD_KEYS for value in values):
-                        raise ValueError('keys contains an unsupported key name')
+                        raise ValueError('keys contains an unsupported key name. Provide each key separately, for example ["CTRL", "O"]')
         if 'expect' in arguments:
             expect = arguments['expect']
             if not isinstance(expect, dict) or expect.get('kind') not in ('text', 'element', 'window', 'state'):
