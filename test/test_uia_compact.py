@@ -215,7 +215,7 @@ class ObservationCompactionTests(unittest.TestCase):
         }
 
     def test_drops_duplicate_geometry_and_keeps_named_click_point(self):
-        from dsh_desktop.dsh_bridge import _compact_observation
+        from dsh_desktop.standalone_bridge import _compact_observation
 
         out = _compact_observation(self.raw)
         first = out["ui_elements"][0]
@@ -231,7 +231,7 @@ class ObservationCompactionTests(unittest.TestCase):
 
     def test_78_is_not_turned_into_130_at_six_hundred_pixels(self):
         """2026-10-30 Steam live: normalized y=78 was rescaled by 1000/600."""
-        from dsh_desktop.dsh_bridge import _compact_observation
+        from dsh_desktop.standalone_bridge import _compact_observation
 
         raw = {
             "space": "window",
@@ -251,7 +251,7 @@ class ObservationCompactionTests(unittest.TestCase):
 
     def test_666_is_not_turned_into_833_by_the_payload(self):
         """Live regression: a 666px-looking normalized y must stay 666."""
-        from dsh_desktop.dsh_bridge import _compact_observation
+        from dsh_desktop.standalone_bridge import _compact_observation
 
         raw = {"ui_elements": [{
             "text": "童年", "bbox": [70, 650, 125, 682],
@@ -263,13 +263,13 @@ class ObservationCompactionTests(unittest.TestCase):
         self.assertNotEqual(element["click_y"], 833)
 
     def test_original_input_is_not_mutated(self):
-        from dsh_desktop.dsh_bridge import _compact_observation
+        from dsh_desktop.standalone_bridge import _compact_observation
 
         _compact_observation(self.raw)
         self.assertIn("bbox", self.raw["ui_elements"][0])
 
     def test_falls_back_to_the_bbox_center_when_click_is_absent(self):
-        from dsh_desktop.dsh_bridge import _compact_observation
+        from dsh_desktop.standalone_bridge import _compact_observation
 
         raw = {"ui_elements": [{"text": "x", "bbox": [10, 20, 30, 60]}]}
         element = _compact_observation(raw)["ui_elements"][0]
@@ -277,7 +277,7 @@ class ObservationCompactionTests(unittest.TestCase):
         self.assertEqual(element["click_unit"], "normalized_0_1000")
 
     def test_desktop_scope_marks_every_click_as_screen_pixels(self):
-        from dsh_desktop.dsh_bridge import _compact_observation
+        from dsh_desktop.standalone_bridge import _compact_observation
 
         raw = {
             "space": "desktop",
@@ -295,7 +295,7 @@ class ObservationCompactionTests(unittest.TestCase):
         self.assertEqual(element["click_unit"], "screen_pixels")
 
     def test_reports_both_sizes(self):
-        from dsh_desktop.dsh_bridge import _compact_observation
+        from dsh_desktop.standalone_bridge import _compact_observation
 
         out = _compact_observation(self.raw)
         self.assertLess(out["payload_bytes"], out["payload_bytes_full"])

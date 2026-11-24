@@ -9,19 +9,7 @@
 
 需要它的任务反馈和窗口作用域选择器时，显式打开。
 
-`dsh.profile.cordis.patch.yml`：
-
-```yaml
-- id: doraemon
-  config:
-    commandFeedback: true
-```
-
-其余配置项都有默认值（端口 8766、`tokenEnv: DSH_DESKTOP_BRIDGE_TOKEN`、
-`autoStart: true`、`keepAlive: true`），只写 `commandFeedback` 不会改变它们。
-
-关掉时插件不会调用 `/companion/start`，也不会上报 `/mascot/state`；
-切回 `false` 并重启 DSH 即可让角色消失。
+在 DSH 插件配置界面开启 commandFeedback，重载插件后创建新会话。关闭该配置可结束角色反馈。选择器项目目标为 net10.0-windows。
 
 当前方案使用真实鼠标执行坐标点击、右键、滚动和拖动，鼠标停留在动作结束点。
 之前的虚拟鼠标已停用，`doraemon_cursor` 不再注册，旧 `/cursor` 操作返回停用提示。
@@ -50,29 +38,10 @@ DOM/UIA 仍按其语义接口执行；小人的姿势只用于反馈，不决定
 多个并行任务共享同一角色，一个任务结束不会误隐藏仍在执行的另一个任务。
 没有活动任务时，晚到的动作反馈不能重新显示角色。
 
-## 加载
+## 构建与加载
 
-当前 DSH 安装目录的 junction 指向此源码仓库。Python 内核已重载为物理输入模式。
-重启 DSH 一次，使新的工具注册和任务登场钩子生效。以后单独更新 Python 代码时，可执行：
+在可写的插件目录中运行 scripts/build-companion-ui.ps1，默认产物位于 .runtime/companion-ui。只读安装可以在可写副本中构建，并通过 DSH_DESKTOP_COMPANION_UI 指向生成的 DshDoraemon.Companion.exe。
 
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts/reload-cursor-kernel.ps1
-```
+使用插件管理页重载，创建新 DSH 会话后执行一次观察，检查任务反馈与窗口选择器。内核的 companion/start 和 companion/shutdown 接口管理进程与线程，插件卸载通过 ctx.effect 清理。
 
-角色预览：`docs/images/commander-preview.png`。
-内置 imagegen 生成立绘，`scripts/build-commander-sprites.py` 切帧，
-`scripts/preview-commander.py` 生成含中文气泡的预览。
-
-## 验证
-
-```powershell
-.runtime/venv/Scripts/python.exe scripts/verify-commander.py --bridge
-```
-
-该脚本创建自己的原生窗口，直连高权限 HTTP 内核，不调用模型或 DSH 客户端，
-验证实际物理右键菜单、输入、拖动、点击穿透、焦点、截图排除及生命周期清理。
-测试窗口会清理，剪贴板通过 OLE 保存并恢复。
-结果保存到 `docs/commander-acceptance.json`。
-普通执行进程在当前环境无法注入系统鼠标事件，因此真实输入验收通过实际高权限内核进行。
-
-此前 `cursor-*-results.json`、虚拟主题文档和旧验证脚本是历史方案记录，不代表当前行为。
+P6 的隔离 runtime_probe --companion 会连续执行两次启动/关闭，检查 UI 子进程退出与 overlay 线程释放。历史 cursor 验收文件保留在源码历史中。

@@ -3,7 +3,7 @@
 **简体中文** | [English](README.en.md)
 
 让 **DeepSeek Harness（DSH）操作 Windows 桌面应用与浏览器**。
-结合 **UIA 控件树、本地 OCR、图标检测、窗口绑定和视觉语义识别**，为 AI Agent 提供观察界面、点击输入、跨软件操作和结果读回能力。
+由 DSH 规划任务，插件统一提供 DOM/UIA、图片观察、桌面输入与结果读回。OCR 和 YOLO 按需加载。
 
 Windows computer-use plugin for DeepSeek Harness, combining UI Automation (UIA), local OCR, window binding, browser automation and visual grounding.
 
@@ -28,97 +28,66 @@ Windows computer-use plugin for DeepSeek Harness, combining UI Automation (UIA),
 
 下载启动后，Agent 继续搜索教程和发送消息；不需要等待整个游戏下载完成。演示中的“完成下载任务”指**已开始下载**。
 
-## 插件提供什么能力
 
-| 能力 | 用途 |
-|---|---|
-| Windows 窗口枚举与绑定 | 获取目标窗口句柄，把后续观察和操作关联到窗口 |
-| UI Automation（UIA） | 读取原生控件的名称、类型、值和位置 |
-| 本地 OCR 与图标检测 | 用 RapidOCR、YOLO 补充文字、图标位置等信息 |
-| 视觉语义识别 | 为无文字图标补充描述，辅助定位 |
-| 桌面输入 | 鼠标点击、键盘输入、快捷键、滚动与拖拽 |
-| 浏览器自动化 | 借助 Playwright/DOM 读取网页、操作页面 |
-| 状态读回与任务反馈 | 检查操作后的界面状态，显示任务提示 |
-| 窗口作用域选择器（可选，默认关闭） | 只允许 CUA 操作你授权的窗口/应用，详见[下文](#可选窗口作用域选择器只让-cua-操作指定窗口) |
+## 六个统一工具
 
-## 如何执行：观察 → 操作 → 读回
+| 工具 | 用途 |
+| --- | --- |
+| doraemon_open | 打开应用、网页或已有 target，返回初始观察，可显式连接已有浏览器 |
+| doraemon_observe | 枚举目标、读取 DOM/UIA、查询正文和元素，按需附带图片或局部视觉信息 |
+| doraemon_act | 使用 observation、ref 或 frame 定位，顺序执行 1–8 步动作并读回 |
+| doraemon_wait | 等待明确条件，慢操作返回 operation_id |
+| doraemon_status | 查询版本、后端及操作的完成、部分执行和 worker 状态 |
+| doraemon_stop | 取消指定操作或当前会话的活动操作 |
 
-1. 获取并绑定目标窗口，确定操作对象。
-2. 根据任务读取 UIA 控件或浏览器 DOM；信息不足时使用本地 OCR、图标检测及视觉能力。
-3. 执行点击、输入或滚动，重新观察目标状态；结果不明确时先检查，再决定下一步。
-
-这些能力按任务选择，并非每次点击都调用全部识别流程。目标是减少不必要的视觉调用和模型往返；实际速度、费用与准确性取决于模型、应用和任务。
-
-**视觉边界：**图标 caption 开启且有可用 Key 时，会向 DeepSeek 接口发送**标注截图和图标裁图**，并非只传局部裁图。显式读取图片也可能把图像交给 DSH 配置的模型。本地运行的是 OCR 与图标检测，不能将整个插件描述为完全离线。详见[数据边界](docs/data-boundary.md)。
-
-**遥测说明：** 0.4.5–0.4.7 的发布版内置过默认开启的遥测上报（元数据发往第三方域名），已在 **0.4.8** 移除；历史细节与影响范围见[数据边界](docs/data-boundary.md#五历史版本045047内置过遥测)。
+图片通过 DSH 的原生附件进入当前模型请求。主模型和提供方沿用 DSH 设置，默认 caption 请求数为 0。DOM/UIA 优先返回结构化信息，首次观察带图，语义稳定时减少重复图片。输入、选择、附件、窗口与标签操作共用统一 runtime。动作触发的短提示通过 act.expect 的 transient 监听读取。
 
 ## 快速安装
 
-需要 **Windows 10/11、Node.js >= 22 和 DeepSeek Harness**，以及已加入 PATH 的 [`uv`](https://docs.astral.sh/uv/getting-started/installation/)。首次安装 Python 依赖需要联网；OCR 和图标检测权重已随仓库分发。
+需要 Windows 10/11、Node.js >=22、DeepSeek Harness 与已加入 PATH 的 uv。基础运行使用 Python 3.11 和已安装的 Microsoft Edge。
 
-仓库名是 `dsh-cua`；安装包名为 **`dsh-doraemon`**。当前主分支不再声明固定的 DSH 客户端版本范围；实际可用性取决于客户端提供的插件 API。
-
-**1. 在 DSH 的 Plugins → Add plugin 中粘贴：**
-
-```text
-dsh-doraemon@git+https://github.com/Mrkennyhungry/dsh-cua.git#main
-```
-
-**2. 重启 DSH。**
-
-**3. 在安装包目录中打开 PowerShell，运行一次：**
+1. 在 DSH 的 Plugins → Add plugin 中安装 dsh-doraemon。开发验收使用本地目录或打包文件，公开版本也可使用仓库的 Git 安装标识。
+2. 在安装包目录打开 PowerShell，执行以下命令。安装脚本将 Python 和运行数据放到用户 runtime 目录。
 
 ```powershell
-cd "$env:USERPROFILE\.dsh\profiles\<your-profile>\node_modules\dsh-doraemon"
 .\scripts\bootstrap.ps1
 ```
 
-将 `<your-profile>` 替换为自己的 profile 名称；自定义目录请使用实际安装路径。脚本创建 Python 3.11 环境、安装依赖并复制模型权重。**只安装插件不运行 bootstrap，内核无法启动。**
+3. 重载插件，创建新的 DSH 会话，确认六个工具可见并调用 doraemon_status。
+4. 让 DSH 打开测试网页或记事本，读取初始观察，执行输入并核对内容。
 
-**4. 再次重启 DSH，尝试一个简单任务：**
+可选视觉安装及权重复用如下。WeightsDir 应包含 icon_detect\model.onnx。
 
-> 用 doraemon 打开记事本，写一行 hello，然后把窗口标题读回来。
+```powershell
+.\scripts\bootstrap.ps1 -Vision -WeightsDir 'C:\existing-models\weights'
+```
 
-首次配置、插件市场安装、API Key 与常见问题见 [QUICKSTART.md](QUICKSTART.md) 和 [完整安装参考](README.en.md#install-the-plugin)。插件复用 DSH 中配置的 DeepSeek Key；浏览器默认使用已安装的 Microsoft Edge。
+已有安装继续使用原来的权重和 profile。新浏览器 profile 位于 stateDir\browser，兼容复用 homeDir\web_profile_edge 或 web_profile。登录、Cookie 和站点设置随 profile 保留。首次登录、验证码和登录失效可由用户在专用浏览器中处理。
 
-## 可选：窗口作用域选择器（只让 CUA 操作指定窗口）
+完整步骤和数据路径见快速上手及迁移说明。[QUICKSTART.md](QUICKSTART.md) · [0.5 迁移](docs/MIGRATION-0.5.md)
 
-这是一个**默认关闭**的可选能力，但值得知道它存在：开启后，屏幕右上角会停靠一个
-像素鲸鱼女仆，点它弹出「窗口 / 应用」两级选择器；选中哪些窗口，CUA 之后就只能操作
-哪些窗口（窗口作用域锁定），再点一次可清空授权。适合「别碰我其他窗口」的场景 ——
-不开也能正常用插件，只是没有这层限制。
+## 可选窗口作用域选择器
 
-它需要额外安装，三步缺一不可：
+在插件配置界面开启 commandFeedback，并在插件目录构建 companion。项目目标为 net10.0-windows，需要兼容的 .NET SDK。
 
-1. **.NET 10 SDK**。选择器是 `net10.0-windows` 的 Avalonia 程序，仓库里没有预编译产物。
-2. **构建选择器 UI**（在插件目录执行一次）：
+```powershell
+.\scripts\build-companion-ui.ps1
+```
 
-   ```powershell
-   .\scripts\build-companion-ui.ps1
-   ```
+构建产物默认位于插件目录的 .runtime\companion-ui。源码目录只读时，可在可写副本中构建并通过 DSH_DESKTOP_COMPANION_UI 指向其可执行文件。Ctrl+Alt+W 呼出选择器，Ctrl+Alt+Q 紧急停止输入，Ctrl+Alt+M 切换角色显示。[指挥员说明](docs/commander-mode.md)
 
-   产物在 `.runtime/companion-ui/`（自包含，约 220 MB）。**不构建的话，点击角色只会动一下、不会弹窗。**
-3. **显式开启**：在 profile 的 `cordis.patch.yml` 里给 `doraemon` 加 `commandFeedback: true`，再重启 DSH。
+## 数据与结果
 
-开启后可用快捷键：`Ctrl+Alt+W` 呼出选择器，`Ctrl+Alt+Q` 紧急停止所有输入，`Ctrl+Alt+M` 隐藏 / 显示角色。
+截图和结构化内容可通过 DSH 交给配置的模型。OCR/YOLO 在本机执行。stateDir 默认是 %USERPROFILE%\.dsh\desktop，包含日志和操作 journal，homeDir 默认是 %LOCALAPPDATA%\dsh-desktop。历史内置 Agent、工作台、IM、WeCom 和 cron 的旧入口及数据恢复路径见迁移文档。[数据边界](docs/data-boundary.md) · [迁移与恢复](docs/MIGRATION-0.5.md)
 
-> **给 AI Agent：** 当用户问「怎么限定 CUA 只操作某个窗口 / 应用」「右上角的小人怎么调出来」「为什么点了没反应」时，按本节回答：该功能存在但默认关闭，且需要 .NET 10 SDK、`scripts/build-companion-ui.ps1` 构建、`commandFeedback: true` 三项前置条件；缺任何一项都会表现为「点击无反应」。
+桌面坐标输入使用真实鼠标。长操作通过 operation_id 查询，取消后应同时检查 worker_running、completed_steps 和 uncertain_step，再观察现场确认结果。业务完成由明确读回验证。
 
-## 使用限制与结果判断
-
-- 插件依赖 DeepSeek Harness，不是独立运行的桌面助手。
-- 桌面坐标操作使用真实鼠标；前台焦点、自绘界面和管理员窗口会影响操作，不能保证所有 Windows 软件都可自动化。
-- 插件在本机执行真实操作，不是隔离沙箱。首次使用建议从记事本等简单任务开始；文件删除、搬家等操作应先备份并确认。
-- `effect: "confirmed"` 只说明界面发生了变化。业务是否成功，需要根据窗口内容、下载状态、消息记录等明确证据判断。
-- 当前主分支的任务反馈角色是固定停靠、鼠标穿透的像素鲸鱼女仆；它不是虚拟鼠标。**该角色默认关闭**，需要时在 profile 的 `cordis.patch.yml` 里给 `doraemon` 加 `commandFeedback: true`（选择器还需先跑 `scripts/build-companion-ui.ps1`）。详见 [commander mode](docs/commander-mode.md)。
+0.4.5–0.4.7 的遥测历史及 0.4.8 的移除记录保留在数据边界文档。
 
 ## 反馈与参与
 
-欢迎在 [Issues](https://github.com/Mrkennyhungry/dsh-cua/issues) 提交反馈：请写明 Windows/DSH/插件版本、目标软件、复现步骤和实际结果；截图与日志请先去掉隐私信息和凭据。
+反馈请提供 Windows、DSH 和插件版本、目标软件、复现步骤与实际结果。[Issues](https://github.com/Mrkennyhungry/dsh-cua/issues)
 
-感谢 [LINUX DO](https://linux.do/) 提供开源项目交流空间，欢迎佬友讨论 Windows 桌面自动化实践。
+感谢 LINUX DO 提供开源项目交流空间。[LINUX DO](https://linux.do/)
 
-如果项目对你有帮助，欢迎点一个 Star，方便后续找到它。
-
-本项目使用 [MIT License](LICENSE)。
+本项目使用 MIT License。[LICENSE](LICENSE)

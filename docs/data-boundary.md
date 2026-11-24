@@ -1,50 +1,34 @@
-# 数据边界与效果表述（dsh-doraemon）
+# 数据边界与结果读回
 
-本文回答两个问题：**什么会离开这台机器**，以及**"成功"到底证明了什么**。
-结论都对应到具体代码位置，改代码后请同步本文。
+## 模型输入与本机数据
 
-## 一、什么会离开本机
+| 内容 | 处理位置与触发方式 |
+| --- | --- |
+| DOM/UIA、正文和动作读回 | 工具结果进入 DSH 当前会话，由其模型配置决定请求目的地 |
+| 图片 | open、observe 和动作读回按策略生成，Host renderer 通过 DSH 原生附件交给当前模型 |
+| OCR/YOLO | 显式视觉查询时按需加载本地 ONNX 依赖和权重 |
+| Caption | 默认 runtime 请求数为 0，历史模块保留在源码兼容边界 |
+| 浏览器 | 专用持久 profile 保存 Cookie、登录和站点设置，访问用户任务指定的网站 |
+| 日志与 journal | stateDir 默认 %USERPROFILE%\.dsh\desktop，包含操作身份、部分结果与不确定步骤 |
+| Python、截图和权重 | homeDir 默认 %LOCALAPPDATA%\dsh-desktop，workspace 配置可覆盖截图与权重目录 |
 
-| 功能 | 是否外发 | 目标 | 触发条件 | 关闭方式 |
-|---|---|---|---|---|
-| OCR 文字识别（RapidOCR） | 否 | 本地 ONNX 模型（`.runtime/weights/rapidocr`） | 每次 `desktop_analyze` / uia 回退 | — |
-| 图标检测（YOLO） | 否 | 本地 ONNX（`.runtime/weights/icon_detect`） | 每次 `desktop_analyze` | — |
-| 图标语义 caption | **是** | `https://api.deepseek.com/chat/completions`，`model: deepseek-flash` | `desktop_analyze` 且 `caption=true`，**且**环境变量 `DEEPSEEK_API_KEY` 非空 | 让 `DEEPSEEK_API_KEY` 为空；或调用时 `caption=false` |
-| `desktop_read_image` | **是** | 由 DSH 侧配置的视觉模型端点决定（插件只返回 base64） | 显式调用该工具 | 不调用 |
-| 受控浏览器 `web_*` | 否（本机 Chromium） | — | — | — |
-| 网页 `web_extract` 的正文 | 由调用方模型决定 | 同上 | 调用后把文本交给模型 | 不调用 |
+图片资源按 owner 隔离，经认证的 loopback bridge 读取。操作日志会对常见输入、路径和凭据字段做脱敏。已有日志和数据的保留与备份由实际目录决定。
 
-关键事实：
+高权限任务通过 kernel-boot.json 读取 bridge token 与启动参数。文件使用当前用户、SYSTEM 和 Administrators 的访问权限。默认执行沿用本机已有权限。
 
-1. **caption 是唯一一处"把画面送出去"的地方**。发送内容是被检测图标标注过的整帧截图 + 若干图标裁图拼贴，`deepseek_caption.py:104`；不含桌面其它窗口的裁剪（整帧按被测窗口客户区截取）。
-2. 未配置 `DEEPSEEK_API_KEY` 时，`deepseek_caption.caption_icons()` 直接返回 `deepseek_called: false`，**不会发起任何网络请求**（`deepseek_caption.py:167-168`）。此时"纯本地"成立。
-3. 截图本身只落盘在 `.runtime/screenshots/<date>/`，不自动上传。
-4. **不含遥测**：没有装机统计、没有错误上报，内核不会向外发送使用数据，也没有安装 ID 之类的标识（0.4.8 移除了 `telemetry` 模块及其全部调用点）。
-5. `kernel-boot.json` 以**明文**保存 bridge token，以及（存在时）`DEEPSEEK_API_KEY`。权限已收紧为：当前用户 + `SYSTEM` + `Administrators`（`kernel.js` 写入后用 `icacls /inheritance:r` 重设）。它必须是明文——高权限计划任务要读它传给内核。
+## 浏览器与 profile
 
-## 二、CDP 端口
+默认使用专用持久 profile，兼容已有 homeDir\web_profile_edge 或 web_profile，新目录位于 stateDir\browser。运行时通过 mutex 和实际进程参数检查占用。首次登录、验证码和失效登录可由用户处理。
 
-- 受控浏览器以 `--remote-debugging-port=9333` 启动（`web_tools.py:295`），未指定 `--remote-debugging-address`，因此 Chromium 默认**只绑定 127.0.0.1**。
-- 这**不是**安全隔离：CDP 本身没有认证，**本机任何进程**都能附着并驱动这个浏览器（含已登录的会话 Cookie）。插件只保证"不对外网暴露"，不保证"本机其它程序不能用"。
-- 若需彻底隔离，应在独立 Windows 用户下运行，或改用不保留登录态的临时 profile。
+CDP 默认端口为 9333，浏览器在本机 loopback 提供调试接口。显式连接已有浏览器使用 open.connect。本机可访问 CDP 的进程能驱动该浏览器及其登录会话。
 
-## 三、"成功"到底证明了什么
+## 取消、部分完成与结果
 
-工具返回值混用了三种不同强度的结论，读的时候必须区分：
+act 的 dispatch、completed_steps、uncertain_step 和动作后 observation 描述现场证据。条件满足记录在 expectation 中。status 的 worker_running 表示底层调用是否仍在执行，stop 撤销后续输入租约。返回不确定状态时，先查询 operation 并重新观察目标，再决定恢复步骤。
 
-| 等级 | 含义 | 现实中的证据 |
-|---|---|---|
-| **动作已发送** | 输入事件已递交给目标窗口 | `desktop_click` / `desktop_type` 的 `action_performed: true` |
-| **界面已变化** | 像素或 UIA 状态相对动作前发生了变化 | `effect: "confirmed"`、`visual_delta`、`window_closed`、`windows_added` |
-| **业务结果已验证** | 用可判读的读回证明了目标状态（列表出现该行、数值等于预期、文件内容正确） | 只有显式读回才有：`text_readback`、`desktop_uia` 命中后读到的文本、`web_extract` 的结果 |
+窗口关闭可能留下保存确认框。任务完成需通过目标文本、状态或其他业务证据明确读回。历史工具的 effect 字段语义和恢复方式保留在独立源码版本中。
 
-必须注意：
-
-- `effect: "confirmed"` **不等于业务成功**。它只说明界面动过——一个弹窗、一次错误的跳转也会让像素变化。
-- `desktop_type` 的 `effect_verified: false` 是**故意的**：它明确告诉你"还没核对"。
-- `desktop_launch_app` 的 `success: true` 只代表"观察到可归属的新窗口"，不代表应用进入可用状态。
-- `web_click` 在点击已发出但随后读取状态失败时返回 `RESULT_UNKNOWN`，这是**未知**，不是失败也不是成功；正确做法是重新 `web_snapshot` 观察，而不是重试点击。
-- 清理报告 `cleanup_success: false` 时，可能只是"目标窗口没关掉"（例如它弹了保存确认框），**不代表数据损坏**。
+迁移时在 kernel 退出后复制整个数据目录及 SQLite 的 WAL/SHM 文件，保留原目录作为恢复点。[迁移与恢复](MIGRATION-0.5.md)
 
 ## 五、历史版本（0.4.5–0.4.7）内置过遥测
 
@@ -68,8 +52,3 @@
 - **写令牌公开**意味着事件可被伪造/污染，但不构成读取他人数据的通道。
 
 建议：安装 0.4.8 及以上（或直接 `#main`）；历史版本请升级，不要仅依赖配置里的开关。
-
-## 六、未验证的部分（不要当成已保证）
-
-- 高权限（High integrity）启动链路用的是计划任务 + 明文 boot 文件，**这不是安全边界**，只是为了让受控应用与内核同身份，避免 UIPI 拦截。
-- `DSH_DESKTOP_LIVE` 相关的手工验证依赖真实桌面会话，CI 不覆盖。

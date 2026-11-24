@@ -3,7 +3,7 @@
 import unittest
 from unittest import mock
 
-from dsh_desktop import dsh_bridge
+from dsh_desktop import standalone_bridge as dsh_bridge
 
 
 class PixelVerdictTests(unittest.TestCase):

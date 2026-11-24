@@ -64,6 +64,11 @@ class RuntimeTests(unittest.TestCase):
         stop.assert_called_once()
         companion._stop_all.assert_called_once()
 
+    def test_companion_binary_can_live_outside_read_only_package(self):
+        from dsh_desktop.companion import _ui_executable
+        with mock.patch.dict(os.environ, {'DSH_DESKTOP_COMPANION_UI': r'C:\runtime\DshDoraemon.Companion.exe'}):
+            self.assertEqual(_ui_executable(), Path(r'C:\runtime\DshDoraemon.Companion.exe'))
+
     def test_watch_shutdown_releases_all_sessions(self):
         from dsh_desktop.watch import WatchRegistry
         registry = WatchRegistry()

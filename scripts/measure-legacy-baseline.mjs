@@ -5,7 +5,7 @@ import { join, dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { randomUUID } from 'node:crypto'
 import { performance } from 'node:perf_hooks'
-import { apply, Config } from '../index.js'
+import { apply, Config } from '../standalone/legacy-host.js'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 process.chdir(root)

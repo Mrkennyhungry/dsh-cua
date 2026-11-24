@@ -4,6 +4,14 @@ import sys
 import time
 import unittest
 import uuid
+from pathlib import Path
+
+if os.environ.get('DSH_TEST_PACKAGES'):
+    import site
+    packages = Path(os.environ['DSH_TEST_PACKAGES'])
+    site.addsitedir(str(packages))
+    _dll_directory = os.add_dll_directory(str(packages / 'pywin32_system32'))
+
 import psutil
 
 import win32api

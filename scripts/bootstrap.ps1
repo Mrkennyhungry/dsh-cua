@@ -1,6 +1,8 @@
 [CmdletBinding()]
 param(
   [string]$InstallDir = (Join-Path $env:LOCALAPPDATA 'dsh-desktop'),
+  [switch]$Vision,
+  [string]$WeightsDir,
   [switch]$DryRun
 )
 $ErrorActionPreference = 'Stop'
@@ -12,7 +14,7 @@ $python = Join-Path $venv 'Scripts\python.exe'
 $uv = Get-Command uv -ErrorAction SilentlyContinue
 if (-not $uv) { throw 'Install uv and retry; the bundled kernel requires Python 3.11.' }
 if ($DryRun) {
-  Write-Host "Would create $venv, install requirements, and copy local model weights."
+  Write-Host "Would create $venv and install base runtime dependencies. Vision=$Vision; WeightsDir=$WeightsDir"
   return
 }
 New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
@@ -22,11 +24,20 @@ if (-not (Test-Path $python)) {
 }
 & $uv.Source pip install --python $python -r $requirements
 if ($LASTEXITCODE -ne 0) { throw 'Kernel dependencies could not be installed.' }
-$weightsSource = Join-Path $pluginRoot 'vendor\weights'
-$weightsDir = Join-Path $InstallDir 'weights'
-if (Test-Path (Join-Path $weightsSource 'icon_detect\model.onnx')) {
-  New-Item -ItemType Directory -Path $weightsDir -Force | Out-Null
-  Copy-Item (Join-Path $weightsSource '*') $weightsDir -Recurse -Force
+if ($Vision) {
+  & $uv.Source pip install --python $python -r (Join-Path $pluginRoot 'requirements-vision.txt')
+  if ($LASTEXITCODE -ne 0) { throw 'Optional vision dependencies could not be installed.' }
+}
+$runtimeWeightsDir = Join-Path $InstallDir 'weights'
+if ($WeightsDir) {
+  $weightsSource = (Resolve-Path -LiteralPath $WeightsDir).Path
+  if (!(Test-Path -LiteralPath (Join-Path $weightsSource 'icon_detect\model.onnx'))) {
+    throw 'WeightsDir must contain icon_detect\model.onnx. Existing runtime weights are retained.'
+  }
+  New-Item -ItemType Directory -Path $runtimeWeightsDir -Force | Out-Null
+  if ([IO.Path]::GetFullPath($weightsSource) -ne [IO.Path]::GetFullPath($runtimeWeightsDir)) {
+    Copy-Item (Join-Path $weightsSource '*') $runtimeWeightsDir -Recurse -Force
+  }
 }
 $env:PYTHONPATH = $sourceRoot
 $env:DSH_DESKTOP_HOME = $InstallDir

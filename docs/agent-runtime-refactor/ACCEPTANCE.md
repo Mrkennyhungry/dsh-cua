@@ -373,3 +373,27 @@ open 在导航前登记 call 身份，失败导航的重试保留原 target 和�
 图片 smoke 证据为 p5-evidence/local-model-images.json，完整操作证据为 p5-evidence/local-actions-probe.json。图片卡片在源 1000×650 图片右下区域，映射到 1440×900 浏览器视口后处于水平中央偏下，两模型的位置描述符合实际输出。两路 UI 费用显示分别为 ¥0.00、¥0.02，属于取整显示。精确费用、图片独立计价和资源字节量未知。图片后请求的 token 含整段请求上下文。每模型图片 smoke 样本量为 1，P7 的多次旧新对照仍待执行。
 
 常规 Python 跳过项仍为受 DSH_LIVE_DIALOG_TEST 开关控制的真实窗口测试，P0 已单独执行通过，本轮原生模态能力另经 actions_probe 验证。存在的 invalid escape docstring warning 为历史桥接说明字符串，测试失败数为 0。P5 的所有退出项现为 PASS。
+
+## 16. P6 执行记录
+
+从 P5 独立提交 d1115ea 和干净工作树开始，版本为 0.5.2。Host 配置抽为 host-config.js，历史注册移到 standalone/legacy-host.js。默认桥接移除旧 tasks、windows、web、KB、decide 等路由，历史适配器保留在源码 standalone_bridge.py。BrowserRuntime 持有持久 context，复用原单线程 worker，浏览器启动辅助与 DOM snapshot 分别集中到 browser_support.py 和 dom.py。共享 Win32/UIA、输入、DPI、取消租约和部分结果实现继续由 runtime 使用。
+
+| P6 退出项 | 状态 | 实测结果 |
+| --- | --- | --- |
+| 默认导入与依赖 | PASS | 新建 C:/Users/Admin/AppData/Local/dsh-desktop-p6-test/venv，bootstrap 联网安装基础分发包 38 个，源码 import 1/1；TestClient 另装 3 个测试依赖。禁止 16 个可选依赖或历史模块导入时，实际 HTTP DOM/UIA 流程成功，禁用集合加载 0、parser 初始化 0、caption 0；旧路由缺席 5/5 |
+| 六工具与历史边界 | PASS | 解包后的 index.apply 注册 6/6，卸载 effect 1/1；默认 Host 对历史 Host 导入 0，默认桥接对 standalone_bridge/web_tools 导入 0。旧路由回归和旧 Host 测试保留在源码边界，共享 snapshot、浏览器启动辅助及浏览器 worker 各 1 个实现 |
+| 干净 runtime 操作 | PASS | 新安装解释器经真实统一 HTTP open/observe 读取原生 JPEG 480×180、UIA 7 控件、本地 DOM 1 命中，5328 ms；companion 启动/关闭 2 轮、进程退出与 overlay 线程释放 2/2，AppControllerRef 清理 1/1 |
+| 真实动作回归 | PASS | 基础依赖新环境执行 actions_probe，19 次同步操作、4 步原生表单、8 步 DOM 表单、附件 1、两 owner 正确输入 2/2；总耗时 15141 ms，p50 165.856 ms、p95 3073.746 ms，最近秩 n=19；原生提示命中 122.550 ms、浏览器 6 ms，取消清理 1/1、重放额外派发 0、caption 0 |
+| profile 保留与恢复 | PASS | targets_probe 检查 profile 占用诊断 1/1、Cookie 恢复 1/1、站点设置恢复 1/1、同 URL 标签 3、嵌套 frame 3、错实例点击 0、外接浏览器释放及卸载后存活 1/1，基础 fixture 12781 ms。另将已关闭 fixture profile 完整复制到 home 兼容旧路径，复制恢复 1/1、原目录回退恢复 1/1，Cookie/站点设置各检查 2/2，原目录保留 1/1，18515 ms |
+| 可选视觉与权重升级 | PASS | bootstrap -Vision 成功，既有 icon_detect/model.onnx 复制前后各 80428823 bytes，SHA256 一致 1/1。禁止 socket connect 的独立视觉 probe 识别中文小字A7B9，OCR 1579.688 ms、YOLO 351.450 ms、检测 4；OCR 加载 YOLO 0、YOLO 加载 OCR 0、网络 0、caption 0 |
+| 发布与只读源码 | PASS | npm pack 实包 104 文件、Python 模块 41，压缩 2593842 bytes、解包 3232856 bytes，3 个 SDK peers 保持 optional。解包直接运行原生/UIA/DOM/companion 成功。隔离包目录加显式写入拒绝 ACL，写入探针拒绝 1/1，真实观察与 companion 2 轮成功，journal/profile 写入隔离 home/state；随后恢复测试目录 ACL |
+| 安装升级与内核身份 | PASS | 0.5.1 resident kernel 经 health PID 接管 1/1，核对 pid 后停止 1/1。DSH Plugins 管理页对既有本地 link 安装停用/启用，显示 0.5.2、运行组件 1。新 DSH 会话六工具发现 6/6，status success=true、operations=[]，version=0.5.2、build=0bc6fd65df535032、epoch=41ccd0ff47af40f6afb4a106434422be；旧协议拒绝及 PID 变更回归通过 |
+| 升级后图片 smoke | PASS | wb/cn:hy4std，新会话 status→open→observe→stop，4 工具、5 模型请求；图像独有 BZCPAMNX 8/8，DOM text 长度 0、elements 0；全图 1366×854，模型自行追加 1 次 ROI，stop operations=[]。UI 75 s、69.3K 聚合 token、取整费用 ¥0.03，精确费用未知，n=1 |
+| 文档与数据去向 | PASS | README 中英文、QUICKSTART、MIGRATION-0.5、data-boundary、commander-mode 共 6 份使用文档更新；迁移表覆盖自主 Agent/旧 status-stop/desktop/web/decide/KB/工作台/IM/WeCom/cron。源码核对 Hermes __main__ 设置 HERMES_HOME 为工作台 home，SessionDB 默认 state.db；知识 knowledge、cron/jobs.json 与 cron/output 原位置保留 |
+| 完整检查 | PASS | scripts/check.ps1，Node 91 PASS、0 FAIL、0 SKIP、932.9777 ms；Python 311 PASS、0 FAIL、1 预期 SKIP、43 subtests PASS、11.58 s；Host/Client 语法 2/2，git diff --check 通过 |
+
+证据位于 p6-evidence。基础安装命令使用 scripts/bootstrap.ps1 -InstallDir C:/Users/Admin/AppData/Local/dsh-desktop-p6-test，后续 -Vision -WeightsDir 使用原有 runtime weights。解包验证通过 PYTHONPATH 指向实际 npm 包 kernel，使用新安装解释器运行 test/runtime_probe.py <隔离 home> --live --companion。该 probe 阻止可选包及历史模块导入，验证六工具对应 HTTP 入口、鉴权、退役路由、图片资源和生命周期。只读测试仅对本次解包目录施加和恢复 ACL，用户源目录与数据目录保留原值。
+
+实包验证先发现缺失 worker.py 和 whale_commander 资源，已补白名单及相应用例。资源加载失败还暴露 CursorOverlay._canvas 在异常清理前未初始化，改为构造时初始化并复验。隔离旧 venv 的 pywin32 DLL 在子进程缺失，fixture 按 DSH_TEST_PACKAGES 显式加载测试依赖后恢复。首次 companion probe 与 resident kernel 同时注册热键时记录 WinError 1409，仍完成两轮资源清理；停止本轮旧 kernel 后的只读复验无该冲突。新 companion 可通过 DSH_DESKTOP_COMPANION_UI 使用可写目录中的构建产物。
+
+主包将独立工作台等历史模块排除，源码恢复入口和测试继续保留，既有用户数据移动或删除次数为 0。Cordis optional peer 范围调整为 >=4.0.5 <5.0.0，依据本机 4.1.0 的实际 SDK 测试。常规跳过项沿用显式真实窗口开关，实机模态由 actions_probe 覆盖。P6 所有退出项 PASS，P7 的双模型旧新多次任务对照待独立实施。

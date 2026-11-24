@@ -6,7 +6,7 @@ import { homedir, tmpdir } from 'node:os'
 import path, { delimiter, dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { execFileSync } from 'node:child_process'
-import { apply, Config, createToolTimeline } from '../legacy-host.js'
+import { apply, Config, createToolTimeline } from '../standalone/legacy-host.js'
 import { createBridge, extractFrames, ownerOf } from '../bridge-client.js'
 import { createKernel } from '../kernel.js'
 
@@ -737,9 +737,14 @@ test('package.json is BOM-free and parseable, and every shipped file exists', as
   for (const file of manifest.files.filter(file => !file.startsWith('!') && !file.includes('*'))) {
     await readFile(new URL(`../${file}`, import.meta.url))
   }
-  assert.ok(manifest.files.includes('kernel/**/*'), 'bundled kernel source must be included')
+  assert.ok(manifest.files.includes('kernel/dsh_desktop/runtime.py'), 'unified runtime source must be included')
+  assert.ok(manifest.files.includes('kernel/dsh_desktop/worker.py'), 'COM apartment worker must ship')
+  assert.ok(manifest.files.includes('kernel/dsh_desktop/assets/whale_commander/*.png'), 'companion sprites must ship')
+  assert.ok(manifest.files.includes('kernel/dsh_desktop/assets/cursor_whale_maid/manifest.json'), 'cursor asset metadata must ship')
   assert.ok(manifest.files.includes('requirements.txt'), 'runtime requirements must be included')
-  assert.ok(manifest.files.includes('vendor/weights/**/*'), 'bundled model weights must be included')
+  assert.equal(manifest.files.includes('vendor/weights/**/*'), false, 'vision weights are provisioned separately')
+  assert.equal(manifest.files.includes('legacy-host.js'), false, 'legacy Host must stay outside the default package')
+  assert.ok(manifest.files.includes('requirements-vision.txt'), 'optional vision installation must remain available')
   assert.ok(manifest.files.includes('README.md'), 'README.md must ship with the package')
 })
 

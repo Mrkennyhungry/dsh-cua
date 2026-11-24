@@ -135,6 +135,9 @@ def _installed_apps(limit: int = 32) -> list[dict]:
 
 def _ui_executable() -> Path:
     """Published Arc picker, kept out of the source package and git history."""
+    configured = os.environ.get('DSH_DESKTOP_COMPANION_UI')
+    if configured:
+        return Path(configured).expanduser()
     return (Path(__file__).resolve().parents[2] / ".runtime" / "companion-ui"
             / "DshDoraemon.Companion.exe")
 

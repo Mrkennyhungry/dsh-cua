@@ -68,7 +68,7 @@ class TargetTests(unittest.TestCase):
         target.handle[1].goto.assert_called_once()
 
     def test_existing_profile_is_used_and_profile_failure_is_diagnostic(self):
-        from dsh_desktop import web_tools as web
+        from dsh_desktop import browser_support as web
         with tempfile.TemporaryDirectory() as directory:
             home = Path(directory)
             legacy = home / 'web_profile_edge'
@@ -79,11 +79,8 @@ class TargetTests(unittest.TestCase):
             with mock.patch.object(browser, '_driver', return_value=driver), \
                  mock.patch.object(browser, '_acquire_profile'), \
                  mock.patch.object(web, '_browser_mode', return_value='edge'), \
-                 mock.patch.object(web, '_pw_context', None), \
-                 mock.patch.object(web, '_pw_playwright', None), \
                  mock.patch.object(web, '_prepare_playwright_temp_dir'), \
                  mock.patch.object(web, '_launch_persistent_context', side_effect=RuntimeError('profile is in use')), \
-                 mock.patch.object(web, '_shutdown_context'), \
                  mock.patch.dict('os.environ', {}, clear=False):
                 with self.assertRaises(RuntimeFault) as error:
                     browser._context()

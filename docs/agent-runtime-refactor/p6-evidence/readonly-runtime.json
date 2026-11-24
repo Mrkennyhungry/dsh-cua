@@ -1,0 +1,18 @@
+{
+  "protocol": 2,
+  "parser_initializations": 0,
+  "forbidden_imports_loaded": 0,
+  "windows": 15,
+  "retired_routes_absent": 5,
+  "health_ms": 172.0,
+  "capture": {
+    "width": 480,
+    "height": 180,
+    "format": "JPEG"
+  },
+  "uia_controls": 7,
+  "dom_matches": 1,
+  "live_elapsed_ms": 4000.0,
+  "companion_start_stop_cycles": 2,
+  "released_runtime": true
+}

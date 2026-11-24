@@ -6,7 +6,7 @@ containing "...CREATE-OK" used to be reported as a blocking dialog button.
 
 import unittest
 
-from dsh_desktop.dsh_bridge import _is_blocker_label
+from dsh_desktop.standalone_bridge import _is_blocker_label
 
 WORDS = ("确定", "取消", "关闭", "接受", "拒绝", "OK", "Cancel", "Close")
 

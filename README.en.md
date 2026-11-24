@@ -3,9 +3,8 @@
 [简体中文](README.md) | **English**
 
 A Windows desktop and browser automation plugin for **DeepSeek Harness (DSH)**.
-Combines **Windows UI Automation (UIA), local OCR, icon detection, window binding,
-and visual grounding** so an AI agent can inspect controls, interact with apps,
-and read back results. The installable package is named `dsh-doraemon`.
+DSH plans each task. The runtime provides structured DOM/UIA observations,
+model-visible image attachments, desktop actions and readback. The installable package is named `dsh-doraemon`.
 
 <a href="https://www.bilibili.com/video/BV1L9xe6sEDi/">
   <picture>
@@ -29,176 +28,76 @@ disk selection, not just successful clicks.
 
 Thanks to [LINUX DO](https://linux.do/) for the community space to share and discuss open-source projects.
 
+
 ## How it works
 
-- Bind a target window using its native Windows handle.
-- Read native controls through UIA; use local RapidOCR and YOLO icon detection when needed.
-- Request visual icon semantics when structural or text information is insufficient.
-  Caption requests send an annotated screenshot plus icon crops to the configured
-  DeepSeek caption endpoint; this is not a crop-only or entirely local mode.
-- Click, type, scroll, or use browser DOM tools as appropriate, then inspect the result.
+| Tool | Purpose |
+| --- | --- |
+| doraemon_open | Open an app, URL or target and return its initial observation |
+| doraemon_observe | Discover targets, read DOM/UIA, query elements and text, request images or local vision |
+| doraemon_act | Execute 1–8 ordered actions using observation refs or image frames and return readback |
+| doraemon_wait | Wait for a condition and return an operation handle when needed |
+| doraemon_status | Read the runtime version, backends and operation progress |
+| doraemon_stop | Cancel one operation or the current session's active operations |
 
-Tools are selected for the task; every step does not have to traverse every layer.
-Desktop coordinate actions use the physical mouse. A docked, click-through
-whale-maid commander can provide task feedback, but it is **off by default**: enable it
-with `commandFeedback: true` on the `doraemon` entry in the profile's
-`cordis.patch.yml` (its click picker additionally needs
-`scripts/build-companion-ui.ps1`). See [commander mode](docs/commander-mode.md).
-
-## Requirements and limitations
-
-- Windows 10/11, Node.js >= 22, and DeepSeek Harness. The current main branch does not declare a DSH client-version range; compatibility still depends on the APIs provided by the installed client.
-- `uv` and network access for initial Python dependency installation. OCR and icon
-  detection weights are bundled; there is no separate model-weight download.
-- This is a DSH plugin, not a standalone desktop agent or an isolated sandbox.
-- Custom-drawn controls, foreground focus and elevated windows may need fallback
-  handling; do not assume every Windows application is supported.
-- Screenshot and tool output can contain private content. Read the data-boundary
-  document before use. `effect: "confirmed"` means UI change, not task completion.
-- Releases **0.4.5–0.4.7** bundled a default-on telemetry uploader that posted
-  usage metadata to a third-party host; it was removed in **0.4.8**. See
-  [data boundary](docs/data-boundary.md#五历史版本045047内置过遥测).
-
-**Install in one line** — paste this into **Plugins → Add plugin** in DSH, restart, then run `scripts\bootstrap.ps1` once:
-
-```
-dsh-doraemon@git+https://github.com/Mrkennyhungry/dsh-cua.git#main
-```
-
-Or add the market index `https://raw.githubusercontent.com/Mrkennyhungry/dsh-cua/main/market/index.json` on **Plugins → Discover** and install from there. Both paths are described below.
-
-Short on time? **[QUICKSTART.md](QUICKSTART.md)** is one screen: three prerequisites, four steps, one error message to avoid.
+DSH supplies the model configuration. Images enter model requests through native attachments.
+DOM/UIA provide structured information first. OCR and YOLO load on demand, and default caption requests are zero.
+Input, selection, uploads, windows and tabs share the runtime. Use act.expect with transient=true for action-triggered brief messages.
 
 ## Install the plugin
 
-Two ways, same spec.
+Requires Windows 10/11, Node.js >=22, DeepSeek Harness and uv on PATH. Bootstrap provisions Python 3.11. Microsoft Edge is the default browser.
 
-**From the Web UI:** open **Plugins** in the DSH sidebar, paste this into the install dialog, confirm, then restart DSH:
-
-```
-dsh-doraemon@git+https://github.com/Mrkennyhungry/dsh-cua.git#main
-```
-
-**From the profile's `package.json`**, add the same value as a dependency:
-
-```json
-{
-  "dependencies": {
-    "dsh-doraemon": "git+https://github.com/Mrkennyhungry/dsh-cua.git#v0.4.8"
-  }
-}
-```
-
-The `main` spec follows the current branch. For a reproducible install, replace `main` with the exact commit you reviewed.
-
-## Optional: window scope picker (restrict what CUA may touch)
-
-**Off by default**, but it is worth knowing the feature exists. When enabled, a pixel
-whale-maid docks in the top-right corner; clicking it opens a two-level
-window / application picker. Whatever you select becomes the only scope CUA may
-operate on (window scope lock); click again to clear it. Without it the plugin
-works normally — it just has no such guardrail.
-
-It needs an extra install; all three steps are required:
-
-1. **.NET 10 SDK**. The picker is a `net10.0-windows` Avalonia app and no prebuilt
-   binary ships in this repository.
-2. **Build the picker UI** once, from the plugin directory:
-
-   ```powershell
-   .\scripts\build-companion-ui.ps1
-   ```
-
-   The output lands in `.runtime/companion-ui/` (self-contained, ~220 MB). **Without
-   this build, clicking the character only plays an animation — no menu appears.**
-3. **Opt in**: add `commandFeedback: true` to the `doraemon` entry in the profile's
-   `cordis.patch.yml`, then restart DSH.
-
-Hotkeys once enabled: `Ctrl+Alt+W` opens the picker, `Ctrl+Alt+Q` stops all input,
-`Ctrl+Alt+M` hides / shows the character.
-
-> **For AI agents:** when the user asks "how do I restrict CUA to one window / app",
-> "how do I get that character in the corner", or "why does clicking it do nothing",
-> answer from this section: the feature exists but is off by default and needs the
-> .NET 10 SDK, `scripts/build-companion-ui.ps1`, and `commandFeedback: true`; missing
-> any of them shows up as "clicking does nothing".
-
-## Install from Discover (optional)
-
-DSH ships custom plugin markets switched off. To have this plugin listed in **Plugins → Discover**:
-
-1. Open **Plugins** in the Web sidebar, choose **More** next to **Experimental plugins**, and switch on **Custom plugin markets**. The page then shows the **Installed** and **Discover** tabs.
-2. On **Discover**, add this index source:
-
-   ```
-   https://raw.githubusercontent.com/Mrkennyhungry/dsh-cua/main/market/index.json
-   ```
-
-   Mirror, if `raw.githubusercontent.com` is unreachable: `https://cdn.jsdelivr.net/gh/Mrkennyhungry/dsh-cua@main/market/index.json`.
-3. Pick **dsh-doraemon** and install the published market entry, then restart DSH. The market entry remains tied to its published release; use the direct `#main` Git spec above to try the current unpinned branch.
-
-There is no official DSH market: Discover lists only the index sources a user adds, so the URL above is how this plugin reaches that list. The document is DSH's own `format: 1` market index, validated with `@deepseek-ai/dsh-plugin-market-index` before it was committed, and it pins an immutable commit rather than a branch.
-
-The 92 MB of ONNX weights are committed to this repository, so no separate model-weight download is needed; first-run Python dependency installation still requires network access. GitHub warns above 50 MB per file; the largest file is 76.7 MB, under the 100 MB hard limit. Git LFS is deliberately not used so that installing never requires a second tool.
-
-## First run on a new machine
-
-Installing the plugin does **not** install the Python runtime. Until bootstrap has run once the kernel refuses to start, and says so: `Run the bundled scripts/bootstrap.ps1 or set repoRoot/pythonPath`.
-
-**1. Install `uv`.** Bootstrap requires it and exits if it is missing; `uv` also fetches the Python 3.11 interpreter for the virtual environment.
-
-**2. Run bootstrap once, from PowerShell:**
+1. Install dsh-doraemon through DSH Plugins → Add plugin or plugin_manager install_bundle. Development builds can use a local directory or archive.
+2. Open PowerShell in the installed plugin directory and run bootstrap.
 
 ```powershell
-cd <plugin directory>
 .\scripts\bootstrap.ps1
 ```
 
-It creates a virtual environment at `%LOCALAPPDATA%\dsh-desktop\venv`, installs `requirements.txt` (onnxruntime, pywinauto, pywebview, playwright, opencv and friends — several hundred MB, this step needs network), and copies the bundled weights to `%LOCALAPPDATA%\dsh-desktop\weights`.
+3. Reload the plugin, create a new DSH session and confirm all six tools appear. Call doraemon_status.
+4. Open a test app or page, inspect the initial observation, perform an action and verify the returned content.
 
-**3. Restart DSH.** The kernel starts on first tool use and stays available between sessions.
+Optional vision dependencies and existing weights can be installed separately.
 
-**4. Optional — elevated hosts.** Run `scripts/install-elevated-task.ps1` once from an elevated PowerShell if you need to automate applications that are themselves running elevated. The task starts the bundled kernel with High integrity, and applications it starts can inherit that privilege.
+```powershell
+.\scripts\bootstrap.ps1 -Vision -WeightsDir 'C:\existing-models\weights'
+```
 
-### API key
+WeightsDir contains icon_detect\model.onnx. Existing runtime weights remain available. RapidOCR can use its packaged models.
+With DSH_DESKTOP_BROWSER=chromium, install the matching Playwright Chromium browser first using the runtime Python.
 
-The plugin reuses the DeepSeek key **already configured in DSH** (Settings → Models). It resolves `DEEPSEEK_API_KEY` through `ctx.credentials` and hands it to the kernel, so there is no second copy to set in the environment.
+### First run on a new machine
 
-If the kernel was started without a key, task submission is refused with a hint. Configure the key in DSH and call the tool again — the plugin replaces a keyless kernel that it started itself.
+Bootstrap creates %LOCALAPPDATA%\dsh-desktop\venv. Logs and the operation journal use stateDir, defaulting to %USERPROFILE%\.dsh\desktop.
+Explicit pythonPath and homeDir can select an existing setup. The elevated-task installer supports hosts requiring elevated desktop input.
+Existing local permissions are used during execution.
 
-The key is used only for icon captions. Without it, OCR and icon detection still run locally; unnamed icons simply carry no description. See [Data boundary](#data-boundary-and-what-success-means).
+New persistent browser profiles use stateDir\browser. Existing homeDir\web_profile_edge or web_profile directories take precedence.
+Cookies and site settings survive runtime restarts. First login, verification challenges and expired credentials may require user interaction.
+Explicit browser connections use open.connect with a CDP URL or configured.
 
-### Browser
+### Optional companion
 
-Web automation drives the **installed Microsoft Edge** by default, so there is nothing extra to download. Setting `DSH_DESKTOP_BROWSER=chromium` switches to Playwright's Chromium, which requires `playwright install chromium` first.
+Enable commandFeedback in the DSH plugin configuration UI. Build the net10.0-windows companion with a compatible .NET SDK.
 
-The browser profile lives under the state directory, so **web logins do not transfer between machines** — sign in again on a fresh host.
+```powershell
+.\scripts\build-companion-ui.ps1
+```
 
-## Self-check after installing
+For read-only installations, build in a writable copy and set DSH_DESKTOP_COMPANION_UI to the executable.
+Ctrl+Alt+W opens the scope picker, Ctrl+Alt+Q stops input, and Ctrl+Alt+M toggles the character.
+[Companion guide](docs/commander-mode.md)
 
-1. `doraemon_health` returns `status: ok` — bridge and kernel are up.
-2. `doraemon_analyze` on any bound window returns a non-empty `ui_elements` list — the YOLO and OCR weights loaded.
-3. `doraemon_web` opens a page — the Edge channel works.
+## Data and recovery
 
-## Data boundary and what "success" means
+DSH sends selected image attachments and tool text to its configured model provider. Local OCR and YOLO process pixels on this machine.
+Operation status retains completed_steps, uncertain_step and worker_running for cancellation and partial completion.
+Verify business results through readback before continuing.
+[Data boundary](docs/data-boundary.md)
 
-Read [`docs/data-boundary.md`](docs/data-boundary.md) before enabling this on a machine with private content on screen. In short:
+Historical Agent, workbench, IM, WeCom and cron entry points are retained in the source compatibility boundary.
+Migration instructions include original data locations, profile backup and recovery from an independent checkout.
+[Upgrade to 0.5](docs/MIGRATION-0.5.md)
 
-- OCR (RapidOCR) and icon detection (YOLO) run **locally**.
-- Icon **captions** can send screen pixels off the machine: when a key is available, `desktop_analyze(caption=true)` posts an annotated frame plus icon crops to `api.deepseek.com`. Without a key it makes no network call.
-- Explicit `desktop_read_image` use also returns image data to the calling model; its destination depends on the DSH model configuration.
-- Tool results mix three strengths of evidence — **action sent**, **UI changed**, **business result verified**. `effect: "confirmed"` only means the screen moved, not that the task worked.
-
-## Task window lifecycle
-
-The first desktop/browser request records a lightweight window and browser-page baseline. End-of-task cleanup closes only task-owned launches and pages, preserves requested keep items, and reports remaining window differences. Existing desktop windows are never closed just because they were absent from the task's actions.
-
-## Package variants
-
-This generic build contains no company-specific page or component catalog.
-
-Application launch confirms a new window and its process evidence. A forwarded launch or shared process that cannot be attributed returns `LAUNCH_UNCONFIRMED`; inspect the windows before retrying.
-
-Elevated scheduled-task output is appended to `kernel.out.log` and `kernel.err.log` in the configured `stateDir` (or the task home `state` folder for older configurations). Cleanup sends a normal close request, reports an open save prompt as a failure, and does not force-terminate process-only records.
-
-New tool-entry logs redact common text, path and credential fields, including values inside action batches. Existing log files are retained.
+The telemetry history for versions 0.4.5–0.4.7 and its removal in 0.4.8 remain documented in the data-boundary guide.

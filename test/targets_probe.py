@@ -3,6 +3,7 @@ import json
 import os
 from pathlib import Path
 import socket
+import shutil
 import subprocess
 import sys
 import threading
@@ -280,6 +281,20 @@ finally:
     runtime.browser.call(check_state)
     report['persistent_profile'] = {'cookie_restored': 1, 'site_setting_restored': 1, 'restart_cycles': 1,
                                      'profile_under_state_dir': Path(profile).is_relative_to(runtime.state_dir)}
+    if '--migration' in sys.argv:
+        runtime.browser.shutdown()
+        legacy_profile = home / Path(profile).name
+        shutil.copytree(profile, legacy_profile)
+        reopened = runtime.open_target('b', url=url, call_id='legacy-copy')
+        assert runtime.browser.profile == legacy_profile
+        runtime.browser.call(check_state)
+        runtime.browser.shutdown()
+        legacy_profile.rename(home / (legacy_profile.name + '-backup'))
+        reopened = runtime.open_target('b', url=url, call_id='rollback-original')
+        assert str(runtime.browser.profile) == profile
+        runtime.browser.call(check_state)
+        report['profile_migration'] = {'legacy_copy_restored': 1, 'original_rollback_restored': 1,
+                                       'cookie_checks': 2, 'site_setting_checks': 2, 'original_retained': 1}
     runtime.browser.close_target('b', reopened.target_id)
     fault('TARGET_CLOSED', lambda: runtime.resolve_target('b', reopened.target_id))
     win32gui.PostMessage(hwnd, win32con.WM_APP + 17, 0, 0)
@@ -292,7 +307,7 @@ finally:
     external = subprocess.Popen([sys.executable, '-c', '''
 import sys
 from playwright.sync_api import sync_playwright
-from dsh_desktop.web_tools import _edge_executable
+from dsh_desktop.browser_support import _edge_executable
 with sync_playwright() as pw:
     context = pw.chromium.launch_persistent_context(sys.argv[1], executable_path=_edge_executable(),
         headless=True, args=['--remote-debugging-port=' + sys.argv[2]])

@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.5.2] - 2026-11-25
+
+### Changed
+
+- Load Host configuration independently and keep the default bridge focused on unified operations and optional companion state.
+- Share browser launch settings and DOM collection, with persistent context ownership in BrowserRuntime and the existing single browser worker.
+- Publish an explicit runtime file whitelist and provision OCR/YOLO dependencies separately with bootstrap.ps1 -Vision.
+- Accept the installed Cordis 4.1 SDK within the optional 4.x peer range.
+
+### Removed
+
+- Move legacy Host registrations to standalone/legacy-host.js and historical HTTP routes to source-only standalone_bridge.py.
+- Exclude the autonomous Agent, workbench, IM/WeCom, cron, provider-driven decisions, caption pipeline, static workbench assets and model weights from the default release. Original data directories and recovery steps are documented in docs/MIGRATION-0.5.md.
+- Remove standalone-only Python requirements and the duplicate psutil requirement from the base installation.
+
 ## [0.5.1] - 2026-11-25
 
 ### Fixed

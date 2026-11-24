@@ -1,0 +1,29 @@
+{
+  "package": {
+    "version": "0.5.2",
+    "size": 2593842,
+    "unpackedSize": 3232856,
+    "entryCount": 104
+  },
+  "python_runtime_modules": 41,
+  "optional_peers": {
+    "@deepseek-ai/cordis": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-tools": {
+      "optional": true
+    },
+    "@deepseek-ai/schemastery": {
+      "optional": true
+    }
+  },
+  "base_distributions": 38,
+  "testclient_additional_distributions": 3,
+  "forbidden_default_imports": 0,
+  "readonly_write_refusals": 1,
+  "weights_copy": {
+    "source_bytes": 80428823,
+    "destination_bytes": 80428823,
+    "sha256_equal": true
+  }
+}

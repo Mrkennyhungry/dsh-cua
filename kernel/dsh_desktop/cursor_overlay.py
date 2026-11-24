@@ -92,6 +92,7 @@ class CursorOverlay:
         self._thread = None
         self._stop = threading.Event()
         self._hwnd = 0
+        self._canvas = None
         self._ready = threading.Event()
         self._error = None
         self._lock = threading.Lock()

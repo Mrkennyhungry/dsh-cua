@@ -13,7 +13,7 @@ if (-not (Test-Path -LiteralPath $Dotnet)) {
     if ($command) { $Dotnet = $command.Source }
 }
 if (-not (Test-Path -LiteralPath $Dotnet)) {
-    throw '.NET 11 SDK was not found. Install it or pass -Dotnet <path-to-dotnet.exe>.'
+    throw 'A .NET SDK supporting net10.0-windows was not found. Install it or pass -Dotnet <path-to-dotnet.exe>.'
 }
 $env:DOTNET_CLI_TELEMETRY_OPTOUT = '1'
 # A normal self-contained folder starts without the single-file extractor. The

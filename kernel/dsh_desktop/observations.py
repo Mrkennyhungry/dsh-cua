@@ -147,7 +147,7 @@ class ObservationService:
         return node
 
     def _dom(self, owner, target_id, trace):
-        from .web_tools import _SNAPSHOT_JS
+        from .dom import _SNAPSHOT_JS
         target = self.runtime.browser.resolve(owner, target_id)
         page, selected_frame = target.handle
         dialog = self.runtime.browser.dialog_metadata(page)
@@ -373,7 +373,7 @@ class ObservationService:
                                                {'frame_id': frame.frame_id}, (x, y, width, height)))
                         coverage += bool(name)
                 except Exception as error:
-                    warnings.append(f'{backend.upper()}_UNAVAILABLE: {error}. Run scripts/bootstrap.ps1 to provision local vision')
+                    warnings.append(f'{backend.upper()}_UNAVAILABLE: {error}. Run scripts/bootstrap.ps1 -Vision to provision local vision; supply -WeightsDir for existing icon weights')
                 finally:
                     trace[backend + '_ms'] = round((time.perf_counter() - backend_started) * 1000, 3)
         if crop:

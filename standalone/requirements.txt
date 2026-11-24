@@ -1,0 +1,10 @@
+# Source-only historical workbench and autonomous Agent support.
+-r ../requirements.txt
+-r ../requirements-vision.txt
+pywebview==6.2.1
+hermes-agent==0.18.2
+aiohttp==3.9.1
+anthropic>=0.40.0
+pystray==0.19.5
+croniter>=2.0.0
+websockets>=12.0

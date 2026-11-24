@@ -1,4 +1,4 @@
-import { Config } from './legacy-host.js'
+import { Config } from './host-config.js'
 import { createBridge, ownerOf } from './bridge-client.js'
 import { installCursorThinking } from './cursor-state.js'
 import { installCompanionSelection } from './companion-state.js'

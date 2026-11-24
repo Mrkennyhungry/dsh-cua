@@ -3,11 +3,14 @@ import hashlib
 import json
 import os
 from collections import OrderedDict
+from concurrent.futures import ThreadPoolExecutor
 import threading
 import uuid
 
 from .targets import RuntimeFault
 from .dom import STATE_JS
+
+_WEB_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix='dsh-web')
 
 
 class BrowserRuntime:
@@ -39,7 +42,6 @@ class BrowserRuntime:
         return {'type': dialog.type, 'message': dialog.message[:4000], 'default_value': dialog.default_value[:1000]}
 
     def call(self, function, *args, timeout=30, **kwargs):
-        from .dsh_bridge import _WEB_EXECUTOR
         if self.thread_id == threading.get_ident():
             return function(*args, **kwargs)
         def invoke():
@@ -53,16 +55,20 @@ class BrowserRuntime:
             raise
 
     def _context(self):
-        from . import web_tools as web
+        from . import browser_support as web
         self.thread_id = threading.get_ident()
-        if self._context_instance is web._pw_context and web._context_up_to_date():
-            return web._pw_context
-        # Older adapters share this worker. Their implicit CDP attachment cannot
-        # become the default runtime's dedicated persistent context.
-        if web._pw_context is not None:
-            web._shutdown_context()
         if self._context_instance is not None:
-            self._playwright = None
+            try:
+                browser = self._context_instance.browser
+                if browser is None or browser.is_connected():
+                    self._context_instance.pages
+                    return self._context_instance
+            except Exception:
+                pass
+            try:
+                self._context_instance.close()
+            except Exception:
+                pass
             self._context_instance = None
         home = self.runtime.home
         name = 'web_profile_edge' if web._browser_mode() == 'edge' else 'web_profile'
@@ -73,16 +79,11 @@ class BrowserRuntime:
         os.environ['DSH_DESKTOP_BROWSER_PROFILE'] = str(self.profile)
         try:
             web._prepare_playwright_temp_dir()
-            web._pw_playwright = self._driver()
-            web._pw_context = web._launch_persistent_context(web._pw_playwright)
-            web._pw_thread_id = self.thread_id
-            self._context_instance = web._pw_context
+            self._context_instance = web._launch_persistent_context(self._driver())
         except Exception as error:
-            web._shutdown_context()
-            self._playwright = None
             self._release_profile()
             raise RuntimeFault('BROWSER_PROFILE_UNAVAILABLE', f'Could not open persistent profile {self.profile}: {error}') from error
-        return web._pw_context
+        return self._context_instance
 
     def _acquire_profile(self):
         import psutil
@@ -305,12 +306,13 @@ class BrowserRuntime:
 
     def shutdown(self):
         def close():
-            from . import web_tools as web
-            pw = self._playwright
-            shared_driver = pw is web._pw_playwright
-            web.web_close()
-            if pw is not None and not shared_driver:
-                pw.stop()
+            if self._context_instance is not None:
+                try:
+                    self._context_instance.close()
+                except Exception:
+                    pass
+            if self._playwright is not None:
+                self._playwright.stop()
             self._playwright = None
             self._connections.clear()
             self._context_instance = None

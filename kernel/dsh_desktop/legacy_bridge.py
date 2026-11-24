@@ -11,7 +11,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 
 
 def install_legacy_routes(router, eternity, authorize):
-    from .dsh_bridge import TaskRequest, SteerRequest
+    from .standalone_bridge import TaskRequest, SteerRequest
     lock = threading.RLock()
     tasks = {}
     requests = {}

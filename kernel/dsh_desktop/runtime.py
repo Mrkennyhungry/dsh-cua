@@ -160,7 +160,7 @@ class DesktopRuntime:
             context.check()
             if connect:
                 if connect == 'configured':
-                    from .web_tools import _CDP_PORT
+                    from .browser_support import _CDP_PORT
                     endpoint = f'http://127.0.0.1:{_CDP_PORT}'
                 else:
                     endpoint = connect
@@ -275,7 +275,7 @@ class DesktopRuntime:
                 parser = UIParser(self.config.workspace.weights_dir,
                                   enable_ocr=backend == 'ocr', enable_yolo=backend == 'yolo')
                 if backend == 'yolo' and parser.yolo_session is None:
-                    raise RuntimeFault('BACKEND_UNAVAILABLE', 'Local icon weights are unavailable. Run scripts/bootstrap.ps1')
+                    raise RuntimeFault('BACKEND_UNAVAILABLE', 'Local icon weights are unavailable. Run scripts/bootstrap.ps1 -Vision -WeightsDir <existing-weights-directory>')
                 self._vision_parsers[backend] = parser
                 self.parser_initializations += 1
             parser = self._vision_parsers[backend]
@@ -283,8 +283,7 @@ class DesktopRuntime:
 
     def initialized_backends(self):
         backends = ['windows', 'capture', 'input']
-        web = sys.modules.get('dsh_desktop.web_tools')
-        if web is not None and web._pw_context is not None:
+        if self.browser._context_instance is not None:
             backends.append('web')
         if self._ui_parser is not None or self._vision_parsers:
             backends.append('vision')
@@ -295,7 +294,7 @@ class DesktopRuntime:
         input_gate.emergency_stop()
 
     def shutdown(self, timeout=5):
-        from . import companion, desktop_tools, watch
+        from . import companion, desktop_tools
         from .cursor_overlay import stop_cursor_overlay
         self.stop_all()
         if self._operations is not None:
@@ -304,7 +303,6 @@ class DesktopRuntime:
         stop_cursor_overlay()
         desktop_tools._CURSOR = None
         self._window_picker_overlay.stop()
-        watch.registry().stop_all()
         self.window_identities.shutdown()
         self.observations.shutdown()
         self._transient_worker.shutdown()
