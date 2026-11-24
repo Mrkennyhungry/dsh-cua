@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.4.19] - 2026-11-24
+
+### Added
+
+- Expose unified observations through an owner-scoped kernel bridge endpoint.
+
 ## [0.4.18] - 2026-11-23
 
 ### Added

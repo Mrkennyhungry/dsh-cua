@@ -375,7 +375,7 @@ class ActionValidationTests(unittest.TestCase):
         self.assertTrue(matched)
         self.assertTrue(evidence['closed'])
 
-    def test_frame_endpoint_enforces_owner_and_returns_binary(self):
+    def test_runtime_observation_and_frame_endpoints(self):
         from fastapi import FastAPI
         from fastapi.testclient import TestClient
         from dsh_desktop.dsh_bridge import create_router
@@ -399,6 +399,17 @@ class ActionValidationTests(unittest.TestCase):
             self.assertEqual(response.headers['content-type'], 'image/jpeg')
             self.assertEqual(client.get('/api/dsh/runtime/frames/f_1', headers={**headers, 'X-DSH-Owner': 'b' * 64}).status_code, 404)
             self.assertEqual(client.get('/api/dsh/runtime/frames/f_1', headers={**headers, 'Authorization': 'Bearer wrong'}).status_code, 401)
+            runtime.observations.observe.return_value = {'success': True, 'targets': []}
+            response = client.post('/api/dsh/runtime/observe', headers=headers, json={'image': False})
+            self.assertEqual(response.json(), {'success': True, 'targets': []})
+            runtime.observations.observe.assert_called_once_with(owner, image=False)
+            self.assertEqual(client.post('/api/dsh/runtime/observe', headers=headers, json={'unknown': 1}).status_code, 422)
+            self.assertEqual(client.post('/api/dsh/runtime/observe', headers={**headers, 'Authorization': 'Bearer wrong'}, json={}).status_code, 401)
+            runtime.observations.observe.side_effect = ValueError('invalid observation')
+            self.assertEqual(client.post('/api/dsh/runtime/observe', headers=headers, json={}).status_code, 422)
+            runtime.observations.observe.side_effect = RuntimeFault('TARGET_CLOSED', 'fixture closed')
+            response = client.post('/api/dsh/runtime/observe', headers=headers, json={'target_id': 't'})
+            self.assertEqual(response.json()['error']['code'], 'TARGET_CLOSED')
             runtime.wait.return_value = {'success': True, 'status': 'completed'}
             response = client.post('/api/dsh/runtime/wait', headers=headers,
                                    json={'request_key': 'call-1', 'arguments': {'condition': {'kind': 'window', 'title': 'x'}}})
