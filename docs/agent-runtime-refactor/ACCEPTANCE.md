@@ -321,3 +321,7 @@ open 在导航前登记 call 身份，失败导航的重试保留原 target 和�
 实机 fixture 使用隔离 home、本地 HTTP 页面与独立原生窗口。17 次同步操作 p50 199.042 ms、p95 3082.903 ms，最近秩法，n=17，完整 fixture 15328 ms，证据位于 p4-evidence/actions-probe.json。浏览器原生确认框的 3 秒来自 Playwright 点击等待超时后保留 dialog 的路径。无模型调用、parser 初始化和 caption 请求均为 0。
 
 直接运行项目 venv 的可执行文件继承 Low Integrity 标签，前台连接返回 WinError 5。复用本机已安装 Python 加载隔离依赖后获得高完整性运行，未更改任何可执行文件标签。浏览器原生 dialog 使 Playwright 无法继续常规页面采集，观察改为返回保留的消息和类型，并由明确键操作处理。瞬态提示的预先 arm 及六工具框架传输在 P5 实施和验证。
+
+## 15. P5 进行中记录
+
+独立等待接入 operation journal，覆盖参数校验、超时证据和同请求重放。新增会话隔离的 JPEG 资源端点，Host 二进制读取使用 4 MiB 上限。act、wait、status、stop 的内核桥接入口已初步接线，尚需与 Host 六工具及取消路径完成端到端验证。完整检查 scripts/check.ps1 实测 Node 84 PASS，Python 302 PASS、1 预期 SKIP、32 subtests PASS。此记录不代表 P5 验收通过。

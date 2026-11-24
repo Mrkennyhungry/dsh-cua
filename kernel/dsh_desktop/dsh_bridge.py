@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import asyncio
 import hmac
 import json
 import logging
@@ -15,6 +16,7 @@ from pathlib import Path
 
 import requests as http_client
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import Response
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from . import desktop_tools
@@ -758,6 +760,90 @@ def create_router(runtime, *, legacy=None) -> APIRouter:
         return owner
 
     router = APIRouter(prefix="/api/dsh", dependencies=[Depends(authorize)])
+
+    @router.get('/runtime/frames/{frame_id}')
+    def runtime_frame(frame_id: str, owner: str = Depends(authorize)):
+        from .targets import RuntimeFault
+        try:
+            data = runtime.observations.image(owner, frame_id)
+        except RuntimeFault as error:
+            raise HTTPException(404, str(error)) from error
+        return Response(content=data, media_type='image/jpeg', headers={'Cache-Control': 'no-store'})
+
+    async def runtime_request(request, owner, kind, payload):
+        from .operations import Cancelled
+        from .targets import RuntimeFault
+        if set(payload) != {'request_key', 'arguments'} or not isinstance(payload['request_key'], str) or not payload['request_key']:
+            raise HTTPException(422, 'A request_key and arguments are required')
+        cancelled = threading.Event()
+        task = asyncio.create_task(asyncio.to_thread(getattr(runtime, kind), owner, payload['request_key'],
+                                                    payload['arguments'], cancelled=cancelled))
+        try:
+            while not task.done():
+                await asyncio.wait({task}, timeout=0.05)
+                if await request.is_disconnected():
+                    cancelled.set()
+                    break
+            return await task
+        except ValueError as error:
+            raise HTTPException(422, str(error)) from error
+        except RuntimeFault as error:
+            return {'success': False, 'error': {'code': error.code, 'message': str(error)}}
+        except Cancelled as error:
+            raise HTTPException(499, str(error)) from error
+        finally:
+            if not task.done():
+                cancelled.set()
+
+    @router.post('/runtime/act')
+    async def runtime_act(request: Request, payload: dict, owner: str = Depends(authorize)):
+        return await runtime_request(request, owner, 'act', payload)
+
+    @router.post('/runtime/wait')
+    async def runtime_wait(request: Request, payload: dict, owner: str = Depends(authorize)):
+        return await runtime_request(request, owner, 'wait', payload)
+
+    @router.post('/runtime/stop')
+    def runtime_stop(payload: dict, owner: str = Depends(authorize)):
+        from .targets import RuntimeFault
+        if set(payload) - {'operation_id'}:
+            raise HTTPException(422, 'Unknown stop arguments')
+        try:
+            return runtime.operations.stop(owner, payload.get('operation_id'))
+        except RuntimeFault as error:
+            return {'success': False, 'error': {'code': error.code, 'message': str(error)}}
+
+    @router.post('/runtime/status')
+    async def runtime_status(request: Request, payload: dict, owner: str = Depends(authorize)):
+        from .operations import Cancelled
+        from .targets import RuntimeFault
+        if set(payload) - {'operation_id', 'request_key', 'follow_ms'}:
+            raise HTTPException(422, 'Unknown status arguments')
+        operation_id = payload.get('operation_id')
+        request_key = payload.get('request_key')
+        if not operation_id and not request_key:
+            return {'success': True, 'epoch': runtime.epoch, 'initialized_backends': runtime.initialized_backends(),
+                    'operations': runtime.operations.journal.active(owner)}
+        cancelled = threading.Event()
+        task = asyncio.create_task(asyncio.to_thread(runtime.operations.status, owner, operation_id,
+                                                    request_key=request_key, follow_ms=payload.get('follow_ms', 0),
+                                                    cancelled=cancelled))
+        try:
+            while not task.done():
+                await asyncio.wait({task}, timeout=0.05)
+                if await request.is_disconnected():
+                    cancelled.set()
+                    break
+            return await task
+        except ValueError as error:
+            raise HTTPException(422, str(error)) from error
+        except RuntimeFault as error:
+            return {'success': False, 'error': {'code': error.code, 'message': str(error)}}
+        except Cancelled as error:
+            raise HTTPException(499, str(error)) from error
+        finally:
+            if not task.done():
+                cancelled.set()
 
     @router.post("/companion/start")
     def start_companion(req: CompanionStartRequest):

@@ -113,6 +113,33 @@ class DesktopRuntime:
                                       lambda context: dispatcher.run(context, arguments), budget_ms=budget_ms,
                                       cancelled=cancelled)
 
+    def wait(self, owner, request_key, arguments, *, budget_ms=5000, cancelled=None):
+        from .conditions import Conditions, validate_condition
+        if not isinstance(arguments, dict) or set(arguments) - {'target_id', 'observation_id', 'condition', 'timeout_ms'}:
+            raise ValueError('Unknown wait arguments')
+        condition = arguments.get('condition')
+        validate_condition(condition)
+        target_id = arguments.get('target_id')
+        observation_id = arguments.get('observation_id')
+        if condition['kind'] != 'window' and (not isinstance(target_id, str) or not target_id):
+            raise ValueError('target_id is required for this condition')
+        if (condition['kind'] == 'element' or condition.get('state') == 'url_changed') and (
+                not isinstance(observation_id, str) or not observation_id):
+            raise ValueError('observation_id is required for this condition')
+        timeout_ms = arguments.get('timeout_ms', 5000)
+        if not isinstance(timeout_ms, int) or isinstance(timeout_ms, bool) or not 100 <= timeout_ms <= 30000:
+            raise ValueError('timeout_ms must be an integer from 100 to 30000')
+
+        def run(context):
+            result = Conditions(self).wait(context, target_id, observation_id, condition, timeout_ms)
+            if result['expectation']['status'] == 'timeout':
+                result.update(success=False, outcome='interrupted',
+                              error={'code': 'EXPECTATION_TIMEOUT', 'message': 'Condition did not become true'})
+            return result
+
+        return self.operations.submit(owner, request_key, 'wait', arguments, run,
+                                      budget_ms=budget_ms, cancelled=cancelled)
+
     @property
     def ui_parser(self):
         with self._parser_lock:

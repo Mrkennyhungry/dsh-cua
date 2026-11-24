@@ -6,6 +6,7 @@ import time
 import unittest
 import subprocess
 import sys
+import os
 from types import SimpleNamespace
 from unittest import mock
 
@@ -16,6 +17,7 @@ from dsh_desktop.journal import OperationJournal
 from dsh_desktop.operations import OperationManager, Cancelled
 from dsh_desktop.targets import RuntimeFault
 from dsh_desktop.worker import ApartmentWorker
+from dsh_desktop.runtime import DesktopRuntime
 
 
 class JournalTests(unittest.TestCase):
@@ -120,6 +122,31 @@ class OperationTests(unittest.TestCase):
     def tearDown(self):
         self.manager.shutdown()
         self.directory.cleanup()
+
+    def test_wait_timeout_and_idempotent_replay(self):
+        self.runtime.operations = self.manager
+        arguments = {'target_id': 't', 'condition': {'kind': 'text', 'text': 'done'}, 'timeout_ms': 100}
+        with mock.patch.object(Conditions, 'sample', return_value=(False, {'evidence': {'text': 'pending'}})) as sample:
+            first = DesktopRuntime.wait(self.runtime, 'a', 'wait-key', arguments)
+            calls = sample.call_count
+            replay = DesktopRuntime.wait(self.runtime, 'a', 'wait-key', arguments)
+        self.assertEqual(first['status'], 'failed')
+        self.assertEqual(first['error']['code'], 'EXPECTATION_TIMEOUT')
+        self.assertEqual(first['evidence']['text'], 'pending')
+        self.assertEqual(first['operation_id'], replay['operation_id'])
+        self.assertEqual(sample.call_count, calls)
+
+    def test_wait_validates_references_before_submitting(self):
+        self.runtime.operations = self.manager
+        invalid = [
+            {'condition': {'kind': 'text', 'text': 'done'}},
+            {'target_id': 't', 'condition': {'kind': 'element', 'ref': 'e'}},
+            {'target_id': 't', 'condition': {'kind': 'state', 'state': 'url_changed'}},
+            {'condition': {'kind': 'window', 'title': 'x'}, 'timeout_ms': True},
+        ]
+        for arguments in invalid:
+            with self.subTest(arguments=arguments), self.assertRaises(ValueError):
+                DesktopRuntime.wait(self.runtime, 'a', 'invalid', arguments)
 
     def test_retry_and_concurrent_retry_dispatch_exactly_once(self):
         count = []
@@ -347,6 +374,37 @@ class ActionValidationTests(unittest.TestCase):
         matched, evidence = conditions.sample('a', 't', 'o', {'kind': 'state', 'state': 'closed'})
         self.assertTrue(matched)
         self.assertTrue(evidence['closed'])
+
+    def test_frame_endpoint_enforces_owner_and_returns_binary(self):
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+        from dsh_desktop.dsh_bridge import create_router
+
+        token = 't' * 32
+        owner = 'a' * 64
+        runtime = mock.Mock()
+        def image(request_owner, frame_id):
+            if request_owner != owner or frame_id != 'f_1':
+                raise RuntimeFault('FRAME_EXPIRED', 'Image resource has expired')
+            return b'jpeg fixture'
+        runtime.observations.image.side_effect = image
+        with mock.patch.dict(os.environ, {'DSH_DESKTOP_BRIDGE_TOKEN': token}):
+            app = FastAPI()
+            app.include_router(create_router(runtime))
+        headers = {'Authorization': 'Bearer ' + token, 'X-DSH-Owner': owner}
+        with TestClient(app) as client:
+            response = client.get('/api/dsh/runtime/frames/f_1', headers=headers)
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.content, b'jpeg fixture')
+            self.assertEqual(response.headers['content-type'], 'image/jpeg')
+            self.assertEqual(client.get('/api/dsh/runtime/frames/f_1', headers={**headers, 'X-DSH-Owner': 'b' * 64}).status_code, 404)
+            self.assertEqual(client.get('/api/dsh/runtime/frames/f_1', headers={**headers, 'Authorization': 'Bearer wrong'}).status_code, 401)
+            runtime.wait.return_value = {'success': True, 'status': 'completed'}
+            response = client.post('/api/dsh/runtime/wait', headers=headers,
+                                   json={'request_key': 'call-1', 'arguments': {'condition': {'kind': 'window', 'title': 'x'}}})
+            self.assertEqual(response.json()['status'], 'completed')
+            self.assertEqual(runtime.wait.call_args.args[:2], (owner, 'call-1'))
+            self.assertEqual(client.post('/api/dsh/runtime/wait', headers=headers, json={}).status_code, 422)
 
 
 if __name__ == '__main__':

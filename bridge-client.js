@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { createKernel } from './kernel.js'
 
 const MAX_JSON_BYTES = 262144
+const MAX_IMAGE_BYTES = 4 * 1024 * 1024
 const DEFAULT_TIMEOUT_MS = 15000
 
 export function ownerOf(exec) {
@@ -55,7 +56,7 @@ export function createBridge(config, transport = fetch, options = {}) {
   const kernel = createKernel(config, options)
   const managed = config.manageKernel !== false
 
-  async function send(path, owner, token, { body, signal, timeoutMs = DEFAULT_TIMEOUT_MS, method } = {}) {
+  async function send(path, owner, token, { body, signal, timeoutMs = DEFAULT_TIMEOUT_MS, method, image = false } = {}) {
     if (typeof token !== 'string' || token.length < 32) {
       throw new Error(`Set ${config.tokenEnv} or enable autoStart so the plugin can start the kernel with a generated token`)
     }
@@ -75,16 +76,31 @@ export function createBridge(config, transport = fetch, options = {}) {
       await response.body?.cancel()
       throw httpFailure(response.status, path)
     }
+    if (image && response.headers.get('content-type')?.split(';')[0].trim().toLowerCase() !== 'image/jpeg') {
+      await response.body?.cancel()
+      throw new Error('Desktop image response has an unexpected media type')
+    }
     const reader = response.body.getReader()
     let text = '', size = 0
+    const chunks = []
     const decoder = new TextDecoder()
     try {
       while (true) {
         const { value, done } = await reader.read()
         if (done) break
         size += value.byteLength
-        if (size > MAX_JSON_BYTES) throw new Error('Desktop result exceeds the response limit')
-        text += decoder.decode(value, { stream: true })
+        if (size > (image ? MAX_IMAGE_BYTES : MAX_JSON_BYTES)) throw new Error('Desktop result exceeds the response limit')
+        if (image) chunks.push(value)
+        else text += decoder.decode(value, { stream: true })
+      }
+      if (image) {
+        const bytes = new Uint8Array(size)
+        let offset = 0
+        for (const chunk of chunks) {
+          bytes.set(chunk, offset)
+          offset += chunk.byteLength
+        }
+        return bytes
       }
       return JSON.parse(text + decoder.decode())
     } finally {

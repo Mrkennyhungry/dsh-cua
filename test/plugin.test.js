@@ -334,6 +334,19 @@ test('loopback client does not accept remote hosts, paths or redirects', async (
   assert.throws(() => bridge.taskPath('../other'), /task id/)
 })
 
+test('image resources use a separate bounded binary response', async () => {
+  let payload = new Uint8Array([1, 2, 3])
+  let mediaType = 'image/jpeg'
+  const bridge = createBridge({ port: 8766, tokenEnv: 'DSH_DESKTOP_BRIDGE_TOKEN', manageKernel: false }, async () =>
+    new Response(payload, { headers: { 'Content-Type': mediaType } }))
+  assert.deepEqual(await bridge.request('/runtime/frames/f_1', ownerOf(execution()), { image: true }), payload)
+  mediaType = 'text/html'
+  await assert.rejects(bridge.request('/runtime/frames/f_1', ownerOf(execution()), { image: true }), /media type/)
+  mediaType = 'image/jpeg'
+  payload = new Uint8Array(4 * 1024 * 1024 + 1)
+  await assert.rejects(bridge.request('/runtime/frames/f_1', ownerOf(execution()), { image: true }), /response limit/)
+})
+
 test('missing secret rejects without sending a request', async () => {
   delete process.env.DSH_DESKTOP_BRIDGE_TOKEN
   const bridge = createBridge({ port: 8766, tokenEnv: 'DSH_DESKTOP_BRIDGE_TOKEN', manageKernel: false }, () => { throw new Error('unexpected network') })
