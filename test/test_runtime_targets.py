@@ -54,6 +54,28 @@ class GeometryTests(unittest.TestCase):
 
 
 class TargetTests(unittest.TestCase):
+    def test_popup_discovery_inherits_opener_owner_and_skips_unrelated_tabs(self):
+        from types import SimpleNamespace
+        registry = TargetRegistry('fixture')
+        runtime = SimpleNamespace(targets=registry, epoch='fixture')
+        browser = BrowserRuntime(runtime)
+        opener, popup, unrelated = mock.Mock(), mock.Mock(), mock.Mock()
+        for page in (opener, popup, unrelated):
+            page.is_closed.return_value = False
+        popup.opener.return_value = opener
+        unrelated.opener.return_value = None
+        context = mock.Mock(pages=[opener, popup, unrelated])
+        opener.context = context
+        browser._page_ids[opener] = 'original'
+        browser._owned_pages[opener] = 'a'
+        registry.adopt('a', 'browser', 'original', (opener, opener.main_frame), {})
+        with mock.patch.object(browser, '_adopt') as adopt:
+            browser.discover('b')
+            adopt.assert_not_called()
+            browser.discover('a')
+            adopt.assert_called_once_with('a', popup)
+        self.assertEqual(browser._owned_pages[popup], 'a')
+
     def test_failed_navigation_retry_retains_target_and_dispatches_once(self):
         runtime = mock.Mock(epoch='fixture')
         browser = BrowserRuntime(runtime)

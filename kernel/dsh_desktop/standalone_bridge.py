@@ -1227,6 +1227,7 @@ def create_router(runtime, *, legacy=None) -> APIRouter:
         return desktop_tools.lock_window(window_id)
 
     @router.post("/windows/{window_id}/unlock")
+    @router.post("/scope/windows/{window_id}/release")
     def unlock_one_window(window_id: str):
         return desktop_tools.unlock_window(window_id)
 

@@ -25,7 +25,7 @@ function fixture() {
     request: async (path, owner, options) => {
       state.requests.push({ path, owner, options })
       if (path === '/scope') return state.scope
-      const match = path.match(/^\/windows\/([^/]+)\/unlock$/)
+      const match = path.match(/^\/scope\/windows\/([^/]+)\/release$/)
       if (match) {
         const id = decodeURIComponent(match[1])
         state.scope.selections = state.scope.selections.filter((item) => item.window_id !== id)
@@ -59,7 +59,7 @@ test('removing one chip unlocks only that selection', async () => {
   await sync.sync()
   state.section.companionSelection = JSON.stringify([b])
   await sync.sync()
-  assert.deepEqual(state.requests.filter((r) => r.path.endsWith('/unlock')).map((r) => r.path), ['/windows/win-a/unlock'])
+  assert.deepEqual(state.requests.filter((r) => r.path.endsWith('/release')).map((r) => r.path), ['/scope/windows/win-a/release'])
   assert.deepEqual(JSON.parse(state.section.companionSelection).map((item) => item.window_id), ['win-b'])
   assert.equal(state.scope.locked, true)
   await sync.dispose()
@@ -71,7 +71,7 @@ test('clearing all chips unlocks every selection', async () => {
   await sync.sync()
   state.section.companionSelection = ''
   await sync.sync()
-  assert.equal(state.requests.filter((r) => r.path.endsWith('/unlock')).length, 2)
+  assert.equal(state.requests.filter((r) => r.path.endsWith('/release')).length, 2)
   assert.equal(state.section.companionSelection, '[]')
   assert.equal(state.scope.locked, false)
   await sync.dispose()
@@ -89,7 +89,7 @@ test('an initially empty field does not cancel a pre-existing kernel lock', asyn
   const { state, sync } = fixture()
   state.scope = { locked: true, selections: [a] }
   await sync.sync()
-  assert.equal(state.requests.filter((request) => request.path.endsWith('/unlock')).length, 0)
+  assert.equal(state.requests.filter((request) => request.path.endsWith('/release')).length, 0)
   await sync.dispose()
 })
 

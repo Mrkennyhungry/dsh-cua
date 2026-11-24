@@ -203,6 +203,10 @@ def create_router(runtime) -> APIRouter:
                 "window": first, "selections": selections,
                 "scope": "applications", "stopped": input_gate.stop_engaged()}
 
+    @router.post("/scope/windows/{window_id}/release")
+    def release_window(window_id: str):
+        return desktop_tools.unlock_window(window_id)
+
     @router.post("/scope/resume")
     def resume_after_stop():
         input_gate.clear_stop()

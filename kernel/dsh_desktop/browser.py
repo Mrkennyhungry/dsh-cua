@@ -163,6 +163,24 @@ class BrowserRuntime:
             metadata['descendants'] = descendants
         return self.runtime.targets.adopt(owner, 'browser', identity, (page, frame), metadata)
 
+    def discover(self, owner):
+        def collect():
+            contexts = {page.context for page in self._page_ids if not page.is_closed()}
+            for context in contexts:
+                for page in context.pages:
+                    if page.is_closed() or page in self._page_ids:
+                        continue
+                    # Popups inherit the opener's ownership, including nested
+                    # popups. Unrelated persistent tabs need explicit connection.
+                    opener = page.opener()
+                    while opener is not None and opener not in self._page_ids:
+                        opener = opener.opener()
+                    owners = {target.owner for target in self.runtime.targets.records_for_handle(opener)} if opener else set()
+                    if owner in owners:
+                        self._owned_pages[page] = self._owned_pages.get(opener, owner)
+                        self._adopt(owner, page)
+        return self.call(collect)
+
     def _forget_page(self, page):
         tab_id = self._page_ids.pop(page, None)
         self._pages_by_id.pop(tab_id, None)

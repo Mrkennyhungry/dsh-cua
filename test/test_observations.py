@@ -12,6 +12,16 @@ from dsh_desktop.worker import ApartmentWorker
 
 
 class ObservationTests(unittest.TestCase):
+    def test_directory_preserves_tab_identity_for_same_url_frames(self):
+        self.runtime.target_directory.return_value = [
+            {'target_id': 'desktop', 'kind': 'desktop'},
+            {'target_id': 'first', 'kind': 'browser', 'url': 'http://fixture', 'tab_id': 'tab-a', 'frame_name': ''},
+            {'target_id': 'second', 'kind': 'browser', 'url': 'http://fixture', 'tab_id': 'tab-b', 'frame_name': 'second'},
+        ]
+        targets = self.service.observe('a')['targets']
+        self.assertEqual(targets[1]['tab_id'], 'tab-a')
+        self.assertEqual(targets[2]['tab_id'], 'tab-b')
+
     def setUp(self):
         self.runtime = mock.Mock()
         self.runtime.frames = FrameRegistry('fixture')

@@ -397,3 +397,25 @@ open 在导航前登记 call 身份，失败导航的重试保留原 target 和�
 实包验证先发现缺失 worker.py 和 whale_commander 资源，已补白名单及相应用例。资源加载失败还暴露 CursorOverlay._canvas 在异常清理前未初始化，改为构造时初始化并复验。隔离旧 venv 的 pywin32 DLL 在子进程缺失，fixture 按 DSH_TEST_PACKAGES 显式加载测试依赖后恢复。首次 companion probe 与 resident kernel 同时注册热键时记录 WinError 1409，仍完成两轮资源清理；停止本轮旧 kernel 后的只读复验无该冲突。新 companion 可通过 DSH_DESKTOP_COMPANION_UI 使用可写目录中的构建产物。
 
 主包将独立工作台等历史模块排除，源码恢复入口和测试继续保留，既有用户数据移动或删除次数为 0。Cordis optional peer 范围调整为 >=4.0.5 <5.0.0，依据本机 4.1.0 的实际 SDK 测试。常规跳过项沿用显式真实窗口开关，实机模态由 actions_probe 覆盖。P6 所有退出项 PASS，P7 的双模型旧新多次任务对照待独立实施。
+
+## 17. P7 执行记录
+
+2026-11-25 从干净的 5382099 开始。直连 GitHub 两次超时后，通过本机已有 http://127.0.0.1:10808 代理执行一次 git fetch，HEAD 相对 FETCH_HEAD 为 ahead 2 / behind 0，公司远端仍为 6dd5563，无新提交需要合入。开工基线 scripts/check.ps1 为 Node 91 PASS、0 FAIL、0 SKIP、978.5466 ms，Python 311 PASS、1 预期 SKIP、43 subtests PASS、11.46 s。
+
+### 真实入口与本阶段修复
+
+使用 DSH 安装内官方 CLI 的 runDesktopCli 导出入口，以 plugin add link 安装本目录到 headless 测试 profile。launch overlay 引用 DSH credentials 服务中的 WB_API_KEY，路由及模型参数取自本机 wb 设置，baseURL 为本机 7863/v1。bridge token 只从 kernel-state 读入子进程环境，未写入验收数据。首次缺少 apiKeyEnv 和 bridge token 的两次接入失败日志均保留在 .runtime，成功接入的新会话发现工具 6/6，并实际调用 status 返回 0.5.2。后续试验逐次新建 DSH 会话。
+
+P6 迁出旧路由后，companion-state 仍调用 /windows/{id}/unlock。新增 /scope/windows/{id}/release 并复用原 unlock_window，历史桥接保留别名。真实 TestClient 验证有效鉴权、错误 token、浏览器 Origin、owner 格式和重复释放，移除 A 后 B 保持选中。Node 同步测试改用新路径。
+
+Hy4 首次同 URL 标签任务在 180 秒超时，fixture 点击 0 次。定位到 target_directory 只刷新既有对象，漏收录页面通过 window.open 创建的标签。新增按 opener 会话归属发现 popup，目录及子 frame 保留 tab_id。确定性测试覆盖另一 owner 不收录该 popup。真实 targets_probe 验证同 URL 两个标签被发现、其他 owner 新收录 0，随后通过原有 profile 占用、重启恢复、跨 owner 释放及外接浏览器保留检查，总计 6328 ms，parser 初始化 0。修复后 DeepSeek frame smoke 6 工具 / 34677.535 ms、Hy4 8 工具 / 162833.657 ms，业务点击均为指定 inner 唯一 1 次。
+
+版本为 0.5.3。resident 内核经 health PID 核验停止并通过现有自动启动入口恢复，status 返回 version=0.5.3。新增开发验收入口 scripts/benchmark-agent-runtime.mjs、benchmark-transport.mjs、dsh-benchmark-entry.mjs 和 reconcile-benchmark.py。fixture 校验字段值、提交次数、上传 SHA256 与 tab/frame 归属。provider 转发只记录请求形状、图像媒体类型/字节/哈希/尺寸和耗时，凭据与图片原文保留在内存。完整会话日志通过 zstandard 解码核对，开发环境安装 zstandard 0.25.0，发行依赖新增 0。
+
+### 当前执行情况
+
+首轮 DeepSeek 的 form/upload/frames/toast/cancellation 各 1 次均达到业务条件，端到端分别为 22240.490 / 13411.846 / 121405.207 / 14210.288 / 29872.635 ms，工具分别为 5 / 3 / 19 / 3 / 6。此轮使用 0.5.2，属于 smoke。首轮 Hy4 在 0.5.3 上 form/upload/toast/cancellation 各 1 次通过，分别为 55080.568 / 60214.291 / 69865.457 / 52066.520 ms，工具为 4 / 6 / 3 / 6。frames 181119.454 ms 超时，notepad 180201.937 ms 超时，均保留失败记录。
+
+DeepSeek 补充 smoke 中 notepad 文件正文核对通过，116079.526 ms、23 工具。原提示要求额外关闭文件标签，模型重复核查菜单并打开最近日志标签，业务保存之后的动作明显过长。正式提示收敛为保存并读回未修改状态，明确只操作本次文件。两会话并发 smoke 31391.037 ms、11 工具通过，A 取消之后无输入事件，B 在确认 A 取消后保存自身值 1 次。此项包含两个独立真实 DSH 会话。
+
+本阶段仍在执行。实机仅有 1 屏、96×96 DPI，真实异 DPI 跨屏及负原点屏幕缺少硬件条件，现有 96/144 DPI 与负原点确定性测试继续保留。旧新版本每模型每任务 3 次正式对照、浏览器进程级重启、最终安装复验与证据汇总尚未完成。P7 退出条件尚未全部 PASS。

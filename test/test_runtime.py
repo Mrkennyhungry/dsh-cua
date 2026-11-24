@@ -11,6 +11,31 @@ from dsh_desktop.runtime import DesktopRuntime, RuntimeConfig
 
 
 class RuntimeTests(unittest.TestCase):
+    def test_scope_release_authenticates_and_preserves_other_selections(self):
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+        from dsh_desktop import desktop_tools
+        from dsh_desktop.dsh_bridge import create_router
+
+        token = 't' * 32
+        headers = {'Authorization': 'Bearer ' + token, 'X-DSH-Owner': 'a' * 64}
+        with mock.patch.dict(os.environ, {'DSH_DESKTOP_BRIDGE_TOKEN': token}):
+            app = FastAPI()
+            app.include_router(create_router(mock.Mock()))
+        selections = {'win-a': {'title': 'A'}, 'win-b': {'title': 'B'}}
+        with mock.patch.dict(desktop_tools._SCOPE_LOCK, {'windows': selections}), TestClient(app) as client:
+            path = '/api/dsh/scope/windows/win-a/release'
+            self.assertEqual(client.post(path).status_code, 401)
+            self.assertEqual(client.post(path, headers={**headers, 'Origin': 'https://example.invalid'}).status_code, 403)
+            self.assertEqual(client.post(path, headers={**headers, 'X-DSH-Owner': 'invalid'}).status_code, 400)
+            self.assertEqual(set(selections), {'win-a', 'win-b'})
+            response = client.post(path, headers=headers)
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json()['unlocked_windows'], ['win-a'])
+            self.assertEqual([item['window_id'] for item in response.json()['selections']], ['win-b'])
+            self.assertEqual(client.post(path, headers=headers).json()['unlocked_windows'], [])
+            self.assertEqual(client.get('/api/dsh/scope', headers=headers).json()['window_id'], 'win-b')
+
     def test_default_app_runs_without_optional_dependencies_or_key(self):
         with tempfile.TemporaryDirectory() as home:
             result = subprocess.run([sys.executable, str(Path(__file__).with_name('runtime_probe.py')), home],

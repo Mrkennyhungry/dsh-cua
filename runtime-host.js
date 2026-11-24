@@ -108,7 +108,8 @@ export function registerRuntimeTools(ctx, bridge, register) {
         target_id: { type: 'string', required: true }, observation_id: { type: 'string', required: true },
         steps: { type: 'array', required: true, description: 'One to eight ordered actions. Input requires mode and text.', items: { type: 'object', additionalProperties: false, properties: {
           action: { type: 'string', required: true, enum: ['click', 'input', 'key', 'scroll', 'drag', 'select', 'check', 'hover', 'attach', 'close'] },
-          target: point, from: point, to: point,
+          target: { ...point, description: 'Required for click, input, select, check, hover and attach. Use {ref} from this observation, or {frame_id,x,y}. Key and close omit target.' },
+          from: point, to: point,
           text: { type: 'string', description: 'Required for input, at most 12000 characters.' },
           mode: { type: 'string', enum: ['replace', 'insert'], description: 'Required for input. Choose replace or insert explicitly.' },
           button: { type: 'string', enum: ['left', 'right'] }, count: { type: 'integer' }, keys: strings,

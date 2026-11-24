@@ -100,6 +100,19 @@ try:
     url = f'http://127.0.0.1:{server.server_port}/'
     first = runtime.open_target('a', url=url, call_id='first')
     assert runtime.browser.thread_id != threading.get_ident()
+    def open_popup():
+        page = first.handle[0]
+        with page.expect_popup() as opened:
+            page.evaluate("url => window.open(url, 'owned-popup')", url)
+        opened.value.wait_for_load_state('domcontentloaded')
+    runtime.browser.call(open_popup)
+    discovered = [row for row in runtime.target_directory('a') if row['kind'] == 'browser'
+                  and row.get('url') == url and row.get('frame_bounds') is None]
+    assert len(discovered) == 2, discovered
+    popup = next(row for row in discovered if row['target_id'] != first.target_id)
+    assert not any(row.get('tab_id') == popup['tab_id'] for row in runtime.target_directory('b'))
+    report['popup_discovery'] = {'same_url_tabs': len(discovered), 'other_owner_adoptions': 0}
+    runtime.browser.close_target('a', popup['target_id'])
     lock_probe = subprocess.run([sys.executable, '-c', '''
 import json, sys
 from pathlib import Path

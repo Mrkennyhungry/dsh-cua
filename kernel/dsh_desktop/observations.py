@@ -181,6 +181,7 @@ class ObservationService:
                 if frame is not selected_frame:
                     children.append({'target_id': source.target_id, 'kind': source.kind, 'revision': source.revision,
                                      'title': source.metadata['title'][:120], 'url': source.metadata['url'][:300],
+                                     'tab_id': source.metadata['tab_id'],
                                      'frame_name': source.metadata['frame_name'][:80]})
                 if snapshot.get('hit_cap') or snapshot.get('text_truncated'):
                     warnings.append('DOM_SOURCE_TRUNCATED')
@@ -307,7 +308,7 @@ class ObservationService:
                 raise ValueError('Cursor is outside the saved observation')
             return self._page(observation, element_offset, text_offset, include_image=False)
         if target_id is None:
-            targets = [{key: row[key] for key in ('target_id', 'kind', 'title', 'url', 'active', 'revision', 'frame_name') if key in row}
+            targets = [{key: row[key] for key in ('target_id', 'kind', 'title', 'url', 'active', 'revision', 'tab_id', 'frame_name') if key in row}
                        for row in self.runtime.target_directory(owner)]
             desktop_id = next(row['target_id'] for row in targets if row['kind'] == 'desktop')
             result = {'success': True, 'targets': targets, 'desktop_target_id': desktop_id}

@@ -66,7 +66,7 @@ export function installCompanionSelection(ctx, bridge, options = {}) {
       const removed = selectionIds(previousCurrent).filter((id) => !currentIds.has(id))
       if (removed.length && scope?.locked) {
         for (const id of removed) {
-          const result = await bridge.request(`/windows/${encodeURIComponent(id)}/unlock`, UI_OWNER, { body: {}, start: false, signal: lifetime.signal })
+          const result = await bridge.request(`/scope/windows/${encodeURIComponent(id)}/release`, UI_OWNER, { body: {}, start: false, signal: lifetime.signal })
           if (result?.success === false) throw new Error(result.error || `failed to unlock ${id}`)
         }
         selected = JSON.stringify(parseSelections(selected).filter((item) => !removed.includes(String(item.window_id || ''))))

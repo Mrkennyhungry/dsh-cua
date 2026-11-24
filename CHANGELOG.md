@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.5.3] - 2026-11-25
+
+### Fixed
+
+- Release individual companion window selections through the default runtime scope API, preserving other selections and bridge authentication.
+- Discover browser popups from their session-owned opener so same-URL tabs remain available through unified target observations.
+- Describe required action targets explicitly in the six-tool schema after live model validation exposed repeated missing-target calls.
+
 ## [0.5.2] - 2026-11-25
 
 ### Changed

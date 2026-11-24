@@ -330,6 +330,8 @@ class DesktopRuntime:
                 self.targets.adopt(owner, 'window', identity, info['hwnd'], self._native_metadata(info))
             except RuntimeFault as error:
                 logger.debug('Window discovery could not establish identity: %s', error)
+        if self.browser._context_instance is not None or self.browser._connections:
+            self.browser.discover(owner)
         # Refresh previously adopted records so the directory cannot return a
         # destroyed HWND or a detached frame as a live target.
         for target in self.targets.records(owner):
