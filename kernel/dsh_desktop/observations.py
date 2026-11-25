@@ -212,24 +212,28 @@ class ObservationService:
         roles = {'Edit': 'textbox', 'Document': 'document', 'CheckBox': 'checkbox',
                  'ComboBox': 'combobox', 'RadioButton': 'radio', 'ListItem': 'listitem', 'TabItem': 'tab'}
 
-        # Filter UIA duplicates from CEF integration: when (name, width, height) match but y differs,
-        # keep the one within visible bounds, discard offscreen duplicates
+        # CEF can report the same logical control both inside and outside the client area.
+        # Region is an object, so compare against its explicit bounds instead of indexing it.
+        def inside_client(rect):
+            x, y, width, height = rect
+            return (region.left <= x and region.top <= y and
+                    x + width <= region.left + region.width and
+                    y + height <= region.top + region.height)
+
         filtered_nodes = []
-        seen_keys = {}  # (name, width, height) -> (index, rect)
-        for i, node in enumerate(nodes):
-            x, y, width, height = node['rect']
-            key = (node.get('name', ''), width, height)
-            if key in seen_keys:
-                prev_i, (prev_x, prev_y, _, _) = seen_keys[key]
-                # Keep element with y closer to window top (more likely visible)
-                if y < prev_y and y >= region[1]:  # new element is higher up and within bounds
-                    filtered_nodes[prev_i] = None  # mark previous for removal
-                    seen_keys[key] = (i, node['rect'])
-                else:
-                    continue  # skip this duplicate
-            filtered_nodes.append(node)
-            seen_keys[key] = (i, node['rect'])
-        nodes = [n for n in filtered_nodes if n is not None]
+        seen_keys = {}  # (name, width, height) -> index in filtered_nodes
+        for node in nodes:
+            rect = node['rect']
+            key = (node.get('name', ''), rect[2], rect[3])
+            previous_index = seen_keys.get(key)
+            if previous_index is None:
+                seen_keys[key] = len(filtered_nodes)
+                filtered_nodes.append(node)
+                continue
+            previous = filtered_nodes[previous_index]
+            if inside_client(rect) and not inside_client(previous['rect']):
+                filtered_nodes[previous_index] = node
+        nodes = filtered_nodes
 
         elements = []
         for node in nodes:

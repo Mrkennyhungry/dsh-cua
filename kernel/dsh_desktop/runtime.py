@@ -229,7 +229,16 @@ class DesktopRuntime:
             context.check()
             context.change(target_id=target.target_id)
             with context.hold(self.operations.target_lock(target)):
-                observed = self.observations.observe(owner, target.target_id, image=arguments.get('image'))
+                for attempt in range(3):
+                    context.check()
+                    try:
+                        observed = self.observations.observe(owner, target.target_id,
+                                                             image=arguments.get('image'))
+                        break
+                    except RuntimeFault as error:
+                        if error.code != 'TARGET_CHANGED' or attempt == 2:
+                            raise
+                        time.sleep(0.15)
             return {**observed, 'target_id': target.target_id, 'outcome': 'opened'}
 
         def run(context):

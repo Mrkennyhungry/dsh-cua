@@ -3,6 +3,7 @@ import threading
 import time
 import unittest
 import uuid
+from types import SimpleNamespace
 from unittest import mock
 
 from dsh_desktop.geometry import FrameGeometry
@@ -12,6 +13,28 @@ from dsh_desktop.worker import ApartmentWorker
 
 
 class ObservationTests(unittest.TestCase):
+    def test_native_duplicate_prefers_control_inside_client_region(self):
+        from dsh_desktop import desktop_tools
+
+        outside = {'name': 'Search', 'control_type': 'Edit', 'rect': (120, 150, 40, 20),
+                   'wrapper': mock.Mock(), 'value': '', 'enabled': True}
+        visible = {'name': 'Search', 'control_type': 'Edit', 'rect': (120, 220, 40, 20),
+                   'wrapper': mock.Mock(), 'value': '', 'enabled': True}
+        root = mock.Mock()
+        target = SimpleNamespace(handle=42)
+        self.runtime.resolve_target.return_value = target
+        self.runtime.window.get_client_region.return_value = SimpleNamespace(left=100, top=200,
+                                                                               width=300, height=200)
+        with mock.patch.dict('sys.modules', {'pywinauto': SimpleNamespace(Desktop=mock.Mock())}) as modules:
+            modules['pywinauto'].Desktop.return_value.window.return_value.wrapper_object.return_value = root
+            with mock.patch.object(desktop_tools, '_uia_batch_elements', return_value=[outside, visible]):
+                elements, text, _metadata = self.service._native('a', self.target.target_id, {'uia': 0})
+
+        self.assertEqual(text, 'Search')
+        self.assertEqual(len(elements), 1)
+        token = elements[0].locator['token']
+        self.assertIs(self.service._uia_elements[token][2], visible)
+
     def test_directory_preserves_tab_identity_for_same_url_frames(self):
         self.runtime.target_directory.return_value = [
             {'target_id': 'desktop', 'kind': 'desktop'},

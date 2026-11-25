@@ -577,6 +577,21 @@ DeepSeek 记事本第 2 次在 19041.749 ms 结束，最终 reason=error、code=
 
 P7 保留 BLOCKED，受 DEVELOPMENT 阶段闸门约束。已执行的数值和断言见 p7-evidence/release-verification.json。真实多屏矩阵需要至少两个不同 DPI 的显示器，并将其中一个配置到主屏左侧或上方，再按第 7 节执行移动、resize、同语义引用和图片点读回。当前 test/test_dpi.py 与 test/test_runtime_targets.py 的确定性变换和失效用例均随完整套件通过，真实多屏项继续保持未通过。精确费用与图片独立计费按协议允许值记为未知。
 
+### 0.5.5 缺陷复核与 0.5.6 修复
+
+2026-11-26 检查用户提供的验收报告和本地 patch。报告中的 UIA `Region` 下标、OpenCV `IMREAD_BGR`、NumPy 布尔序列化、视觉依赖顶层导入、首次 open 来源帧变化和运行时版本落后均在当前源码中复现。修复后包版本与内核版本同步为 0.5.6。
+
+| 检查项 | 状态 | 实测结果 |
+| --- | --- | --- |
+| UIA 客户区重复节点 | PASS | 隔离回归 1/1，Region 使用 left/top/width/height，边界外重复节点被客户区内节点替换 |
+| 视觉动作效果与可选依赖 | PASS | 回归 2/2，相同 JPEG 返回原生 `bool(false)`，不同纯色 JPEG 返回原生 `bool(true)` 且 JSON 编码成功；模拟缺少 cv2/numpy 时返回未知值 |
+| open 初始观察竞态 | PASS | 回归 1/1，首次 `TARGET_CHANGED` 后 150 ms 重试并成功读回；最多重试 3 次 |
+| 版本与变更记录 | PASS | `package.json` 与 `kernel/dsh_desktop/version.py` 均为 0.5.6，CHANGELOG 已增加对应条目 |
+| 完整检查 | PASS | `scripts/check.ps1`，Node 94 PASS、0 FAIL、0 SKIP；Python 318 PASS、1 显式真实窗口 SKIP、43 subtests PASS，11.63 s |
+| 真实 DSH 会话及模型验收 | NOT RUN | 本轮仅执行源码、单元及完整仓库检查，未重新启动 DSH，也未重新发起两个模型请求 |
+
+Steam 同名控件的近似尺寸归并和最小化窗口的幽灵 target 仍需实机复现后分别确定判据。本次没有加入点击失败后的兄弟节点重试，因为自动重放输入可能作用于错误控件。`observation_changed` 继续表示语义观察变化，是否有可见画面变化由独立的 `visual_effect` 表达，符合 PROTOCOL 的证据区分。
+
 复现最后实机检查可在项目根目录执行以下命令，使用新的隔离 home 目录保留已有证据。
 
 ```powershell

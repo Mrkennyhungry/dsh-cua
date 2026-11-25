@@ -3,9 +3,6 @@ import math
 from pathlib import Path
 import time
 
-import cv2
-import numpy as np
-
 from .operations import Cancelled
 from .conditions import Conditions, TransientWatcher, validate_condition
 from .targets import RuntimeFault
@@ -228,11 +225,16 @@ class ActionDispatcher:
         Uses pixel difference thresholding to detect UI effects (enable/disable, visual feedback).
         """
         try:
+            # Vision packages are optional. Ordinary window/UIA actions must stay importable
+            # when a machine has not provisioned the visual extra.
+            import cv2
+            import numpy as np
+
             # Decode JPEG images
             before_arr = np.frombuffer(before_image_bytes, np.uint8)
             after_arr = np.frombuffer(after_image_bytes, np.uint8)
-            before = cv2.imdecode(before_arr, cv2.IMREAD_BGR)
-            after = cv2.imdecode(after_arr, cv2.IMREAD_BGR)
+            before = cv2.imdecode(before_arr, cv2.IMREAD_COLOR)
+            after = cv2.imdecode(after_arr, cv2.IMREAD_COLOR)
 
             if before is None or after is None or before.shape != after.shape:
                 return False
@@ -252,11 +254,11 @@ class ActionDispatcher:
             changed_pixels = np.count_nonzero(mask)
             total_pixels = mask.size
 
-            # Return True if at least 0.5% of pixels changed significantly
-            return changed_pixels / total_pixels > 0.005
+            # Normalize numpy.bool_ to bool so the bridge can serialize the result.
+            return bool(changed_pixels / total_pixels > 0.005)
         except Exception:
-            # Image comparison failed; conservatively assume no visual change
-            return False
+            # Missing or unreadable vision inputs should not be reported as a verified no-op.
+            return None
 
 
 

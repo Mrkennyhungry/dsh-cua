@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.5.6] - 2026-11-26
+
+### Fixed
+
+- Restore UIA observations by checking duplicate bounds against the window client region.
+- Verify visual action effects with optional vision dependencies and JSON-safe boolean results.
+- Retry the initial open observation after transient source-frame changes.
+
+## [0.5.5] - 2026-11-25
+
+### Added
+
+- Include frame coordinate origin and clickability metadata, and report visual change evidence after supported actions.
+
 ## [0.5.4] - 2026-11-25
 
 ### Fixed

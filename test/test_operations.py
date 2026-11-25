@@ -1,3 +1,4 @@
+import builtins
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import nullcontext
 from pathlib import Path
@@ -5,6 +6,7 @@ import tempfile
 import threading
 import time
 import unittest
+import json
 import subprocess
 import sys
 import os
@@ -439,6 +441,40 @@ class OperationTests(unittest.TestCase):
 
 
 class ActionValidationTests(unittest.TestCase):
+    def test_visual_effect_uses_supported_decode_flag_and_json_boolean(self):
+        import cv2
+        import numpy as np
+
+        dispatcher = ActionDispatcher(mock.Mock())
+        before = np.zeros((40, 40, 3), dtype=np.uint8)
+        after = np.full((40, 40, 3), 255, dtype=np.uint8)
+        unchanged_ok, unchanged = cv2.imencode('.jpg', before)
+        changed_ok, changed = cv2.imencode('.jpg', after)
+        self.assertTrue(unchanged_ok and changed_ok)
+
+        unchanged_result = dispatcher._visual_effect_changed(unchanged.tobytes(), unchanged.tobytes())
+        changed_result = dispatcher._visual_effect_changed(unchanged.tobytes(), changed.tobytes())
+
+        self.assertIs(type(unchanged_result), bool)
+        self.assertIs(type(changed_result), bool)
+        self.assertFalse(unchanged_result)
+        self.assertTrue(changed_result)
+        self.assertEqual(json.loads(json.dumps({'visual_effect': changed_result})), {'visual_effect': True})
+
+    def test_visual_effect_is_unknown_when_optional_vision_packages_are_unavailable(self):
+        original_import = builtins.__import__
+
+        def without_vision(name, *args, **kwargs):
+            if name in ('cv2', 'numpy'):
+                raise ImportError('optional visual dependency unavailable')
+            return original_import(name, *args, **kwargs)
+
+        dispatcher = ActionDispatcher(mock.Mock())
+        with mock.patch('builtins.__import__', side_effect=without_vision):
+            result = dispatcher._visual_effect_changed(b'image', b'image')
+
+        self.assertIsNone(result)
+
     def test_transient_watcher_is_armed_before_dispatch_and_closed(self):
         order = []
         runtime = mock.Mock()

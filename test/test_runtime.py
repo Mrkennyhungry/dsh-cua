@@ -4,13 +4,48 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import threading
 import unittest
+from contextlib import nullcontext
+from types import SimpleNamespace
 from unittest import mock
 
 from dsh_desktop.runtime import DesktopRuntime, RuntimeConfig
+from dsh_desktop.targets import RuntimeFault
 
 
 class RuntimeTests(unittest.TestCase):
+    def test_open_retries_transient_target_change_during_initial_observation(self):
+        runtime = DesktopRuntime.__new__(DesktopRuntime)
+        target = SimpleNamespace(kind='window', target_id='target', handle=42, metadata={})
+        context = mock.Mock()
+        context.owner = 'owner'
+        context.hold.side_effect = lambda _lock: nullcontext()
+        context.backend.side_effect = lambda _call, operation, timeout: operation()
+        runtime.resolve_target = mock.Mock(return_value=target)
+        runtime.window = mock.Mock()
+        runtime.window.force_foreground.return_value = True
+        runtime._input_lock = threading.Lock()
+        runtime.observations = mock.Mock()
+        expected = {'success': True, 'observation': {'observation_id': 'fresh'}}
+        runtime.observations.observe.side_effect = [
+            RuntimeFault('TARGET_CHANGED', 'source frame changed'), expected]
+        operations = mock.Mock()
+        operations.target_lock.return_value = threading.Lock()
+
+        def submit(_owner, _key, _kind, _arguments, execute, **_kwargs):
+            return execute(context)
+
+        operations.submit.side_effect = submit
+        runtime._operations_lock = threading.Lock()
+        runtime._operations = operations
+
+        result = runtime.open('owner', 'request', {'target_id': 'target'})
+
+        self.assertEqual(runtime.observations.observe.call_count, 2)
+        self.assertEqual(result['observation']['observation_id'], 'fresh')
+        self.assertEqual(result['outcome'], 'opened')
+
     def test_scope_release_authenticates_and_preserves_other_selections(self):
         from fastapi import FastAPI
         from fastapi.testclient import TestClient
