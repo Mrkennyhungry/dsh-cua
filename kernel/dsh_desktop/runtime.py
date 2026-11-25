@@ -189,7 +189,24 @@ class DesktopRuntime:
                     return launched
                 context.completed(0, launched.get('launch_method', 'launch'))
                 context.check()
-                target = self.open_target(owner, hwnd=launched['tracked_windows'][0]['hwnd'])
+                # Poll for window stability post-launch (handles single-instance launchers that fork/exit)
+                hwnd = launched['tracked_windows'][0]['hwnd']
+                polled_ms = 0
+                poll_start = time.monotonic()
+                poll_timeout = 2.0  # 2-second post-launch stability window
+                stability_checks = 0
+                while polled_ms < poll_timeout * 1000:
+                    if self.window.is_valid(hwnd):
+                        stability_checks += 1
+                        if stability_checks >= 2:  # Require two consecutive valid checks
+                            break
+                    time.sleep(0.1)
+                    polled_ms = round((time.monotonic() - poll_start) * 1000)
+                if stability_checks < 2:
+                    raise RuntimeFault('WINDOW_STABILITY_TIMEOUT',
+                                     f'Launched window {hwnd:x} did not stabilize after {polled_ms}ms')
+                context.change(diagnostics={'window_stability_ms': polled_ms, 'stability_checks': stability_checks})
+                target = self.open_target(owner, hwnd=hwnd)
             elif url:
                 from contextlib import nullcontext
                 current = self.resolve_target(owner, target_id) if target_id else None
