@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.5.9] - 2026-11-26
+
+### Added
+
+- Warn when visual change is detected only outside the control and immediate click neighborhood, or only in the full frame, so callers can verify the expected UI state.
+
 ## [0.5.8] - 2026-11-26
 
 ### Fixed

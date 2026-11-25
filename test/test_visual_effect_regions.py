@@ -44,6 +44,7 @@ class LocalVisualEffectTests(unittest.TestCase):
         self.assertTrue(result['visual_effect_local_changed'])
         self.assertEqual(result['visual_effect_basis'], 'local')
         self.assertTrue(result['visual_effect_regions'][0]['changed'])
+        self.assertNotIn('visual_effect_attribution', result)
         self.assertEqual(json.loads(json.dumps(result)), result)
 
     def test_same_icon_change_is_detected_in_larger_window(self):
@@ -58,6 +59,7 @@ class LocalVisualEffectTests(unittest.TestCase):
                 result = self.compare(after)
                 self.assertFalse(result['visual_effect'])
                 self.assertFalse(result['visual_effect_local_changed'])
+                self.assertNotIn('visual_effect_attribution', result)
 
     def test_tiny_caret_noise_is_below_local_threshold(self):
         after = self.before.copy()
@@ -78,6 +80,8 @@ class LocalVisualEffectTests(unittest.TestCase):
         self.assertTrue(result['visual_effect'])
         self.assertEqual(result['visual_effect_basis'], 'full_frame')
         self.assertFalse(result['visual_effect_local_changed'])
+        self.assertEqual(result['visual_effect_attribution'], 'unknown')
+        self.assertEqual(result['visual_effect_attribution_reason'], 'full_frame_only')
 
     def test_dropdown_change_outside_small_neighborhood_reaches_surroundings(self):
         # Use an upward-opening menu at a button away from the image edge.
@@ -88,6 +92,20 @@ class LocalVisualEffectTests(unittest.TestCase):
         self.assertFalse(result['visual_effect_regions'][0]['changed'])
         self.assertTrue(result['visual_effect_regions'][1]['changed'])
         self.assertFalse(result['visual_effect_global_changed'])
+        self.assertTrue(result['visual_effect'])
+        self.assertEqual(result['visual_effect_attribution'], 'unknown')
+        self.assertEqual(result['visual_effect_attribution_reason'], 'surroundings_only')
+        self.assertIn('Verify the expected UI state', result['visual_effect_warning'])
+
+    def test_global_and_surroundings_change_has_unknown_attribution(self):
+        after = self.before.copy()
+        after[570:615, 630:810] = 240
+        regions = self.dispatcher._visual_regions(self.frame, {'point': (720, 650)})
+        result = self.compare(after, regions)
+        self.assertTrue(result['visual_effect_global_changed'])
+        self.assertFalse(result['visual_effect_regions'][0]['changed'])
+        self.assertTrue(result['visual_effect_regions'][1]['changed'])
+        self.assertEqual(result['visual_effect_attribution_reason'], 'surroundings_only')
 
     def test_global_result_still_works_without_local_geometry(self):
         after = np.full_like(self.before, 240)
@@ -95,6 +113,7 @@ class LocalVisualEffectTests(unittest.TestCase):
         self.assertTrue(result['visual_effect_global_changed'])
         self.assertIsNone(result['visual_effect_local_changed'])
         self.assertEqual(result['visual_effect_regions'], [])
+        self.assertEqual(result['visual_effect_attribution_reason'], 'full_frame_only')
 
     def test_scaled_negative_origin_and_cropped_frames_map_regions(self):
         geometry = FrameGeometry((-1600, -500, 1200, 800), (300, 200), crop=(100, 100, 600, 400))
@@ -148,6 +167,7 @@ class LocalVisualEffectTests(unittest.TestCase):
             before_observation=before, action='click', location=self.location)
         self.assertIsNone(result['visual_effect'])
         self.assertEqual(result['visual_effect_reason'], 'geometry_mismatch')
+        self.assertNotIn('visual_effect_attribution', result)
 
     def test_missing_before_capture_is_explicitly_unknown(self):
         runtime, _, _, _ = self.readback_fixture()

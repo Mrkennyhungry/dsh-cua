@@ -320,6 +320,14 @@ class ActionDispatcher:
                           visual_effect_changed_ratio=round(float(changed_ratio), 6),
                           visual_effect_global_changed=global_changed,
                           visual_effect_local_changed=local_changed if result['visual_effect_regions'] else None)
+            near_changed = any(region['changed'] for region in result['visual_effect_regions']
+                               if region['basis'] in ('element_bbox', 'click_neighborhood'))
+            if result['visual_effect'] and not near_changed:
+                surroundings_changed = any(region['changed'] for region in result['visual_effect_regions']
+                                           if region['basis'] == 'click_surroundings')
+                result.update(visual_effect_attribution='unknown',
+                              visual_effect_attribution_reason='surroundings_only' if surroundings_changed else 'full_frame_only',
+                              visual_effect_warning='The relationship between the visual change and the action is unknown. Verify the expected UI state.')
             return result
         except Exception:
             # Missing or unreadable vision inputs should not be reported as a verified no-op.

@@ -655,3 +655,17 @@ $env:PYTHONIOENCODING = 'utf-8'
 $env:TEMP = $env:TMP = Join-Path (Get-Location) '.runtime/test-temp'
 python scripts/run-live-probe.py test/actions_probe.py .runtime/p7-local-visual-reproduce-home
 ```
+
+### 0.5.9 视觉变化关联性提示
+
+2026-11-26 基线 `scripts/check.ps1` 通过 Node 94 项、Python 339 项、1 项显式真实窗口 SKIP、45 subtests，Python 11.10 s。外围或全图命中且控件边界与点击近邻均未命中时，增加关联性未知、空间原因和核验界面状态的提示。具体合同见 PROTOCOL，决策见 ADR 0006。
+
+| 检查项 | 状态 | 实测结果 |
+| --- | --- | --- |
+| 视觉回归 | PASS | 19 项、2 subtests 通过，覆盖播放图标、无变化、外围菜单、全图与外围同时命中、无局部几何、几何变化；Host 的 act/status 字段转发回归通过 |
+| 真实动作入口 | PASS | 隔离 actions_probe 完成，耗时 20.719 s。外围测试控件点击一次，控件区域与近邻各 0 个变化像素，外围 3001/66049，返回 `surroundings_only`；同一 operation 的 status 视觉字段一致 |
+| 安装与新 DSH 会话 | PASS | 官方 CLI link 安装后，新 DeepSeek 会话调用 status、open、act、status，版本 0.5.9，5 个 Agent 请求均发现六工具。控件与近邻各 0 个变化像素，外围 2890/66049，全图比例 0.002476，act/status 返回相同未知关联提示；页面独立读回 clicks=1、playing=true |
+| 完整检查 | PASS | scripts/check.ps1，Node 95 PASS、0 SKIP，Python 340 PASS、1 显式真实窗口 SKIP、45 subtests PASS，11.64 s |
+| 真实异 DPI / 负原点多屏 | BLOCKED | 本机缺少异 DPI、负原点多屏硬件，P7 阶段闸门继续阻塞 |
+
+定向测试首次直接运行缺少 `PYTHONPATH`，完整检查首次执行发现两处测试样本问题，已修正断言位置和近邻区域边界，再通过上述检查。实机页面及隔离服务已关闭。

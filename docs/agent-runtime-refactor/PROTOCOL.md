@@ -131,6 +131,7 @@ owner 只能读取自身操作和观察。全局健康摘要可以包含设备�
 | `visual_effect_thresholds` | `pixel_difference=25`、`global_ratio=0.005`、`local_ratio=0.01`、`local_min_pixels=12`。比例使用 0–1 数值 |
 | `visual_effect_frames` | 实际比较前后的 `observation_id`、`frame_id` 与图像字节 SHA256，用于原样取回及复算 |
 | `visual_effect_step` / `visual_effect_reason` | 当前视觉读回对应的零起点动作下标，未知时给出缺帧、几何变化、解码失败或比较不可用原因 |
+| `visual_effect_attribution` / `visual_effect_attribution_reason` / `visual_effect_warning` | 检测到变化且控件区域、点击近邻均未命中时，关联性为 `unknown`，原因是 `surroundings_only` 或 `full_frame_only`，提示核验预期界面状态。没有控件或点击位置时，全图命中同样给出未知提示。其他情况省略这些字段 |
 
 局部区域来自实际动作解析后的坐标。DOM/UIA 使用控件边界向外扩 12 个图片像素，同时提供以动作点为中心的 64×64 与 256×256 图片像素区域。纯坐标动作提供两个周边区域，越界部分裁剪。局部使用已解码图片的原始分辨率，灰度差超过 25 的像素比例严格大于 1% 且数量至少 12 时命中。全图结果继续使用宽高各减半的原口径，因此全图与局部变化像素数的采样尺度不同。
 

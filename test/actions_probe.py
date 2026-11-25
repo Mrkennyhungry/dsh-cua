@@ -91,6 +91,9 @@ HTML = '''<!doctype html><meta charset="utf-8"><title>P4 form</title>
 <label>附件<input id="file" type="file"></label>
 <button id="tiny" aria-label="Tiny playback" style="position:fixed;right:30px;top:60px;width:32px;height:32px;padding:0;border:0;background:#eee;outline:none"
  onmousedown="event.preventDefault()" onclick="tinyPlaying=!tinyPlaying;paintTiny()"><canvas id="tinyCanvas" width="32" height="32"></canvas></button>
+<button id="outer" aria-label="Outer change" style="position:fixed;left:500px;top:250px;width:32px;height:32px;padding:0;border:0;background:#eee;outline:none"
+ onmousedown="event.preventDefault()" onclick="document.querySelector('#outerPanel').style.background='#222';window.outerClicks++"></button>
+<div id="outerPanel" style="position:fixed;left:480px;top:160px;width:80px;height:40px;background:#eee"></div>
 <button id="click" onclick="count++; document.querySelector('output').textContent='saved '+count"
  oncontextmenu="event.preventDefault(); right++;">保存</button>
 <button id="hover" onmouseover="hovered++">悬停</button><output>pending</output>
@@ -103,7 +106,7 @@ HTML = '''<!doctype html><meta charset="utf-8"><title>P4 form</title>
 <div id="drag" style="width:240px;height:60px;background:#ccd" onpointerdown="down++" onpointerup="up++">拖动区域</div>
 <div style="height:1800px"></div>
 <script>window.count=0;window.right=0;window.hovered=0;window.down=0;window.up=0;
-window.tinyPlaying=false;
+window.tinyPlaying=false;window.outerClicks=0;
 function paintTiny(){const c=document.querySelector('#tinyCanvas').getContext('2d');c.clearRect(0,0,32,32);c.fillStyle='#111';
 if(tinyPlaying){c.fillRect(10,10,4,12);c.fillRect(18,10,4,12)}else{c.beginPath();c.moveTo(10,10);c.lineTo(22,16);c.lineTo(10,22);c.fill()}}
 paintTiny();</script>'''
@@ -269,6 +272,13 @@ try:
     assert not runtime.browser.call(lambda: target.handle[1].evaluate('tinyPlaying'))
     assert tiny_point['visual_effect_local_changed'] and tiny_point['visual_effect_global_changed'] is False, tiny_point
     report['browser_tiny_coordinate_click'] = {key: value for key, value in tiny_point.items() if key.startswith('visual_effect')}
+    outer, _ = act(target, tiny_point['observation'], [{'action': 'click', 'target': ref(tiny_point['observation'], 'Outer change')}])
+    assert runtime.browser.call(lambda: target.handle[1].evaluate('outerClicks')) == 1
+    assert outer['visual_effect'] and outer['visual_effect_attribution'] == 'unknown', outer
+    assert outer['visual_effect_attribution_reason'] == 'surroundings_only', outer
+    outer_status = runtime.operations.status('a', outer['operation_id'])
+    assert all(outer_status[key] == value for key, value in outer.items() if key.startswith('visual_effect'))
+    report['browser_outer_visual_effect'] = {key: value for key, value in outer.items() if key.startswith('visual_effect')}
     # Retrieve exactly the internal pair before the bounded observation cache expires.
     import hashlib
     for label, result in (('tiny-semantic', tiny), ('tiny-point', tiny_point)):
@@ -277,7 +287,7 @@ try:
             data = runtime.observations.image('a', evidence[side + '_frame_id'])
             assert hashlib.sha256(data).hexdigest() == evidence[side + '_sha256']
             (home / (label + '-' + side + '.jpg')).write_bytes(data)
-    observed = tiny_point['observation']
+    observed = outer['observation']
     attachment = home / 'upload.txt'
     attachment.write_text('fixture attachment', encoding='utf-8')
     result, arguments = act(target, observed, [

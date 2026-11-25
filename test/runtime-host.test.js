@@ -46,6 +46,22 @@ test('runtime adapter registers six tools and forwards operation identity and ca
   assert.match(calls[0].owner, /^[a-f0-9]{64}$/)
 })
 
+test('act and status relay uncertain visual attribution', async () => {
+  const tools = new Map()
+  const evidence = { visual_effect: true, visual_effect_attribution: 'unknown',
+    visual_effect_attribution_reason: 'surroundings_only', visual_effect_warning: 'Verify the expected UI state.' }
+  registerRuntimeTools({}, { async request() {
+    return { success: true, status: 'completed', operation_id: 'op-1', ...evidence }
+  } }, tool => tools.set(tool.name, tool))
+  const exec = { callId: 'call', signal: new AbortController().signal, agent: { session: { id: 'session' } } }
+  const act = await tools.get('doraemon_act').execute({ target_id: 't', observation_id: 'o', steps: [{ action: 'close' }] }, exec)
+  const status = await tools.get('doraemon_status').execute({ operation_id: 'op-1' }, exec)
+  for (const [key, value] of Object.entries(evidence)) {
+    assert.equal(act[key], value)
+    assert.equal(status[key], value)
+  }
+})
+
 test('runtime observation emits an actual DSH image attachment through the tool pipeline', async () => {
   const { tools, calls, attachment } = fixture()
   const pipeline = new ToolExecutionPipeline({
