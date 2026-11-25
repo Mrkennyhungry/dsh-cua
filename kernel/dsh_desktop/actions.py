@@ -3,6 +3,9 @@ import math
 from pathlib import Path
 import time
 
+import cv2
+import numpy as np
+
 from .operations import Cancelled
 from .conditions import Conditions, TransientWatcher, validate_condition
 from .targets import RuntimeFault
@@ -114,6 +117,7 @@ class ActionDispatcher:
             for index, step in enumerate(arguments['steps']):
                 watcher = None
                 watcher_slot = False
+                before_observation = None
                 try:
                     expect = arguments.get('expect')
                     watch_step = (expect and expect.get('transient') and
@@ -133,6 +137,12 @@ class ActionDispatcher:
                             watcher_slot = False
                             watcher = TransientWatcher(runtime, context, target, expect, lock_held=True)
                             context.before_dispatch = watcher.dispatch
+                        # Capture before-action observation for visual effect verification on certain actions
+                        if step['action'] in ('click', 'input', 'check'):
+                            try:
+                                before_observation = runtime.observations.observe(owner, target_id, image=True)
+                            except Exception:
+                                before_observation = None
                         method = self._step(context, target, oid, index, step)
                         context.completed(index, method)
                         time.sleep(0.03)
@@ -147,7 +157,7 @@ class ActionDispatcher:
                             result['close_pending'] = True
                         last = index == len(arguments['steps']) - 1
                         if last or current != previous:
-                            result.update(self._readback(owner, target_id, baseline))
+                            result.update(self._readback(owner, target_id, baseline, before_observation=before_observation, action=step.get('action')))
                     expect = arguments.get('expect')
                     if expect and index == expect.get('after_step', len(arguments['steps']) - 1):
                         # Keep target order, release physical input while waiting.
@@ -162,11 +172,11 @@ class ActionDispatcher:
                         break
                     previous = current
                 except Cancelled:
-                    result.update(self._readback(owner, target_id, baseline))
+                    result.update(self._readback(owner, target_id, baseline, before_observation=before_observation, action=step.get('action')))
                     context.change(result=result)
                     raise
                 except Exception as error:
-                    result.update(self._readback(owner, target_id, baseline))
+                    result.update(self._readback(owner, target_id, baseline, before_observation=before_observation, action=step.get('action')))
                     context.change(result=result, stopped_at=index)
                     raise
                 finally:
@@ -177,20 +187,78 @@ class ActionDispatcher:
                         runtime._transient_lock.release()
         return result
 
-    def _readback(self, owner, target_id, baseline):
+    def _readback(self, owner, target_id, baseline, before_observation=None, action=None):
         try:
             # Request image to ensure frames and bounds are populated in readback observation
             observed = self.runtime.observations.observe(owner, target_id, image=True)
             fresh = self.runtime.observations.get(owner, observed['observation']['observation_id'])
             changed = None if baseline is None else (fresh.text != baseline.text or
                 [element.semantic for element in fresh.elements] != [element.semantic for element in baseline.elements])
-            return {'observation': observed['observation'], 'observation_changed': changed}
+
+            # Verify visual effect for UI-affecting actions: check if screenshot actually changed
+            visual_effect = None
+            if before_observation and action in ('click', 'input', 'check'):
+                try:
+                    before_frames = before_observation.get('observation', {}).get('frames', [])
+                    after_frames = observed.get('observation', {}).get('frames', [])
+                    if before_frames and after_frames:
+                        before_frame_id = before_frames[0]['frame_id']
+                        after_frame_id = after_frames[0]['frame_id']
+                        before_image = self.runtime.observations.image(owner, before_frame_id)
+                        after_image = self.runtime.observations.image(owner, after_frame_id)
+                        visual_effect = self._visual_effect_changed(before_image, after_image)
+                except Exception:
+                    visual_effect = None
+
+            result = {'observation': observed['observation'], 'observation_changed': changed}
+            if visual_effect is not None:
+                result['visual_effect'] = visual_effect
+            return result
         except RuntimeFault as error:
             if error.code == 'TARGET_CLOSED':
                 return {'closed': True, 'observation_changed': True}
             return {'readback_warning': str(error), 'observation_changed': None}
         except Exception as error:
             return {'readback_warning': str(error), 'observation_changed': None}
+
+    def _visual_effect_changed(self, before_image_bytes, after_image_bytes):
+        """Compare two JPEG images for significant visual changes.
+
+        Returns True if visual changes detected, False if no changes or decode fails.
+        Uses pixel difference thresholding to detect UI effects (enable/disable, visual feedback).
+        """
+        try:
+            # Decode JPEG images
+            before_arr = np.frombuffer(before_image_bytes, np.uint8)
+            after_arr = np.frombuffer(after_image_bytes, np.uint8)
+            before = cv2.imdecode(before_arr, cv2.IMREAD_BGR)
+            after = cv2.imdecode(after_arr, cv2.IMREAD_BGR)
+
+            if before is None or after is None or before.shape != after.shape:
+                return False
+
+            # Downscale for efficient comparison
+            h, w = before.shape[:2]
+            small_dim = (max(1, w // 2), max(1, h // 2))
+            before_small = cv2.resize(before, small_dim, interpolation=cv2.INTER_AREA)
+            after_small = cv2.resize(after, small_dim, interpolation=cv2.INTER_AREA)
+
+            # Compute pixel differences
+            diff = cv2.absdiff(before_small, after_small)
+            gray = cv2.cvtColor(diff, cv2.COLOR_BGR2GRAY)
+
+            # Threshold to detect meaningful changes (threshold 25 same as watch.py)
+            mask = (gray > 25).astype(np.uint8)
+            changed_pixels = np.count_nonzero(mask)
+            total_pixels = mask.size
+
+            # Return True if at least 0.5% of pixels changed significantly
+            return changed_pixels / total_pixels > 0.005
+        except Exception:
+            # Image comparison failed; conservatively assume no visual change
+            return False
+
+
 
     def _boundary(self, owner, target_id):
         target = self.runtime.resolve_target(owner, target_id)

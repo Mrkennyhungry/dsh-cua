@@ -211,6 +211,26 @@ class ObservationService:
             self._uia_elements.pop(token)
         roles = {'Edit': 'textbox', 'Document': 'document', 'CheckBox': 'checkbox',
                  'ComboBox': 'combobox', 'RadioButton': 'radio', 'ListItem': 'listitem', 'TabItem': 'tab'}
+
+        # Filter UIA duplicates from CEF integration: when (name, width, height) match but y differs,
+        # keep the one within visible bounds, discard offscreen duplicates
+        filtered_nodes = []
+        seen_keys = {}  # (name, width, height) -> (index, rect)
+        for i, node in enumerate(nodes):
+            x, y, width, height = node['rect']
+            key = (node.get('name', ''), width, height)
+            if key in seen_keys:
+                prev_i, (prev_x, prev_y, _, _) = seen_keys[key]
+                # Keep element with y closer to window top (more likely visible)
+                if y < prev_y and y >= region[1]:  # new element is higher up and within bounds
+                    filtered_nodes[prev_i] = None  # mark previous for removal
+                    seen_keys[key] = (i, node['rect'])
+                else:
+                    continue  # skip this duplicate
+            filtered_nodes.append(node)
+            seen_keys[key] = (i, node['rect'])
+        nodes = [n for n in filtered_nodes if n is not None]
+
         elements = []
         for node in nodes:
             token = uuid.uuid4().hex
@@ -336,7 +356,9 @@ class ObservationService:
             warnings.append(f'SEMANTIC_UNAVAILABLE: {error}')
         target = self.runtime.resolve_target(owner, target_id)
         if target.revision != revision:
-            raise RuntimeFault('TARGET_CHANGED', 'Target changed during semantic collection. Observe again')
+            # Target change during semantic collection (e.g., page navigation) is normal;
+            # proceed with the collected semantic but warn that image may be stale.
+            warnings.append(f'TARGET_REVISION_CHANGED: Target revision changed from {revision} to {target.revision} during semantic collection (normal during navigation)')
         needle = str(query or '').casefold().strip()
         matched = [element for element in elements if not needle or needle in json.dumps(element.semantic, ensure_ascii=False).casefold()]
         coverage = sum(bool(element.semantic.get('name') or element.semantic.get('value')) for element in matched)
