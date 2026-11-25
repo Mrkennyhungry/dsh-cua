@@ -89,6 +89,8 @@ HTML = '''<!doctype html><meta charset="utf-8"><title>P4 form</title>
 <label>加急<input id="check" type="checkbox"></label>
 <select aria-label="城市" id="city"><option>杭州</option><option>上海</option></select>
 <label>附件<input id="file" type="file"></label>
+<button id="tiny" aria-label="Tiny playback" style="position:fixed;right:30px;top:60px;width:32px;height:32px;padding:0;border:0;background:#eee;outline:none"
+ onmousedown="event.preventDefault()" onclick="tinyPlaying=!tinyPlaying;paintTiny()"><canvas id="tinyCanvas" width="32" height="32"></canvas></button>
 <button id="click" onclick="count++; document.querySelector('output').textContent='saved '+count"
  oncontextmenu="event.preventDefault(); right++;">保存</button>
 <button id="hover" onmouseover="hovered++">悬停</button><output>pending</output>
@@ -100,7 +102,11 @@ HTML = '''<!doctype html><meta charset="utf-8"><title>P4 form</title>
 <iframe title="embedded" srcdoc="&lt;button onclick=&quot;this.textContent='inner done'&quot;&gt;frame action&lt;/button&gt;"></iframe>
 <div id="drag" style="width:240px;height:60px;background:#ccd" onpointerdown="down++" onpointerup="up++">拖动区域</div>
 <div style="height:1800px"></div>
-<script>window.count=0;window.right=0;window.hovered=0;window.down=0;window.up=0;</script>'''
+<script>window.count=0;window.right=0;window.hovered=0;window.down=0;window.up=0;
+window.tinyPlaying=false;
+function paintTiny(){const c=document.querySelector('#tinyCanvas').getContext('2d');c.clearRect(0,0,32,32);c.fillStyle='#111';
+if(tinyPlaying){c.fillRect(10,10,4,12);c.fillRect(18,10,4,12)}else{c.beginPath();c.moveTo(10,10);c.lineTo(22,16);c.lineTo(10,22);c.fill()}}
+paintTiny();</script>'''
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -201,6 +207,11 @@ try:
     assert toast['expectation']['evidence']['source'] == 'uia', toast
     report['native_transient'] = toast['expectation']
     report['native_form_steps'] = 4
+    native_snapshot = observe(native)
+    native_toggle, _ = act(native, native_snapshot, [
+        {'action': 'check', 'target': ref(native_snapshot, 'Urgent'), 'checked': False}])
+    assert native_toggle['visual_effect_local_changed'], native_toggle
+    report['native_local_visual_effect'] = {key: value for key, value in native_toggle.items() if key.startswith('visual_effect')}
     native_b = runtime.open_target('b', hwnd=hwnd)
     first_observation = observe(native)
     second_observation = runtime.observations.observe('b', native_b.target_id)['observation']
@@ -244,6 +255,29 @@ try:
     target = runtime.resolve_target('a', opened['target_id'])
     observed = opened['observation']
     report['open_browser_initial_observation_and_replay'] = 1
+    tiny, _ = act(target, observed, [{'action': 'click', 'target': ref(observed, 'Tiny playback')}])
+    assert runtime.browser.call(lambda: target.handle[1].evaluate('tinyPlaying'))
+    assert tiny['visual_effect'] and tiny['visual_effect_local_changed'], tiny
+    assert tiny['visual_effect_global_changed'] is False, tiny
+    assert tiny['observation_changed'] is False, tiny
+    report['browser_tiny_semantic_click'] = {key: value for key, value in tiny.items() if key.startswith('visual_effect')}
+    tiny_frame = runtime.observations.get('a', tiny['observation']['observation_id']).frames[0]
+    box = runtime.browser.call(lambda: target.handle[1].locator('#tiny').bounding_box())
+    px, py = tiny_frame.geometry.from_screen(box['x'] + box['width'] / 2, box['y'] + box['height'] / 2)
+    tiny_point, _ = act(target, tiny['observation'], [{'action': 'click',
+        'target': {'frame_id': tiny_frame.frame_id, 'x': px, 'y': py}}])
+    assert not runtime.browser.call(lambda: target.handle[1].evaluate('tinyPlaying'))
+    assert tiny_point['visual_effect_local_changed'] and tiny_point['visual_effect_global_changed'] is False, tiny_point
+    report['browser_tiny_coordinate_click'] = {key: value for key, value in tiny_point.items() if key.startswith('visual_effect')}
+    # Retrieve exactly the internal pair before the bounded observation cache expires.
+    import hashlib
+    for label, result in (('tiny-semantic', tiny), ('tiny-point', tiny_point)):
+        for side in ('before', 'after'):
+            evidence = result['visual_effect_frames']
+            data = runtime.observations.image('a', evidence[side + '_frame_id'])
+            assert hashlib.sha256(data).hexdigest() == evidence[side + '_sha256']
+            (home / (label + '-' + side + '.jpg')).write_bytes(data)
+    observed = tiny_point['observation']
     attachment = home / 'upload.txt'
     attachment.write_text('fixture attachment', encoding='utf-8')
     result, arguments = act(target, observed, [

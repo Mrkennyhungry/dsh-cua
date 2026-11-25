@@ -1,11 +1,13 @@
 """One validated dispatch/readback path for individual and short batch actions."""
 import math
+import hashlib
 from pathlib import Path
 import time
 
 from .operations import Cancelled
 from .conditions import Conditions, TransientWatcher, validate_condition
 from .targets import RuntimeFault
+from .geometry import FrameGeometry
 
 
 _ACTIONS = {'click', 'input', 'key', 'scroll', 'drag', 'select', 'check', 'hover', 'attach', 'close'}
@@ -115,6 +117,7 @@ class ActionDispatcher:
                 watcher = None
                 watcher_slot = False
                 before_observation = None
+                context.visual_location = None
                 try:
                     expect = arguments.get('expect')
                     watch_step = (expect and expect.get('transient') and
@@ -154,7 +157,8 @@ class ActionDispatcher:
                             result['close_pending'] = True
                         last = index == len(arguments['steps']) - 1
                         if last or current != previous:
-                            result.update(self._readback(owner, target_id, baseline, before_observation=before_observation, action=step.get('action')))
+                            result.update(self._readback(owner, target_id, baseline, before_observation=before_observation,
+                                                         action=step.get('action'), location=context.visual_location, step_index=index))
                     expect = arguments.get('expect')
                     if expect and index == expect.get('after_step', len(arguments['steps']) - 1):
                         # Keep target order, release physical input while waiting.
@@ -169,11 +173,13 @@ class ActionDispatcher:
                         break
                     previous = current
                 except Cancelled:
-                    result.update(self._readback(owner, target_id, baseline, before_observation=before_observation, action=step.get('action')))
+                    result.update(self._readback(owner, target_id, baseline, before_observation=before_observation,
+                                                 action=step.get('action'), location=context.visual_location, step_index=index))
                     context.change(result=result)
                     raise
                 except Exception as error:
-                    result.update(self._readback(owner, target_id, baseline, before_observation=before_observation, action=step.get('action')))
+                    result.update(self._readback(owner, target_id, baseline, before_observation=before_observation,
+                                                 action=step.get('action'), location=context.visual_location, step_index=index))
                     context.change(result=result, stopped_at=index)
                     raise
                 finally:
@@ -184,7 +190,7 @@ class ActionDispatcher:
                         runtime._transient_lock.release()
         return result
 
-    def _readback(self, owner, target_id, baseline, before_observation=None, action=None):
+    def _readback(self, owner, target_id, baseline, before_observation=None, action=None, location=None, step_index=None):
         try:
             # Request image to ensure frames and bounds are populated in readback observation
             observed = self.runtime.observations.observe(owner, target_id, image=True)
@@ -192,37 +198,37 @@ class ActionDispatcher:
             changed = None if baseline is None else (fresh.text != baseline.text or
                 [element.semantic for element in fresh.elements] != [element.semantic for element in baseline.elements])
 
-            # Verify visual effect for UI-affecting actions: check if screenshot actually changed
-            visual_effect = None
-            visual_effect_reason = None
-            visual_effect_changed_ratio = None
-            visual_effect_attempted = False
-            if before_observation and action in ('click', 'input', 'check'):
-                visual_effect_attempted = True
-                try:
-                    before_frames = before_observation.get('observation', {}).get('frames', [])
-                    after_frames = observed.get('observation', {}).get('frames', [])
-                    if before_frames and after_frames:
-                        before_frame_id = before_frames[0]['frame_id']
-                        after_frame_id = after_frames[0]['frame_id']
-                        before_image = self.runtime.observations.image(owner, before_frame_id)
-                        after_image = self.runtime.observations.image(owner, after_frame_id)
-                        visual_effect, visual_effect_reason, visual_effect_changed_ratio = \
-                            self._compare_visual_effect(before_image, after_image)
-                    else:
-                        visual_effect_reason = 'frame_missing'
-                except RuntimeFault as error:
-                    visual_effect_reason = 'frame_expired' if error.code == 'FRAME_EXPIRED' else 'frame_unavailable'
-                except Exception:
-                    visual_effect_reason = 'comparison_failed'
-
             result = {'observation': observed['observation'], 'observation_changed': changed}
-            if visual_effect_attempted:
-                result['visual_effect'] = visual_effect
-                if visual_effect_reason is not None:
-                    result['visual_effect_reason'] = visual_effect_reason
-                if visual_effect_changed_ratio is not None:
-                    result['visual_effect_changed_ratio'] = visual_effect_changed_ratio
+            if action in ('click', 'input', 'check'):
+                result.update(visual_effect=None, visual_effect_basis='unknown', visual_effect_step=step_index)
+                before = (before_observation or {}).get('observation', {})
+                after = observed['observation']
+                before_frames, after_frames = before.get('frames', []), after.get('frames', [])
+                evidence = {'before_observation_id': before.get('observation_id'),
+                            'after_observation_id': after.get('observation_id'),
+                            'before_frame_id': before_frames[0]['frame_id'] if before_frames else None,
+                            'after_frame_id': after_frames[0]['frame_id'] if after_frames else None}
+                result['visual_effect_frames'] = evidence
+                try:
+                    if before_frames and after_frames:
+                        before_image = self.runtime.observations.image(owner, evidence['before_frame_id'])
+                        after_image = self.runtime.observations.image(owner, evidence['after_frame_id'])
+                        evidence.update(before_sha256=hashlib.sha256(before_image).hexdigest(),
+                                        after_sha256=hashlib.sha256(after_image).hexdigest())
+                        # Equal dimensions alone cannot establish the same coordinate frame.
+                        geometry_keys = ('target_id', 'width', 'height', 'source_rect', 'crop', 'coordinate_origin', 'method',
+                                         'dpi', 'window_rect', 'client_rect', 'virtual_origin')
+                        if any(before_frames[0].get(key) != after_frames[0].get(key) for key in geometry_keys):
+                            result['visual_effect_reason'] = 'geometry_mismatch'
+                        else:
+                            regions = self._visual_regions(before_frames[0], location)
+                            result.update(self._compare_visual_effect(before_image, after_image, regions))
+                    else:
+                        result['visual_effect_reason'] = 'frame_missing' if before_observation else 'before_capture_unavailable'
+                except RuntimeFault as error:
+                    result['visual_effect_reason'] = 'frame_expired' if error.code == 'FRAME_EXPIRED' else 'frame_unavailable'
+                except Exception:
+                    result['visual_effect_reason'] = 'comparison_failed'
             return result
         except RuntimeFault as error:
             if error.code == 'TARGET_CLOSED':
@@ -231,11 +237,31 @@ class ActionDispatcher:
         except Exception as error:
             return {'readback_warning': str(error), 'observation_changed': None}
 
-    def _compare_visual_effect(self, before_image_bytes, after_image_bytes):
-        """Compare two JPEG images for significant visual changes.
+    @staticmethod
+    def _visual_regions(frame, location):
+        if not location or not frame.get('source_rect'):
+            return []
+        geometry = FrameGeometry(tuple(frame['source_rect']), (frame['width'], frame['height']),
+                                 crop=tuple(frame['crop']) if frame.get('crop') else None)
+        x, y = geometry.from_screen(*location['point'])
+        if not 0 <= x < frame['width'] or not 0 <= y < frame['height']:
+            return []
+        regions = []
+        if location.get('rect'):
+            left, top, width, height = location['rect']
+            left, top = geometry.from_screen(left, top)
+            right, bottom = geometry.from_screen(location['rect'][0] + width, location['rect'][1] + height)
+            regions.append({'basis': 'element_bbox', 'bbox': [left - 12, top - 12, right + 12, bottom + 12]})
+        for basis, radius in (('click_neighborhood', 32), ('click_surroundings', 128)):
+            regions.append({'basis': basis, 'bbox': [x - radius, y - radius, x + radius, y + radius]})
+        return regions
 
-        Return a boolean only when both same-sized frames decoded successfully.
-        """
+    def _compare_visual_effect(self, before_image_bytes, after_image_bytes, regions=()):
+        """Preserve global evidence and detect small responses around the action."""
+        result = {'visual_effect': None, 'visual_effect_basis': 'unknown',
+                  'visual_effect_thresholds': {'pixel_difference': 25, 'global_ratio': 0.005,
+                                               'local_ratio': 0.01, 'local_min_pixels': 12},
+                  'visual_effect_regions': []}
         try:
             # Vision packages are optional. Ordinary window/UIA actions must stay importable
             # when a machine has not provisioned the visual extra.
@@ -249,9 +275,9 @@ class ActionDispatcher:
             after = cv2.imdecode(after_arr, cv2.IMREAD_COLOR)
 
             if before is None or after is None:
-                return None, 'decode_failed', None
+                return {**result, 'visual_effect_reason': 'decode_failed'}
             if before.shape != after.shape:
-                return None, 'shape_mismatch', None
+                return {**result, 'visual_effect_reason': 'shape_mismatch'}
 
             # Downscale for efficient comparison
             h, w = before.shape[:2]
@@ -268,12 +294,36 @@ class ActionDispatcher:
             changed_pixels = np.count_nonzero(mask)
             total_pixels = mask.size
 
-            # Normalize numpy.bool_ to bool so the bridge can serialize the result.
             changed_ratio = changed_pixels / total_pixels
-            return bool(changed_ratio > 0.005), None, round(float(changed_ratio), 6)
+            global_changed = bool(changed_ratio > 0.005)
+            for region in regions:
+                left, top, right, bottom = region['bbox']
+                left, top = max(0, math.floor(left)), max(0, math.floor(top))
+                right, bottom = min(w, math.ceil(right)), min(h, math.ceil(bottom))
+                if right <= left or bottom <= top:
+                    continue
+                # Retain fine icon edges already present in the captured frame.
+                local_diff = cv2.absdiff(before[top:bottom, left:right], after[top:bottom, left:right])
+                local_mask = cv2.cvtColor(local_diff, cv2.COLOR_BGR2GRAY) > 25
+                pixels = int(np.count_nonzero(local_mask))
+                ratio = pixels / local_mask.size
+                result['visual_effect_regions'].append({
+                    'basis': region['basis'], 'bbox': [left, top, right, bottom],
+                    'changed_pixels': pixels, 'total_pixels': int(local_mask.size),
+                    'changed_ratio': round(ratio, 6), 'changed': bool(ratio > 0.01 and pixels >= 12)})
+            local_changed = any(region['changed'] for region in result['visual_effect_regions'])
+            bases = ['full_frame'] if global_changed else []
+            if local_changed:
+                bases.append('local')
+            basis = '_and_'.join(bases) or 'none'
+            result.update(visual_effect=global_changed or local_changed, visual_effect_basis=basis,
+                          visual_effect_changed_ratio=round(float(changed_ratio), 6),
+                          visual_effect_global_changed=global_changed,
+                          visual_effect_local_changed=local_changed if result['visual_effect_regions'] else None)
+            return result
         except Exception:
             # Missing or unreadable vision inputs should not be reported as a verified no-op.
-            return None, 'comparison_unavailable', None
+            return {**result, 'visual_effect_reason': 'comparison_unavailable'}
 
 
 
@@ -364,6 +414,16 @@ class ActionDispatcher:
                 raise RuntimeFault('SELECTION_MISMATCH', 'A single-select control accepts one exact label')
             if any(available['labels'].count(value) != 1 for value in step['values']):
                 raise RuntimeFault('SELECTION_MISMATCH', 'Each requested option label must identify exactly one option')
+        if action in ('click', 'input', 'check'):
+            try:
+                box = node.bounding_box()
+                if box:
+                    context.visual_location = {
+                        'point': (box['x'] + box['width'] / 2, box['y'] + box['height'] / 2),
+                        'rect': (box['x'], box['y'], box['width'], box['height'])}
+            except Exception:
+                # Optional visual evidence must not prevent semantic input dispatch.
+                pass
         context.dispatch(index)
         if action == 'click':
             try:
@@ -411,6 +471,8 @@ class ActionDispatcher:
         page = target.handle[0]
         if step['action'] not in ('click', 'hover', 'scroll', 'drag', 'input'):
             raise RuntimeFault('UNSUPPORTED_ACTION', 'This action requires a semantic element reference')
+        if step['action'] in ('click', 'input') and context.visual_location is None:
+            context.visual_location = {'point': point}
         context.dispatch(index)
         page.mouse.move(*point)
         context.guard_input()
@@ -461,6 +523,15 @@ class ActionDispatcher:
             if not wrapper.is_enabled():
                 raise RuntimeFault('ELEMENT_DISABLED', 'Observed control is disabled')
             self._native_guard(context, target)
+            if action in ('click', 'input', 'check'):
+                try:
+                    rect = wrapper.element_info.rectangle
+                    context.visual_location = {
+                        'point': ((rect.left + rect.right) / 2, (rect.top + rect.bottom) / 2),
+                        'rect': (rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top)}
+                except Exception:
+                    # Some semantic-only providers expose no usable rectangle.
+                    pass
             if action == 'check':
                 if bool(wrapper.get_toggle_state()) == step['checked']:
                     return 'already_satisfied'
@@ -491,6 +562,8 @@ class ActionDispatcher:
             point = ((rect.left + rect.right) / 2, (rect.top + rect.bottom) / 2)
         else:
             point = node
+        if action in ('click', 'input') and context.visual_location is None:
+            context.visual_location = {'point': point}
         destination = None
         if action == 'drag':
             other_element, other = self._resolve(context, target, oid, step['to'])

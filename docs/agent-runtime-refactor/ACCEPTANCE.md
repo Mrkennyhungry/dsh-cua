@@ -620,3 +620,38 @@ python scripts/run-live-probe.py test/test_cleanup_dialog_live.py
 ```
 
 受影响模型任务的命令沿用 README 的基准入口，增加 --tasks=notepad,upload,persistence，每次使用空输出目录。原始会话和请求日志继续位于本机忽略目录，归档 JSON 排除工具全文、模型全文、凭据和图片原文。更新 HIGH_HANDOFF 中过期的 P5 状态与测试基线，后续进度以 PHASES 顶部表为准。
+
+### 0.5.8 动作局部视觉变化修复
+
+2026-11-26 在原分支完成 P7 缺陷修复。修改前完整检查通过 Node 94 项、Python 321 项、1 项显式真实窗口 SKIP、43 subtests，Python 耗时 11.74 s。版本同步为 0.5.8。本轮增加 18 项有针对性的回归测试，公开返回结构的决定见 ADR 0005。
+
+用户提供的 evidence-0.5.6-visual-effect 原图使用内核同一算法复算，QQ 音乐全图为 0.165184，Steam 为 0.70763。前者精确复现原报告 16.52% 的量级，后者与工具返回完全一致。QQ 音乐动作内部 before 帧仍未留存，因此这两张公开帧继续用于图像算法复核。按钮区域由原图人工指定，回放脚本中明确列出坐标。
+
+实现复用现有动作前后截图，保留全图半采样灰度差口径，并增加控件边界外扩 12 图片像素、动作点周边 64×64 和 256×256 区域。局部使用已解码图像原始分辨率，比例严格大于 1% 且至少 12 个变化像素时命中。新字段分别给出全图、局部结果、阈值、区域、动作下标、实际内部 observation/frame ID 和图像 SHA256。比较前核对坐标几何，变化时返回 unknown。帧沿用会话隔离的有界缓存，获取期限见 PROTOCOL。
+
+| 检查项 | 状态 | 实测结果 |
+| --- | --- | --- |
+| 合成与入口回归 | PASS | 新增 18/18，覆盖微小双竖线、不同窗口尺寸、相同帧、低幅 JPEG 噪声、细小光标、最小像素门槛、远处横幅、外围菜单、裁剪、缩放、负原点、iframe CSS 原点、边缘裁剪、几何变化、缺失前帧、语义控件和批次坐标复位 |
+| QQ 音乐原图与按钮重构回放 | PASS | 完整原图全图 16.5184%，局部控件 2.7065%、64×64 周边 2.3682%，局部变化 97 个原分辨率像素。仅把后图按钮区域复制到前图并用 PNG 保留解码像素后，全图 0.011%，局部仍命中。相同原图返回 false |
+| 原生与浏览器实际入口 | PASS | actions_probe 连续两轮完整通过，耗时 19.329 s 与 17.984 s，每轮 22 个成功返回的 act 操作。UIA checkbox 局部命中，两轮 DOM ref 与纯 frame 坐标均检测到 32 像素按钮变化。两次浏览器动作全图各 0.0082%，局部近邻约 2.1065%，semantic-only 观察保持稳定。精确比较帧共 4 张每轮均按 ID 取回并核对 SHA256 |
+| DSH 安装与新会话 | PASS | 使用官方 CLI plugin add link 安装 headless profile，新的 wb/cn:deepseek-v4.1-flash 会话调用 status→open→act→status，版本 0.5.8、build c7b762237d12917e。5 个 Agent 请求均含六个 doraemon 工具，另有 1 个辅助请求，图片内容块累计 6 个。业务页独立读回 clicks=1、playing=true |
+| DSH 局部证据与持久读回 | PASS | 全图 0.024%，控件局部 6.5004%、点击近邻 6.1065%，返回 basis=local、visual_effect=true、observation_changed=false。同一 operation 的 status 视觉字段全部一致，两个内部 frame 下载后哈希匹配并精确复算全部比较字段 |
+| 比较计算耗时 | PASS | 1366×854 同一对真实帧，预热各 5 次再测各 50 次。全图 median 4.054 ms、p95 4.474 ms，联合局部 median 4.136 ms、p95 4.522 ms。该数字只覆盖图像比较 |
+| 完整检查与打包 | PASS | 提交前 scripts/check.ps1，Node 94 PASS、0 FAIL、0 SKIP，Python 339 PASS、1 显式真实窗口 SKIP、45 subtests PASS，10.91 s。npm pack --dry-run 共 104 文件、2598585 bytes，运行文件清单完整 |
+| QQ 音乐 0.5.8 实际播放与 Hy4 | NOT RUN | 本轮 QQ 音乐使用用户留存图像复算，模型验收使用 DeepSeek 与自建播放图标页面 |
+| 真实异 DPI / 负原点多屏 | BLOCKED | 原硬件缺口继续阻塞 P7 阶段闸门，本轮确定性坐标测试覆盖负原点与缩放 |
+
+首次 live fixture 已检出小图标，但点击同时改变 focused 字段，导致要求 observation_changed=false 的隔离断言失败。随后在测试按钮阻止 mousedown 默认焦点行为，两轮均只改变 canvas。96×96 初始近邻对这枚图标得到约 0.9459%，实测不足 1%，因此近邻缩为 64×64，保留外围范围。最初 DSH 会话缺少 wb adapter，随后复用现有 benchmark 的 provider overlay 与 credentials 服务，正式验证成功。失败日志和原始图片保留在本机 .runtime。
+
+局部阈值由这些样本校准。悬停、焦点或按钮按下反馈也可能命中，业务成功继续由条件与状态读回判断。当前仍使用一次动作后观察，延迟生效的状态可通过 wait/expect 验证。归档测量见 p7-evidence/local-visual-058.json。实机 fixture 与 loopback 验证服务已完成清理。
+
+以下命令可在根目录复现离线证据和实际入口验证。实机 probe 每次使用新的隔离 home。DSH profile 的安装与新会话操作沿用 README 中的官方 CLI 入口及本机已配置 provider。
+
+```powershell
+pwsh -File scripts/check.ps1
+$env:PYTHONPATH = Join-Path (Get-Location) 'kernel'
+.\.venv\Scripts\python.exe test/visual_effect_replay.py '..\evidence-0.5.6-visual-effect'
+$env:PYTHONIOENCODING = 'utf-8'
+$env:TEMP = $env:TMP = Join-Path (Get-Location) '.runtime/test-temp'
+python scripts/run-live-probe.py test/actions_probe.py .runtime/p7-local-visual-reproduce-home
+```

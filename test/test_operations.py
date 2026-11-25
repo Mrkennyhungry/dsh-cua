@@ -452,20 +452,20 @@ class ActionValidationTests(unittest.TestCase):
         changed_ok, changed = cv2.imencode('.jpg', after)
         self.assertTrue(unchanged_ok and changed_ok)
 
-        unchanged_result, unchanged_reason, unchanged_ratio = dispatcher._compare_visual_effect(
+        unchanged_result = dispatcher._compare_visual_effect(
             unchanged.tobytes(), unchanged.tobytes())
-        changed_result, changed_reason, changed_ratio = dispatcher._compare_visual_effect(
+        changed_result = dispatcher._compare_visual_effect(
             unchanged.tobytes(), changed.tobytes())
 
-        self.assertIs(type(unchanged_result), bool)
-        self.assertIs(type(changed_result), bool)
-        self.assertIsNone(unchanged_reason)
-        self.assertIsNone(changed_reason)
-        self.assertEqual(unchanged_ratio, 0.0)
-        self.assertGreater(changed_ratio, 0.005)
-        self.assertFalse(unchanged_result)
-        self.assertTrue(changed_result)
-        self.assertEqual(json.loads(json.dumps({'visual_effect': changed_result})), {'visual_effect': True})
+        self.assertIs(type(unchanged_result['visual_effect']), bool)
+        self.assertIs(type(changed_result['visual_effect']), bool)
+        self.assertNotIn('visual_effect_reason', unchanged_result)
+        self.assertNotIn('visual_effect_reason', changed_result)
+        self.assertEqual(unchanged_result['visual_effect_changed_ratio'], 0.0)
+        self.assertGreater(changed_result['visual_effect_changed_ratio'], 0.005)
+        self.assertFalse(unchanged_result['visual_effect'])
+        self.assertTrue(changed_result['visual_effect'])
+        self.assertEqual(json.loads(json.dumps(changed_result)), changed_result)
 
     def test_visual_effect_comparison_reports_unknown_for_invalid_or_different_frames(self):
         import cv2
@@ -476,10 +476,12 @@ class ActionValidationTests(unittest.TestCase):
         large_ok, large = cv2.imencode('.jpg', np.zeros((60, 40, 3), dtype=np.uint8))
         self.assertTrue(small_ok and large_ok)
 
-        self.assertEqual(dispatcher._compare_visual_effect(b'invalid', small.tobytes()),
-                         (None, 'decode_failed', None))
-        self.assertEqual(dispatcher._compare_visual_effect(small.tobytes(), large.tobytes()),
-                         (None, 'shape_mismatch', None))
+        for before, after, reason in ((b'invalid', small.tobytes(), 'decode_failed'),
+                                      (small.tobytes(), large.tobytes(), 'shape_mismatch')):
+            result = dispatcher._compare_visual_effect(before, after)
+            self.assertIsNone(result['visual_effect'])
+            self.assertEqual(result['visual_effect_reason'], reason)
+            self.assertNotIn('visual_effect_changed_ratio', result)
 
     def test_visual_effect_is_unknown_when_optional_vision_packages_are_unavailable(self):
         original_import = builtins.__import__
@@ -493,7 +495,8 @@ class ActionValidationTests(unittest.TestCase):
         with mock.patch('builtins.__import__', side_effect=without_vision):
             result = dispatcher._compare_visual_effect(b'image', b'image')
 
-        self.assertEqual(result, (None, 'comparison_unavailable', None))
+        self.assertIsNone(result['visual_effect'])
+        self.assertEqual(result['visual_effect_reason'], 'comparison_unavailable')
 
     def test_readback_preserves_unknown_visual_effect_and_reason(self):
         runtime = mock.Mock()
@@ -504,7 +507,7 @@ class ActionValidationTests(unittest.TestCase):
         dispatcher = ActionDispatcher(runtime)
         before_observation = {'observation': {'frames': [{'frame_id': 'before-frame'}]}}
         with mock.patch.object(dispatcher, '_compare_visual_effect',
-                               return_value=(None, 'shape_mismatch', None)):
+                               return_value={'visual_effect': None, 'visual_effect_reason': 'shape_mismatch'}):
             result = dispatcher._readback('owner', 'target', None,
                                           before_observation=before_observation, action='click')
 

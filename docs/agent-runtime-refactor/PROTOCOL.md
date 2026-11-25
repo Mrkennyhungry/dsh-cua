@@ -123,7 +123,20 @@ owner 只能读取自身操作和观察。全局健康摘要可以包含设备�
 | `expectation.status` | `not_requested`、`pending`、`met`、`timeout`、`unknown` |
 | `outcome` | `opened`、`dispatched`、`expectation_met`、`interrupted`、`cancelled`、`unknown` |
 | `observation_changed` | `true`、`false` 或 `null`，最后一种表示采集不足以比较 |
-| `visual_effect` | `true` 或 `false` 仅表示两张有效、同尺寸图片的像素比较结果；`null` 表示无法判断。`visual_effect_reason` 说明未知原因，`visual_effect_changed_ratio` 给出灰度差超过 25 的像素比例。比例超过 0.005 时结果为 `true` |
+| `visual_effect` | 两张有效且坐标几何一致的图片，全图或任一局部区域命中时为 `true`，均未命中为 `false`，无法比较为 `null`。表示画面变化证据，业务完成使用期望条件验证 |
+| `visual_effect_changed_ratio` | 保留全图半采样后 BGR 差值灰度超过 25 的像素比例，严格大于 0.005 时全图命中 |
+| `visual_effect_global_changed` / `visual_effect_local_changed` | 分别给出全图与局部命中结果，局部未提供有效区域时为 `null` |
+| `visual_effect_basis` | `full_frame`、`local`、`full_frame_and_local`、`none`、`unknown` |
+| `visual_effect_regions` | 每项含 `basis`、`bbox`、`changed_pixels`、`total_pixels`、`changed_ratio`、`changed`。bbox 为该比较图片中的 `[left, top, right, bottom]`，右下边界不含 |
+| `visual_effect_thresholds` | `pixel_difference=25`、`global_ratio=0.005`、`local_ratio=0.01`、`local_min_pixels=12`。比例使用 0–1 数值 |
+| `visual_effect_frames` | 实际比较前后的 `observation_id`、`frame_id` 与图像字节 SHA256，用于原样取回及复算 |
+| `visual_effect_step` / `visual_effect_reason` | 当前视觉读回对应的零起点动作下标，未知时给出缺帧、几何变化、解码失败或比较不可用原因 |
+
+局部区域来自实际动作解析后的坐标。DOM/UIA 使用控件边界向外扩 12 个图片像素，同时提供以动作点为中心的 64×64 与 256×256 图片像素区域。纯坐标动作提供两个周边区域，越界部分裁剪。局部使用已解码图片的原始分辨率，灰度差超过 25 的像素比例严格大于 1% 且数量至少 12 时命中。全图结果继续使用宽高各减半的原口径，因此全图与局部变化像素数的采样尺度不同。
+
+动作前后复用现有截图。仅比较目标、图像尺寸、来源矩形、裁剪、坐标系、采集方法、DPI 与窗口几何一致的帧。坐标不同返回 `null/geometry_mismatch`。局部命中可由图标、悬停或焦点反馈产生，全图命中也可能来自背景动画。
+
+帧可通过现有会话鉴权的 `GET /api/dsh/runtime/frames/{frame_id}` 获取。图片沿用观察缓存上限 64 份、32 MiB、最长 300 秒，容量淘汰和会话释放可提前删除。需要留存时应及时按返回 frame ID 取回并核对 SHA256。操作 journal 保留标识和测量结果，图片按缓存生命周期管理。
 
 `success` 表示本次工具请求是否成功处理。`accepted`、`running` 和需要核对现场的 `unknown` 可以返回 `success: true`。这些结果使用 `message` 和 `next_action` 描述后续处理，保持 `error` 字段缺省。
 

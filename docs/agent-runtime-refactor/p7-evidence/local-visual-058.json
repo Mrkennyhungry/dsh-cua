@@ -1,0 +1,688 @@
+{
+  "version": "0.5.8",
+  "date": "2026-11-26",
+  "phase": "P7",
+  "baseline": {
+    "node_pass": 94,
+    "python_pass": 321,
+    "python_skip": 1,
+    "python_subtests_pass": 43,
+    "python_seconds": 11.74
+  },
+  "final_check": {
+    "node_pass": 94,
+    "python_pass": 339,
+    "python_skip": 1,
+    "python_subtests_pass": 45,
+    "python_seconds": 10.91
+  },
+  "replay": {
+    "cases": {
+      "qqmusic": {
+        "visual_effect": true,
+        "visual_effect_basis": "full_frame_and_local",
+        "visual_effect_thresholds": {
+          "pixel_difference": 25,
+          "global_ratio": 0.005,
+          "local_ratio": 0.01,
+          "local_min_pixels": 12
+        },
+        "visual_effect_regions": [
+          {
+            "basis": "element_bbox",
+            "bbox": [
+              691,
+              714,
+              755,
+              770
+            ],
+            "changed_pixels": 97,
+            "total_pixels": 3584,
+            "changed_ratio": 0.027065,
+            "changed": true
+          },
+          {
+            "basis": "click_neighborhood",
+            "bbox": [
+              691,
+              710,
+              755,
+              774
+            ],
+            "changed_pixels": 97,
+            "total_pixels": 4096,
+            "changed_ratio": 0.023682,
+            "changed": true
+          },
+          {
+            "basis": "click_surroundings",
+            "bbox": [
+              595,
+              614,
+              851,
+              800
+            ],
+            "changed_pixels": 97,
+            "total_pixels": 47616,
+            "changed_ratio": 0.002037,
+            "changed": false
+          }
+        ],
+        "visual_effect_changed_ratio": 0.165184,
+        "visual_effect_global_changed": true,
+        "visual_effect_local_changed": true,
+        "before_sha256": "f32cbfd36cb93e36ec460f4dab4443c8d977d3d298c9d232028898af6a0ba75a",
+        "after_sha256": "89b4d1ee312689c5193c4e2da3f098339e85c431ffad4d786198d603b4616f1a"
+      },
+      "qqmusic_button_only_reconstruction": {
+        "visual_effect": true,
+        "visual_effect_basis": "local",
+        "visual_effect_thresholds": {
+          "pixel_difference": 25,
+          "global_ratio": 0.005,
+          "local_ratio": 0.01,
+          "local_min_pixels": 12
+        },
+        "visual_effect_regions": [
+          {
+            "basis": "element_bbox",
+            "bbox": [
+              691,
+              714,
+              755,
+              770
+            ],
+            "changed_pixels": 97,
+            "total_pixels": 3584,
+            "changed_ratio": 0.027065,
+            "changed": true
+          },
+          {
+            "basis": "click_neighborhood",
+            "bbox": [
+              691,
+              710,
+              755,
+              774
+            ],
+            "changed_pixels": 97,
+            "total_pixels": 4096,
+            "changed_ratio": 0.023682,
+            "changed": true
+          },
+          {
+            "basis": "click_surroundings",
+            "bbox": [
+              595,
+              614,
+              851,
+              800
+            ],
+            "changed_pixels": 97,
+            "total_pixels": 47616,
+            "changed_ratio": 0.002037,
+            "changed": false
+          }
+        ],
+        "visual_effect_changed_ratio": 0.00011,
+        "visual_effect_global_changed": false,
+        "visual_effect_local_changed": true
+      },
+      "qqmusic_identical_frame": {
+        "visual_effect": false,
+        "visual_effect_basis": "none",
+        "visual_effect_thresholds": {
+          "pixel_difference": 25,
+          "global_ratio": 0.005,
+          "local_ratio": 0.01,
+          "local_min_pixels": 12
+        },
+        "visual_effect_regions": [
+          {
+            "basis": "element_bbox",
+            "bbox": [
+              691,
+              714,
+              755,
+              770
+            ],
+            "changed_pixels": 0,
+            "total_pixels": 3584,
+            "changed_ratio": 0.0,
+            "changed": false
+          },
+          {
+            "basis": "click_neighborhood",
+            "bbox": [
+              691,
+              710,
+              755,
+              774
+            ],
+            "changed_pixels": 0,
+            "total_pixels": 4096,
+            "changed_ratio": 0.0,
+            "changed": false
+          },
+          {
+            "basis": "click_surroundings",
+            "bbox": [
+              595,
+              614,
+              851,
+              800
+            ],
+            "changed_pixels": 0,
+            "total_pixels": 47616,
+            "changed_ratio": 0.0,
+            "changed": false
+          }
+        ],
+        "visual_effect_changed_ratio": 0.0,
+        "visual_effect_global_changed": false,
+        "visual_effect_local_changed": false
+      },
+      "steam": {
+        "visual_effect": true,
+        "visual_effect_basis": "full_frame",
+        "visual_effect_thresholds": {
+          "pixel_difference": 25,
+          "global_ratio": 0.005,
+          "local_ratio": 0.01,
+          "local_min_pixels": 12
+        },
+        "visual_effect_regions": [],
+        "visual_effect_changed_ratio": 0.70763,
+        "visual_effect_global_changed": true,
+        "visual_effect_local_changed": null,
+        "before_sha256": "4d5d9c7754ffbd41210760705f6e597049080d767491df4ba233aec5803142cc",
+        "after_sha256": "9b67e35e1453decda1b1e60cbf37ce61e5a8a56c4d999237e8e7c50a11181fde"
+      }
+    }
+  },
+  "live_runs": [
+    {
+      "run": 2,
+      "elapsed_ms": 19329.0,
+      "operations": 22,
+      "native": {
+        "visual_effect": true,
+        "visual_effect_basis": "full_frame_and_local",
+        "visual_effect_step": 0,
+        "visual_effect_frames": {
+          "before_observation_id": "o_0ff56463b4f9439aa81bde2320dcf66f",
+          "after_observation_id": "o_f1fe31007dde466f86ce01058a108892",
+          "before_frame_id": "f_0f88e5bd354c476ca6b2f8a6c49001e3_1049a09c12bf4be7af15059f9373fb22",
+          "after_frame_id": "f_0f88e5bd354c476ca6b2f8a6c49001e3_7f6813a8d21544f6b51c2a897b45940f",
+          "before_sha256": "47ce72514dcc32607b597f3048ba0b5fafc4eb66c7f798e3041d032545c743b9",
+          "after_sha256": "c742d35a09ebe076b2e6640a2bca55f1d9c42ddbfec395d8a903088c73896dd7"
+        },
+        "visual_effect_thresholds": {
+          "pixel_difference": 25,
+          "global_ratio": 0.005,
+          "local_ratio": 0.01,
+          "local_min_pixels": 12
+        },
+        "visual_effect_regions": [
+          {
+            "basis": "element_bbox",
+            "bbox": [
+              16,
+              84,
+              190,
+              136
+            ],
+            "changed_pixels": 214,
+            "total_pixels": 9048,
+            "changed_ratio": 0.023652,
+            "changed": true
+          },
+          {
+            "basis": "click_neighborhood",
+            "bbox": [
+              71,
+              78,
+              135,
+              142
+            ],
+            "changed_pixels": 26,
+            "total_pixels": 4096,
+            "changed_ratio": 0.006348,
+            "changed": false
+          },
+          {
+            "basis": "click_surroundings",
+            "bbox": [
+              0,
+              0,
+              231,
+              238
+            ],
+            "changed_pixels": 214,
+            "total_pixels": 54978,
+            "changed_ratio": 0.003892,
+            "changed": false
+          }
+        ],
+        "visual_effect_changed_ratio": 0.005419,
+        "visual_effect_global_changed": true,
+        "visual_effect_local_changed": true
+      },
+      "browser_semantic": {
+        "visual_effect": true,
+        "visual_effect_basis": "local",
+        "visual_effect_step": 0,
+        "visual_effect_frames": {
+          "before_observation_id": "o_ce6553fce54546d8a8dbb071a5c8482c",
+          "after_observation_id": "o_aeabf0643c8c4a5bac23cecb74e945c5",
+          "before_frame_id": "f_0f88e5bd354c476ca6b2f8a6c49001e3_7f62fa6c6e654d7c85b16cbd61c73d0f",
+          "after_frame_id": "f_0f88e5bd354c476ca6b2f8a6c49001e3_423c1f0861aa4cf3a0451a5976493b68",
+          "before_sha256": "4669070583bb82748fb048148002f3fc6f1d7b6cafb93cff8c867a37e540d5fd",
+          "after_sha256": "5f8f0a47e0533548f33c3003385a4f4fd3aecc40ff84dfdb92d1dc51e73b2c9a"
+        },
+        "visual_effect_thresholds": {
+          "pixel_difference": 25,
+          "global_ratio": 0.005,
+          "local_ratio": 0.01,
+          "local_min_pixels": 12
+        },
+        "visual_effect_regions": [
+          {
+            "basis": "element_bbox",
+            "bbox": [
+              1280,
+              44,
+              1336,
+              100
+            ],
+            "changed_pixels": 89,
+            "total_pixels": 3136,
+            "changed_ratio": 0.02838,
+            "changed": true
+          },
+          {
+            "basis": "click_neighborhood",
+            "bbox": [
+              1276,
+              40,
+              1341,
+              105
+            ],
+            "changed_pixels": 89,
+            "total_pixels": 4225,
+            "changed_ratio": 0.021065,
+            "changed": true
+          },
+          {
+            "basis": "click_surroundings",
+            "bbox": [
+              1180,
+              0,
+              1366,
+              201
+            ],
+            "changed_pixels": 89,
+            "total_pixels": 37386,
+            "changed_ratio": 0.002381,
+            "changed": false
+          }
+        ],
+        "visual_effect_changed_ratio": 8.2e-05,
+        "visual_effect_global_changed": false,
+        "visual_effect_local_changed": true
+      },
+      "browser_coordinate": {
+        "visual_effect": true,
+        "visual_effect_basis": "local",
+        "visual_effect_step": 0,
+        "visual_effect_frames": {
+          "before_observation_id": "o_4630d95ca0f5486cad94ff321e25f723",
+          "after_observation_id": "o_b5cb36125336407ebf9ce71895e242d5",
+          "before_frame_id": "f_0f88e5bd354c476ca6b2f8a6c49001e3_9e35f09f82754c1ab0a4f24857949741",
+          "after_frame_id": "f_0f88e5bd354c476ca6b2f8a6c49001e3_96271d92d17e4494acab2be3a7bf7d36",
+          "before_sha256": "5f8f0a47e0533548f33c3003385a4f4fd3aecc40ff84dfdb92d1dc51e73b2c9a",
+          "after_sha256": "4669070583bb82748fb048148002f3fc6f1d7b6cafb93cff8c867a37e540d5fd"
+        },
+        "visual_effect_thresholds": {
+          "pixel_difference": 25,
+          "global_ratio": 0.005,
+          "local_ratio": 0.01,
+          "local_min_pixels": 12
+        },
+        "visual_effect_regions": [
+          {
+            "basis": "click_neighborhood",
+            "bbox": [
+              1276,
+              40,
+              1341,
+              105
+            ],
+            "changed_pixels": 89,
+            "total_pixels": 4225,
+            "changed_ratio": 0.021065,
+            "changed": true
+          },
+          {
+            "basis": "click_surroundings",
+            "bbox": [
+              1180,
+              0,
+              1366,
+              201
+            ],
+            "changed_pixels": 89,
+            "total_pixels": 37386,
+            "changed_ratio": 0.002381,
+            "changed": false
+          }
+        ],
+        "visual_effect_changed_ratio": 8.2e-05,
+        "visual_effect_global_changed": false,
+        "visual_effect_local_changed": true
+      },
+      "transient_cancelled_and_cleaned": 1,
+      "response_loss_replay_extra_dispatches": 0,
+      "parser_initializations": 0
+    },
+    {
+      "run": 3,
+      "elapsed_ms": 17984.0,
+      "operations": 22,
+      "native": {
+        "visual_effect": true,
+        "visual_effect_basis": "local",
+        "visual_effect_step": 0,
+        "visual_effect_frames": {
+          "before_observation_id": "o_50d303b20f144e048de7a9e0ac774daa",
+          "after_observation_id": "o_1a5a2553a9c241fcb1485e9c96b954a1",
+          "before_frame_id": "f_1b04c52631964bf7b0846b9af1b1e2a1_e63a533aadc84bcca99fadb154274ed1",
+          "after_frame_id": "f_1b04c52631964bf7b0846b9af1b1e2a1_93b367da353f4be685a256c77dd757e9",
+          "before_sha256": "641ac87ee75273b8e798509171c1e19b5703912b076f830448cd4adca763fcff",
+          "after_sha256": "a099a123a068333fbeedab532c97ab89092b938557fdda22801dd430b58cb2c2"
+        },
+        "visual_effect_thresholds": {
+          "pixel_difference": 25,
+          "global_ratio": 0.005,
+          "local_ratio": 0.01,
+          "local_min_pixels": 12
+        },
+        "visual_effect_regions": [
+          {
+            "basis": "element_bbox",
+            "bbox": [
+              16,
+              84,
+              190,
+              136
+            ],
+            "changed_pixels": 155,
+            "total_pixels": 9048,
+            "changed_ratio": 0.017131,
+            "changed": true
+          },
+          {
+            "basis": "click_neighborhood",
+            "bbox": [
+              71,
+              78,
+              135,
+              142
+            ],
+            "changed_pixels": 0,
+            "total_pixels": 4096,
+            "changed_ratio": 0.0,
+            "changed": false
+          },
+          {
+            "basis": "click_surroundings",
+            "bbox": [
+              0,
+              0,
+              231,
+              238
+            ],
+            "changed_pixels": 155,
+            "total_pixels": 54978,
+            "changed_ratio": 0.002819,
+            "changed": false
+          }
+        ],
+        "visual_effect_changed_ratio": 0.000664,
+        "visual_effect_global_changed": false,
+        "visual_effect_local_changed": true
+      },
+      "browser_semantic": {
+        "visual_effect": true,
+        "visual_effect_basis": "local",
+        "visual_effect_step": 0,
+        "visual_effect_frames": {
+          "before_observation_id": "o_7abcd9374b44439d9b855cfb0446d504",
+          "after_observation_id": "o_38eb4d54da2d4c02bbd87300fbe43cc9",
+          "before_frame_id": "f_1b04c52631964bf7b0846b9af1b1e2a1_0ed5aa39bac747eca867d73478aa0b67",
+          "after_frame_id": "f_1b04c52631964bf7b0846b9af1b1e2a1_5876d09d39154ccfb18d90f109335881",
+          "before_sha256": "4669070583bb82748fb048148002f3fc6f1d7b6cafb93cff8c867a37e540d5fd",
+          "after_sha256": "5f8f0a47e0533548f33c3003385a4f4fd3aecc40ff84dfdb92d1dc51e73b2c9a"
+        },
+        "visual_effect_thresholds": {
+          "pixel_difference": 25,
+          "global_ratio": 0.005,
+          "local_ratio": 0.01,
+          "local_min_pixels": 12
+        },
+        "visual_effect_regions": [
+          {
+            "basis": "element_bbox",
+            "bbox": [
+              1280,
+              44,
+              1336,
+              100
+            ],
+            "changed_pixels": 89,
+            "total_pixels": 3136,
+            "changed_ratio": 0.02838,
+            "changed": true
+          },
+          {
+            "basis": "click_neighborhood",
+            "bbox": [
+              1276,
+              40,
+              1341,
+              105
+            ],
+            "changed_pixels": 89,
+            "total_pixels": 4225,
+            "changed_ratio": 0.021065,
+            "changed": true
+          },
+          {
+            "basis": "click_surroundings",
+            "bbox": [
+              1180,
+              0,
+              1366,
+              201
+            ],
+            "changed_pixels": 89,
+            "total_pixels": 37386,
+            "changed_ratio": 0.002381,
+            "changed": false
+          }
+        ],
+        "visual_effect_changed_ratio": 8.2e-05,
+        "visual_effect_global_changed": false,
+        "visual_effect_local_changed": true
+      },
+      "browser_coordinate": {
+        "visual_effect": true,
+        "visual_effect_basis": "local",
+        "visual_effect_step": 0,
+        "visual_effect_frames": {
+          "before_observation_id": "o_3393b70dffba4bf69e4df1f4710dd63f",
+          "after_observation_id": "o_93189ea6d55b423198c3bd2591e74ae9",
+          "before_frame_id": "f_1b04c52631964bf7b0846b9af1b1e2a1_b4bb445c301b47fe899191d782d6a2dc",
+          "after_frame_id": "f_1b04c52631964bf7b0846b9af1b1e2a1_5b1ab11db6c5409987ae6795141ede17",
+          "before_sha256": "5f8f0a47e0533548f33c3003385a4f4fd3aecc40ff84dfdb92d1dc51e73b2c9a",
+          "after_sha256": "4669070583bb82748fb048148002f3fc6f1d7b6cafb93cff8c867a37e540d5fd"
+        },
+        "visual_effect_thresholds": {
+          "pixel_difference": 25,
+          "global_ratio": 0.005,
+          "local_ratio": 0.01,
+          "local_min_pixels": 12
+        },
+        "visual_effect_regions": [
+          {
+            "basis": "click_neighborhood",
+            "bbox": [
+              1276,
+              40,
+              1341,
+              105
+            ],
+            "changed_pixels": 89,
+            "total_pixels": 4225,
+            "changed_ratio": 0.021065,
+            "changed": true
+          },
+          {
+            "basis": "click_surroundings",
+            "bbox": [
+              1180,
+              0,
+              1366,
+              201
+            ],
+            "changed_pixels": 89,
+            "total_pixels": 37386,
+            "changed_ratio": 0.002381,
+            "changed": false
+          }
+        ],
+        "visual_effect_changed_ratio": 8.2e-05,
+        "visual_effect_global_changed": false,
+        "visual_effect_local_changed": true
+      },
+      "transient_cancelled_and_cleaned": 1,
+      "response_loss_replay_extra_dispatches": 0,
+      "parser_initializations": 0
+    }
+  ],
+  "dsh": {
+    "version": "0.5.8",
+    "build": "c7b762237d12917e",
+    "model": "wb/cn:deepseek-v4.1-flash",
+    "new_session": true,
+    "six_tools_verified": true,
+    "tool_calls": [
+      "doraemon_status",
+      "doraemon_open",
+      "doraemon_act",
+      "doraemon_status"
+    ],
+    "model_requests": 6,
+    "agent_requests": 5,
+    "image_parts": 6,
+    "fixture": [
+      {
+        "title": "Local visual 0.5.8 fixture",
+        "playing": true,
+        "clicks": 1
+      }
+    ],
+    "frame_downloads_and_hash_checks": 2,
+    "recomputed_exact_match": true,
+    "status_evidence_matches": true,
+    "visual_effect": true,
+    "visual_effect_basis": "local",
+    "visual_effect_step": 0,
+    "visual_effect_frames": {
+      "before_observation_id": "o_94986b75758c46838bf97e0f7ce18e96",
+      "after_observation_id": "o_7559a867c3a14579a582f62cf26f6175",
+      "before_frame_id": "f_024b8e7399d34a7ea668d37f1ce57987_1928965deacd4821a70dfbf815a7b709",
+      "after_frame_id": "f_024b8e7399d34a7ea668d37f1ce57987_ea07b7dcc1d2474b9b065bbaf5d434a5",
+      "before_sha256": "95fac65052585db18fd7b9c70a0cfc3f43db4af49362f28756f8ff5fcdedebb3",
+      "after_sha256": "3c42c2b84f4a63e9647beefcf433196f3cbf074a831643dac94080ea1da3a3e9"
+    },
+    "visual_effect_thresholds": {
+      "pixel_difference": 25,
+      "global_ratio": 0.005,
+      "local_ratio": 0.01,
+      "local_min_pixels": 12
+    },
+    "visual_effect_regions": [
+      {
+        "basis": "element_bbox",
+        "bbox": [
+          557,
+          367,
+          620,
+          430
+        ],
+        "changed_pixels": 258,
+        "total_pixels": 3969,
+        "changed_ratio": 0.065004,
+        "changed": true
+      },
+      {
+        "basis": "click_neighborhood",
+        "bbox": [
+          556,
+          366,
+          621,
+          431
+        ],
+        "changed_pixels": 258,
+        "total_pixels": 4225,
+        "changed_ratio": 0.061065,
+        "changed": true
+      },
+      {
+        "basis": "click_surroundings",
+        "bbox": [
+          460,
+          270,
+          717,
+          527
+        ],
+        "changed_pixels": 258,
+        "total_pixels": 66049,
+        "changed_ratio": 0.003906,
+        "changed": false
+      }
+    ],
+    "visual_effect_changed_ratio": 0.00024,
+    "visual_effect_global_changed": false,
+    "visual_effect_local_changed": true
+  },
+  "comparison_timing": {
+    "global": {
+      "samples": 50,
+      "median_ms": 4.054,
+      "p95_ms": 4.474
+    },
+    "global_and_local": {
+      "samples": 50,
+      "median_ms": 4.136,
+      "p95_ms": 4.522
+    }
+  },
+  "package": {
+    "version": "0.5.8",
+    "entryCount": 104,
+    "size": 2598585,
+    "unpackedSize": 3251386
+  },
+  "remaining_validation": [
+    "Live QQMusic playback with version 0.5.8",
+    "wb/cn:hy4std on this revision",
+    "Real mixed-DPI and negative-origin multi-monitor hardware"
+  ],
+  "attempt_notes": [
+    "First fixture run detected the small icon, then failed an assertion because clicking also changed semantic focus. The fixture now suppresses default mousedown focus to isolate its canvas-only change.",
+    "The initial DSH run failed with NO_ADAPTER for wb. The retry used the existing benchmark provider overlay and credential service.",
+    "QQMusic button-only replay replaces only the reported button region in the decoded before image and encodes lossless PNGs. It is a reconstruction from the supplied JPEGs."
+  ]
+}

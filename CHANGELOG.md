@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.8] - 2026-11-26
+
+### Fixed
+
+- Detect small visual responses within control bounds and two action-centered neighborhoods, retaining separate full-frame and local measurements.
+- Include the exact comparison frame identities, SHA256 hashes, thresholds and action step in visual readback, and report changed frame geometry as unknown.
+
 ## [0.5.7] - 2026-11-26
 
 ### Fixed

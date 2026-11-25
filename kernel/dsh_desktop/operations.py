@@ -29,6 +29,7 @@ class OperationContext:
         self.orchestrator_done = False
         self.future = None
         self.before_dispatch = None
+        self.visual_location = None
 
     def check(self):
         if self.cancelled.is_set():
