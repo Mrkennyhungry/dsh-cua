@@ -132,8 +132,11 @@ owner 只能读取自身操作和观察。全局健康摘要可以包含设备�
 | `visual_effect_frames` | 实际比较前后的 `observation_id`、`frame_id` 与图像字节 SHA256，用于原样取回及复算 |
 | `visual_effect_step` / `visual_effect_reason` | 当前视觉读回对应的零起点动作下标，未知时给出缺帧、几何变化、解码失败或比较不可用原因 |
 | `visual_effect_attribution` / `visual_effect_attribution_reason` / `visual_effect_warning` | 检测到变化且控件区域、点击近邻均未命中时，关联性为 `unknown`，原因是 `surroundings_only` 或 `full_frame_only`，提示核验预期界面状态。没有控件或点击位置时，全图命中同样给出未知提示。其他情况省略这些字段 |
+| `hover_semantic_changes` | hover 动作前后语义观察比较，`status` 为 `observed` 或 `unknown`，包含新观察到的 `new_elements`、同一元素的 `expanded_changes` 和 `truncated`。元素以 DOM 文档内身份或 UIA runtime ID 匹配，每类最多返回 20 项。来源截断、缺少身份或重复身份时 `truncated` 为 true。文档变化或前次观察缺失时为 unknown |
 
 局部区域来自实际动作解析后的坐标。DOM/UIA 使用控件边界向外扩 12 个图片像素，同时提供以动作点为中心的 64×64 与 256×256 图片像素区域。纯坐标动作提供两个周边区域，越界部分裁剪。局部使用已解码图片的原始分辨率，灰度差超过 25 的像素比例严格大于 1% 且数量至少 12 时命中。全图结果继续使用宽高各减半的原口径，因此全图与局部变化像素数的采样尺度不同。
+
+视觉比较适用于 click、input、check、hover、scroll、drag。拖动以释放点作为局部区域中心。hover 的语义变化使用该步骤派发前后的观察，DOM 的 `aria-expanded` 和可用 UIA ExpandCollapse 状态以 `expanded` 布尔值输出，DOM `role=tooltip` 也参与观察。未暴露语义、延迟出现或观察截断的内容可能需要后续 wait/observe；变化证据由调用方结合预期状态判断。
 
 动作前后复用现有截图。仅比较目标、图像尺寸、来源矩形、裁剪、坐标系、采集方法、DPI 与窗口几何一致的帧。坐标不同返回 `null/geometry_mismatch`。局部命中可由图标、悬停或焦点反馈产生，全图命中也可能来自背景动画。
 

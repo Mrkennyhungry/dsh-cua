@@ -669,3 +669,16 @@ python scripts/run-live-probe.py test/actions_probe.py .runtime/p7-local-visual-
 | 真实异 DPI / 负原点多屏 | BLOCKED | 本机缺少异 DPI、负原点多屏硬件，P7 阶段闸门继续阻塞 |
 
 定向测试首次直接运行缺少 `PYTHONPATH`，完整检查首次执行发现两处测试样本问题，已修正断言位置和近邻区域边界，再通过上述检查。实机页面及隔离服务已关闭。
+
+### 0.5.10 悬停语义及其他动作的视觉读回
+
+2026-11-26 修改前完整基线 Node 95 PASS、Python 340 PASS、1 SKIP、45 subtests，Python 11.52 s。悬停使用当前步骤的前后观察匹配 DOM 身份或 UIA runtime ID，输出新观察元素和可读取的展开状态变化。截图不可用时悬停继续尝试语义采集。hover、scroll、drag 复用画面比较，拖动局部区域位于释放点。
+
+| 检查项 | 状态 | 实测结果 |
+| --- | --- | --- |
+| 原生和浏览器动作 | PASS | 隔离 actions_probe 24 个操作，20.235 s；浏览器 hover 返回 tooltip `Hover details` 和 `aria-expanded` false→true，status 一致。原生 ComboBox 展开前后 UIA 状态 false→true，runtime ID 关联后的变化匹配成功；scroll、drag 返回视觉字段 |
+| 新 DSH 会话 | PASS | 官方 CLI link 安装 0.5.10，新 DeepSeek 会话 status→open→act→status，5 个 Agent 请求均发现六工具；hover 的新 tooltip、展开状态和视觉结果返回，operation status 的语义证据一致 |
+| 完整检查 | PASS | scripts/check.ps1，Node 95 PASS、0 SKIP，Python 344 PASS、1 显式真实窗口 SKIP、48 subtests PASS，11.56 s |
+| 真实异 DPI / 负原点多屏 | BLOCKED | 本机缺少异 DPI、负原点多屏硬件，P7 阶段闸门继续阻塞 |
+
+语义采集受可访问性、采集时机和截断约束，独立窗口或纯绘制 tooltip 可能需要额外观察。延迟显示可通过 expect/wait 验证。UIA 的部分展开和叶节点状态不映射为布尔 `expanded`。测试服务及自建窗口已关闭。

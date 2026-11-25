@@ -94,6 +94,9 @@ HTML = '''<!doctype html><meta charset="utf-8"><title>P4 form</title>
 <button id="outer" aria-label="Outer change" style="position:fixed;left:500px;top:250px;width:32px;height:32px;padding:0;border:0;background:#eee;outline:none"
  onmousedown="event.preventDefault()" onclick="document.querySelector('#outerPanel').style.background='#222';window.outerClicks++"></button>
 <div id="outerPanel" style="position:fixed;left:480px;top:160px;width:80px;height:40px;background:#eee"></div>
+<button id="hover-menu" aria-label="Hover menu" aria-expanded="false" style="position:fixed;left:650px;top:250px"
+ onmouseover="this.setAttribute('aria-expanded','true');document.querySelector('#hover-tip').style.display='block'">Hover menu</button>
+<div id="hover-tip" role="tooltip" style="display:none;position:fixed;left:650px;top:290px;background:white">Hover details</div>
 <button id="click" onclick="count++; document.querySelector('output').textContent='saved '+count"
  oncontextmenu="event.preventDefault(); right++;">保存</button>
 <button id="hover" onmouseover="hovered++">悬停</button><output>pending</output>
@@ -192,6 +195,22 @@ try:
     assert native_open['status'] == 'completed' and native_open['target_id'] == native.target_id, native_open
     native_observed = native_open['observation']
     report['open_native_initial_observation'] = 1
+    combo_before = runtime.observations.observe('a', native.target_id)['observation']
+    win32gui.SendMessage(win32gui.GetDlgItem(hwnd, 102), win32con.CB_SHOWDROPDOWN, 1, 0)
+    try:
+        combo_after = runtime.observations.observe('a', native.target_id)['observation']
+        before_combo = next(element for element in combo_before['elements'] if element['role'] == 'combobox')
+        after_combo = next(element for element in combo_after['elements'] if element['role'] == 'combobox')
+        assert before_combo.get('expanded') is False and after_combo.get('expanded') is True, (before_combo, after_combo)
+        from dsh_desktop.actions import ActionDispatcher
+        before_snapshot = runtime.observations.get('a', combo_before['observation_id'])
+        after_snapshot = runtime.observations.get('a', combo_after['observation_id'])
+        native_changes = ActionDispatcher._hover_semantic_changes(before_snapshot, after_snapshot)
+        assert any(not item['before'] and item['after'] for item in native_changes['expanded_changes']), native_changes
+        report['native_expand_collapse'] = {'before': before_combo['expanded'], 'after': after_combo['expanded'],
+                                            'matched_by_runtime_id': True}
+    finally:
+        win32gui.SendMessage(win32gui.GetDlgItem(hwnd, 102), win32con.CB_SHOWDROPDOWN, 0, 0)
     result, _ = act(native, native_observed, [
         {'action': 'input', 'target': ref(native_observed, role='textbox'), 'text': '中文内容', 'mode': 'replace'},
         {'action': 'check', 'target': ref(native_observed, 'Urgent'), 'checked': True},
@@ -279,6 +298,14 @@ try:
     outer_status = runtime.operations.status('a', outer['operation_id'])
     assert all(outer_status[key] == value for key, value in outer.items() if key.startswith('visual_effect'))
     report['browser_outer_visual_effect'] = {key: value for key, value in outer.items() if key.startswith('visual_effect')}
+    hover, _ = act(target, outer['observation'], [{'action': 'hover', 'target': ref(outer['observation'], 'Hover menu')}])
+    changes = hover['hover_semantic_changes']
+    assert any(item['name'] == 'Hover details' for item in changes['new_elements']), changes
+    assert any(item['name'] == 'Hover menu' and item['after'] for item in changes['expanded_changes']), changes
+    assert hover['visual_effect'], hover
+    hover_status = runtime.operations.status('a', hover['operation_id'])
+    assert hover_status['hover_semantic_changes'] == changes
+    report['browser_hover_semantics'] = changes
     # Retrieve exactly the internal pair before the bounded observation cache expires.
     import hashlib
     for label, result in (('tiny-semantic', tiny), ('tiny-point', tiny_point)):
@@ -287,7 +314,7 @@ try:
             data = runtime.observations.image('a', evidence[side + '_frame_id'])
             assert hashlib.sha256(data).hexdigest() == evidence[side + '_sha256']
             (home / (label + '-' + side + '.jpg')).write_bytes(data)
-    observed = outer['observation']
+    observed = hover['observation']
     attachment = home / 'upload.txt'
     attachment.write_text('fixture attachment', encoding='utf-8')
     result, arguments = act(target, observed, [
@@ -394,11 +421,13 @@ try:
     def point(value):
         return {'frame_id': frame.frame_id, 'x': value[0], 'y': value[1]}
     result, _ = act(target, image_observation, [{'action': 'drag', 'from': point(first_point), 'to': point(second_point)}])
+    assert 'visual_effect' in result, result
     counts = runtime.browser.call(lambda: target.handle[1].evaluate('({down,up})'))
     assert counts == {'down': 1, 'up': 1}, counts
     report['frame_drag'] = counts
     observed = observe(target)
     result, _ = act(target, observed, [{'action': 'scroll', 'target': ref(observed, '悬停'), 'direction': 'down', 'amount': 3}])
+    assert 'visual_effect' in result, result
     # Wheel delivery is asynchronous in Chromium.
     runtime.browser.call(lambda: target.handle[0].wait_for_timeout(150))
     assert runtime.browser.call(lambda: target.handle[1].evaluate('scrollY')) > 0

@@ -114,7 +114,7 @@ _SNAPSHOT_JS = "(args) => {\n args = args || {};\n" + _SELECTOR_JS + """
   // 自绘组件（div/li/a 实现，没有 role）必须按类名补进来，否则它们既不在快照里、
 // 也进不了决策层：自绘页签、翻页与开关可能没有原生 ARIA role，
 // 开关是 div[class*=switch]。这三类都实测在控制台里存在但原来一个都看不到。
-  const INTERACTIVE = 'button, a[href], input, select, textarea, summary, [role="button"], [role="tab"], [role="menuitem"], [role="option"], [role="link"], [role="checkbox"], [role="radio"], [role="switch"], [onclick], [aria-label]:not([aria-hidden="true"]), [aria-haspopup], [class*="icon" i][role], [class*="tabs__tabitem"], [class*="pagination__turnbtn"], [class*="pagination"] [class*="page"], [class*="switch" i]:not([class*="switch-"]), [class*="dropdown__header"], [class*="dropdown-btn"], [class*="dropdown__value"], [class*="select__trigger"], [class*="select__value"]';
+  const INTERACTIVE = 'button, a[href], input, select, textarea, summary, [role="tooltip"], [role="button"], [role="tab"], [role="menuitem"], [role="option"], [role="link"], [role="checkbox"], [role="radio"], [role="switch"], [onclick], [aria-label]:not([aria-hidden="true"]), [aria-haspopup], [class*="icon" i][role], [class*="tabs__tabitem"], [class*="pagination__turnbtn"], [class*="pagination"] [class*="page"], [class*="switch" i]:not([class*="switch-"]), [class*="dropdown__header"], [class*="dropdown-btn"], [class*="dropdown__value"], [class*="select__trigger"], [class*="select__value"]';
   const OVERLAY_HINT = /modal|dialog|drawer|popup|dropdown|popover|select|overlay|mask|lightbox|ant-modal|tc-modal/i;
 
   // Deep collect: document.querySelectorAll does NOT pierce shadow DOM —
@@ -242,6 +242,7 @@ _SNAPSHOT_JS = "(args) => {\n args = args || {};\n" + _SELECTOR_JS + """
       if ('value' in el && type !== 'password') semantic.value = String(el.value).slice(0, 12000);
       if ('checked' in el || el.hasAttribute('aria-checked')) semantic.checked = 'checked' in el ? el.checked : el.getAttribute('aria-checked') === 'true';
       if (el.hasAttribute('aria-selected')) semantic.selected = el.getAttribute('aria-selected') === 'true';
+      if (['true', 'false'].includes(el.getAttribute('aria-expanded'))) semantic.expanded = el.getAttribute('aria-expanded') === 'true';
       if (tag === 'select') {
         semantic.options = Array.from(el.options).slice(0, 300).map(option => option.label);
         semantic.options_truncated = el.options.length > 300;

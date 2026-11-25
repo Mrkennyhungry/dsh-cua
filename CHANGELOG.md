@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.10] - 2026-11-26
+
+### Added
+
+- Report before-and-after hover semantic evidence for newly observed elements and readable expansion-state changes, including DOM tooltips and UIA ExpandCollapse.
+- Provide visual change measurements for hover, scroll and drag actions.
+
 ## [0.5.9] - 2026-11-26
 
 ### Added

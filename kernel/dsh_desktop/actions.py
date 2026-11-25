@@ -11,6 +11,7 @@ from .geometry import FrameGeometry
 
 
 _ACTIONS = {'click', 'input', 'key', 'scroll', 'drag', 'select', 'check', 'hover', 'attach', 'close'}
+_VISUAL_ACTIONS = {'click', 'input', 'check', 'hover', 'scroll', 'drag'}
 _KEY_ALIASES = {'control': 'ctrl', 'esc': 'escape', 'meta': 'win', 'arrowleft': 'left',
                 'arrowright': 'right', 'arrowup': 'up', 'arrowdown': 'down', 'return': 'enter'}
 
@@ -138,11 +139,15 @@ class ActionDispatcher:
                             watcher = TransientWatcher(runtime, context, target, expect, lock_held=True)
                             context.before_dispatch = watcher.dispatch
                         # Capture before-action observation for visual effect verification on certain actions
-                        if step['action'] in ('click', 'input', 'check'):
+                        if step['action'] in _VISUAL_ACTIONS:
                             try:
                                 before_observation = runtime.observations.observe(owner, target_id, image=True)
                             except Exception:
-                                before_observation = None
+                                if step['action'] == 'hover':
+                                    try:
+                                        before_observation = runtime.observations.observe(owner, target_id, image=False)
+                                    except Exception:
+                                        pass
                         method = self._step(context, target, oid, index, step)
                         context.completed(index, method)
                         time.sleep(0.03)
@@ -193,13 +198,25 @@ class ActionDispatcher:
     def _readback(self, owner, target_id, baseline, before_observation=None, action=None, location=None, step_index=None):
         try:
             # Request image to ensure frames and bounds are populated in readback observation
-            observed = self.runtime.observations.observe(owner, target_id, image=True)
+            try:
+                observed = self.runtime.observations.observe(owner, target_id, image=True)
+            except Exception:
+                if action != 'hover':
+                    raise
+                observed = self.runtime.observations.observe(owner, target_id, image=False)
             fresh = self.runtime.observations.get(owner, observed['observation']['observation_id'])
             changed = None if baseline is None else (fresh.text != baseline.text or
                 [element.semantic for element in fresh.elements] != [element.semantic for element in baseline.elements])
 
             result = {'observation': observed['observation'], 'observation_changed': changed}
-            if action in ('click', 'input', 'check'):
+            if action == 'hover':
+                try:
+                    before_id = (before_observation or {}).get('observation', {}).get('observation_id')
+                    before_semantic = self.runtime.observations.get(owner, before_id, target_id) if before_id else None
+                    result['hover_semantic_changes'] = self._hover_semantic_changes(before_semantic, fresh)
+                except Exception:
+                    result['hover_semantic_changes'] = {'status': 'unknown'}
+            if action in _VISUAL_ACTIONS:
                 result.update(visual_effect=None, visual_effect_basis='unknown', visual_effect_step=step_index)
                 before = (before_observation or {}).get('observation', {})
                 after = observed['observation']
@@ -236,6 +253,52 @@ class ActionDispatcher:
             return {'readback_warning': str(error), 'observation_changed': None}
         except Exception as error:
             return {'readback_warning': str(error), 'observation_changed': None}
+
+    @staticmethod
+    def _hover_semantic_changes(before, after):
+        if before is None:
+            return {'status': 'unknown'}
+        if before.metadata.get('document_id') != after.metadata.get('document_id'):
+            return {'status': 'unknown', 'reason': 'document_changed'}
+
+        def keyed(observation):
+            elements = {}
+            incomplete = False
+            for element in observation.elements:
+                identity = None
+                if element.source == 'dom':
+                    identity = element.locator.get('token')
+                elif element.source == 'uia':
+                    identity = element.locator.get('runtime_id')
+                if not identity:
+                    incomplete = True
+                    continue
+                if isinstance(identity, list):
+                    identity = tuple(identity)
+                key = (element.source, element.target_id, element.document_id, identity)
+                if key in elements:
+                    elements[key] = None
+                else:
+                    elements[key] = element
+            return elements, incomplete or any(element is None for element in elements.values())
+
+        (previous, before_incomplete), (current, after_incomplete) = keyed(before), keyed(after)
+        added, expanded = [], []
+        for key, element in current.items():
+            if element is None:
+                continue
+            old = previous.get(key)
+            if key not in previous:
+                added.append({'ref': element.ref, 'role': element.semantic.get('role'),
+                              'name': str(element.semantic.get('name', ''))[:240]})
+            elif old is not None and 'expanded' in old.semantic and 'expanded' in element.semantic:
+                if old.semantic['expanded'] != element.semantic['expanded']:
+                    expanded.append({'ref': element.ref, 'name': str(element.semantic.get('name', ''))[:240],
+                                     'before': old.semantic['expanded'], 'after': element.semantic['expanded']})
+        return {'status': 'observed', 'new_elements': added[:20], 'expanded_changes': expanded[:20],
+                'truncated': len(added) > 20 or len(expanded) > 20 or
+                             before_incomplete or after_incomplete or
+                             bool(before.metadata.get('source_truncated') or after.metadata.get('source_truncated'))}
 
     @staticmethod
     def _visual_regions(frame, location):
@@ -422,7 +485,7 @@ class ActionDispatcher:
                 raise RuntimeFault('SELECTION_MISMATCH', 'A single-select control accepts one exact label')
             if any(available['labels'].count(value) != 1 for value in step['values']):
                 raise RuntimeFault('SELECTION_MISMATCH', 'Each requested option label must identify exactly one option')
-        if action in ('click', 'input', 'check'):
+        if action in ('click', 'input', 'check', 'hover', 'scroll'):
             try:
                 box = node.bounding_box()
                 if box:
@@ -479,7 +542,9 @@ class ActionDispatcher:
         page = target.handle[0]
         if step['action'] not in ('click', 'hover', 'scroll', 'drag', 'input'):
             raise RuntimeFault('UNSUPPORTED_ACTION', 'This action requires a semantic element reference')
-        if step['action'] in ('click', 'input') and context.visual_location is None:
+        if step['action'] == 'drag':
+            context.visual_location = {'point': destination}
+        elif context.visual_location is None:
             context.visual_location = {'point': point}
         context.dispatch(index)
         page.mouse.move(*point)
@@ -531,7 +596,7 @@ class ActionDispatcher:
             if not wrapper.is_enabled():
                 raise RuntimeFault('ELEMENT_DISABLED', 'Observed control is disabled')
             self._native_guard(context, target)
-            if action in ('click', 'input', 'check'):
+            if action in ('click', 'input', 'check', 'hover', 'scroll'):
                 try:
                     rect = wrapper.element_info.rectangle
                     context.visual_location = {
@@ -570,7 +635,7 @@ class ActionDispatcher:
             point = ((rect.left + rect.right) / 2, (rect.top + rect.bottom) / 2)
         else:
             point = node
-        if action in ('click', 'input') and context.visual_location is None:
+        if action in ('click', 'input', 'hover', 'scroll') and context.visual_location is None:
             context.visual_location = {'point': point}
         destination = None
         if action == 'drag':
@@ -587,6 +652,7 @@ class ActionDispatcher:
             finally:
                 if other_element and other_element.source == 'dom':
                     other.dispose()
+            context.visual_location = {'point': destination}
         if target.kind == 'browser':
             self._browser_pointer(context, target, index, step, point, destination)
             return 'browser_point_' + action

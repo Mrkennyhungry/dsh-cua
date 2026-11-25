@@ -170,7 +170,7 @@ class ObservationService:
                 offset = source.metadata.get('frame_bounds') or {'x': 0, 'y': 0}
                 for node in snapshot.get('elements', []):
                     semantic = {key: node[key] for key in ('role', 'name', 'value', 'enabled', 'checked', 'selected',
-                                                          'editable', 'focused', 'options', 'options_truncated', 'input_type') if key in node}
+                                                          'editable', 'focused', 'expanded', 'options', 'options_truncated', 'input_type') if key in node}
                     if node.get('in_overlay'):
                         semantic['in_overlay'] = True
                     rect = node['rect']
@@ -239,9 +239,10 @@ class ObservationService:
         for node in nodes:
             token = uuid.uuid4().hex
             self._uia_elements[token] = (time.monotonic(), owner, node)
-            semantic = {key: node[key] for key in ('name', 'value', 'enabled', 'focused', 'editable', 'checked', 'selected') if key in node}
+            semantic = {key: node[key] for key in ('name', 'value', 'enabled', 'focused', 'editable', 'checked', 'selected', 'expanded') if key in node}
             semantic['role'] = roles.get(node['control_type'], node['control_type'].lower())
-            elements.append(Element('', 'uia', target_id, None, semantic, {'token': token}, tuple(node['rect'])))
+            elements.append(Element('', 'uia', target_id, None, semantic,
+                                    {'token': token, 'runtime_id': node.get('runtime_id')}, tuple(node['rect'])))
             node['wrapper'].element_info.set_cache_strategy(cached=False)
         while len(self._uia_elements) > 4000:
             self._uia_elements.popitem(last=False)

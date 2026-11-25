@@ -5516,6 +5516,12 @@ def _uia_batch_elements(root, region, max_depth, max_nodes, deadline, *, truncat
                         node['selected'] = bool(element.is_selected())
                 except Exception:
                     pass
+                try:
+                    expanded = int(element.iface_expand_collapse.CurrentExpandCollapseState)
+                    if expanded in (0, 1):
+                        node['expanded'] = expanded == 1
+                except Exception:
+                    pass
         if depth < max_depth:
             pending.extend((child, depth + 1) for child in reversed(element.children()))
         elif truncation is not None:

@@ -13,6 +13,26 @@ from dsh_desktop.worker import ApartmentWorker
 
 
 class ObservationTests(unittest.TestCase):
+    def test_uia_expand_collapse_state_is_optional(self):
+        from dsh_desktop.desktop_tools import _uia_batch_elements
+
+        element = mock.Mock()
+        element.element_info.name = 'Menu'
+        element.element_info.automation_id = 'menu'
+        element.element_info.control_type = 'MenuItem'
+        element.element_info.runtime_id = (1, 2)
+        element.element_info.has_keyboard_focus = False
+        element.element_info.rectangle = SimpleNamespace(left=0, top=0, right=20, bottom=20,
+                                                          width=lambda: 20, height=lambda: 20)
+        element.children.return_value = []
+        element.iface_expand_collapse.CurrentExpandCollapseState = 1
+        region = SimpleNamespace(left=0, top=0, width=100, height=100)
+        nodes = _uia_batch_elements(element, region, 2, 10, time.monotonic() + 2, semantics=True)
+        self.assertTrue(nodes[0]['expanded'])
+        element.iface_expand_collapse.CurrentExpandCollapseState = 2
+        nodes = _uia_batch_elements(element, region, 2, 10, time.monotonic() + 2, semantics=True)
+        self.assertNotIn('expanded', nodes[0])
+
     def test_native_duplicate_prefers_control_inside_client_region(self):
         from dsh_desktop import desktop_tools
 

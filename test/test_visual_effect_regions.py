@@ -11,6 +11,7 @@ import numpy as np
 
 from dsh_desktop.actions import ActionDispatcher
 from dsh_desktop.geometry import FrameGeometry
+from dsh_desktop.observations import Element
 from dsh_desktop.targets import Frame
 
 
@@ -174,6 +175,46 @@ class LocalVisualEffectTests(unittest.TestCase):
         result = ActionDispatcher(runtime)._readback('owner', 'target', None, action='click')
         self.assertIsNone(result['visual_effect'])
         self.assertEqual(result['visual_effect_reason'], 'before_capture_unavailable')
+
+    def test_hover_semantics_use_stable_identity_and_report_expansion(self):
+        def element(ref, token, name, expanded=None):
+            semantic = {'role': 'button', 'name': name}
+            if expanded is not None:
+                semantic['expanded'] = expanded
+            return Element(ref, 'dom', 'target', 'doc', semantic, {'token': token})
+        before = SimpleNamespace(metadata={'document_id': 'doc'}, elements=[element('old', '1', 'Menu', False)])
+        after = SimpleNamespace(metadata={'document_id': 'doc'}, elements=[
+            element('new-ref', '1', 'Menu', True), element('tip-ref', '2', 'Tooltip')])
+        result = self.dispatcher._hover_semantic_changes(before, after)
+        self.assertEqual(result['new_elements'], [{'ref': 'tip-ref', 'role': 'button', 'name': 'Tooltip'}])
+        self.assertEqual(result['expanded_changes'], [{'ref': 'new-ref', 'name': 'Menu', 'before': False, 'after': True}])
+        self.assertFalse(result['truncated'])
+        after.metadata['document_id'] = 'other'
+        self.assertEqual(self.dispatcher._hover_semantic_changes(before, after)['status'], 'unknown')
+        self.assertEqual(self.dispatcher._hover_semantic_changes(None, after)['status'], 'unknown')
+
+    def test_hover_scroll_and_drag_readback_provide_visual_evidence(self):
+        for action in ('hover', 'scroll', 'drag'):
+            with self.subTest(action=action):
+                runtime, before, _, _ = self.readback_fixture()
+                result = ActionDispatcher(runtime)._readback('owner', 'target', None,
+                    before_observation=before, action=action, location=self.location, step_index=0)
+                self.assertTrue(result['visual_effect'])
+                self.assertEqual(result['visual_effect_step'], 0)
+
+    def test_hover_semantic_readback_survives_unavailable_screenshot(self):
+        runtime = mock.Mock()
+        before = SimpleNamespace(metadata={'document_id': 'doc'}, elements=[], text='')
+        tooltip = Element('tip', 'dom', 'target', 'doc', {'role': 'tooltip', 'name': 'Details'}, {'token': '1'})
+        after = SimpleNamespace(metadata={'document_id': 'doc'}, elements=[tooltip], text='Details')
+        runtime.observations.observe.side_effect = [RuntimeError('capture unavailable'),
+            {'observation': {'observation_id': 'after', 'frames': []}}]
+        runtime.observations.get.side_effect = [after, before]
+        result = ActionDispatcher(runtime)._readback('owner', 'target', None,
+            before_observation={'observation': {'observation_id': 'before', 'frames': []}}, action='hover')
+        self.assertEqual(result['hover_semantic_changes']['new_elements'][0]['name'], 'Details')
+        self.assertIsNone(result['visual_effect'])
+        self.assertEqual(result['visual_effect_reason'], 'frame_missing')
 
     def test_physical_click_normal_batch_entry_uses_actual_mapped_point(self):
         runtime, before, _, _ = self.readback_fixture()
