@@ -103,9 +103,13 @@ class Frame:
     created: float = field(default_factory=time.monotonic)
 
     def summary(self):
+        metadata = self.geometry.metadata()
+        # Mark region-bound frames (with crop) as not clickable since they represent constrained views
+        is_region_bound = self.geometry.crop is not None
         return {'frame_id': self.frame_id, 'target_id': self.target_id,
                 'revision': self.revision, 'width': self.geometry.image_size[0],
-                'height': self.geometry.image_size[1], **self.geometry.metadata()}
+                'height': self.geometry.image_size[1], 'clickable': not is_region_bound,
+                'coordinate_origin': metadata.pop('coordinate_space'), **metadata}
 
 
 class FrameRegistry:
