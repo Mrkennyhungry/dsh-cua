@@ -35,6 +35,37 @@ class LaunchRegressionTests(unittest.TestCase):
         self.assertEqual(desktop._STATE._launched_windows[0]['scope_owner'], 'owner')
         shell.assert_called_once()
 
+    def test_unique_titled_window_is_selected_when_children_share_one_window_pid(self):
+        from types import SimpleNamespace
+        titled = {'hwnd': 100, 'window_key': '100:10:1000200', 'pid': 10,
+                  'exe': 'QQMusic.exe', 'title': 'Butter-Fly'}
+        helper = {'hwnd': 101, 'window_key': '101:10:1000200', 'pid': 10,
+                  'exe': 'QQMusic.exe', 'title': ''}
+        before = {}
+        after = {10: ('calc.exe', 1000.2), 11: ('helper.exe', 1000.3), 12: ('helper.exe', 1000.4)}
+        child_processes = [SimpleNamespace(pid=11), SimpleNamespace(pid=12)]
+        with patch.object(desktop.os.path, 'isfile', return_value=True), \
+             patch.object(desktop, '_SYSTEM_APP_DIRS', ()), \
+             patch.object(desktop, '_launch_target_allowed', return_value=True), \
+             patch.object(desktop.os, 'startfile'), \
+             patch.object(desktop, '_list_visible_windows', side_effect=[[], [titled, helper]]), \
+             patch.object(desktop, '_launch_process_snapshot', side_effect=[before, after]), \
+             patch.object(desktop, '_window_process_ids', side_effect=[{10, 11}, {10, 12}]), \
+             patch.object(desktop, '_current_window_key', side_effect=lambda hwnd: {
+                 100: titled['window_key'], 101: helper['window_key']}[hwnd]), \
+             patch.object(desktop.win32gui, 'GetAncestor', side_effect=lambda hwnd, _flag: hwnd), \
+             patch.object(desktop.win32gui, 'GetClassName', return_value='QQMusicWindow'), \
+             patch.object(desktop.psutil, 'Process', return_value=SimpleNamespace(children=lambda **_kw: child_processes)), \
+             patch.object(desktop.time, 'sleep'), \
+             patch.object(desktop.time, 'time', return_value=1000.0):
+            process = SimpleNamespace(pid=10)
+            with patch.object(desktop, '_popen_launch', return_value=(process, None)):
+                result = desktop.desktop_launch_app.__wrapped__(self.calc, scoped=True, scope_owner='owner')
+
+        self.assertTrue(result['success'])
+        self.assertEqual(result['tracked_windows'][0]['hwnd'], titled['hwnd'])
+        self.assertEqual(desktop._STATE._launched_windows[0]['hwnd'], titled['hwnd'])
+
     def test_packaged_shortcut_uses_shell_and_preserves_arguments(self):
         from types import SimpleNamespace
         import win32com.client

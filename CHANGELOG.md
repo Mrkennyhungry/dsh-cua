@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.7] - 2026-11-26
+
+### Fixed
+
+- Return an unknown visual effect when image decoding or frame dimensions prevent a valid comparison, with a reason and measured changed-pixel ratio when available.
+- Select a unique titled launch window when candidate windows share the same owning process but their process-tree evidence includes helper children.
+
 ## [0.5.6] - 2026-11-26
 
 ### Fixed

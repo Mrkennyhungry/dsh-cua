@@ -123,6 +123,7 @@ owner 只能读取自身操作和观察。全局健康摘要可以包含设备�
 | `expectation.status` | `not_requested`、`pending`、`met`、`timeout`、`unknown` |
 | `outcome` | `opened`、`dispatched`、`expectation_met`、`interrupted`、`cancelled`、`unknown` |
 | `observation_changed` | `true`、`false` 或 `null`，最后一种表示采集不足以比较 |
+| `visual_effect` | `true` 或 `false` 仅表示两张有效、同尺寸图片的像素比较结果；`null` 表示无法判断。`visual_effect_reason` 说明未知原因，`visual_effect_changed_ratio` 给出灰度差超过 25 的像素比例。比例超过 0.005 时结果为 `true` |
 
 `success` 表示本次工具请求是否成功处理。`accepted`、`running` 和需要核对现场的 `unknown` 可以返回 `success: true`。这些结果使用 `message` 和 `next_action` 描述后续处理，保持 `error` 字段缺省。
 

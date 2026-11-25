@@ -592,6 +592,22 @@ P7 保留 BLOCKED，受 DEVELOPMENT 阶段闸门约束。已执行的数值和�
 
 Steam 同名控件的近似尺寸归并和最小化窗口的幽灵 target 仍需实机复现后分别确定判据。本次没有加入点击失败后的兄弟节点重试，因为自动重放输入可能作用于错误控件。`observation_changed` 继续表示语义观察变化，是否有可见画面变化由独立的 `visual_effect` 表达，符合 PROTOCOL 的证据区分。
 
+### 0.5.6 复验问题修正与 0.5.7
+
+2026-11-26 读取用户提供的 0.5.6 复验报告。报告中 `visual_effect: false` 与另行比较截图得到的 16.52% 差异无法从已提交的原始图片资源独立复算，因为报告未附工具使用的两个 frame ID 或图像字节。本次修正了可确认的错误分类，并让每个可比较结果携带实际 `visual_effect_changed_ratio`，可在下一次实机复验中定位该不一致。
+
+| 检查项 | 状态 | 实测结果 |
+| --- | --- | --- |
+| 比较不可用状态 | PASS | 无法解码返回 `(null, decode_failed)`，不同尺寸返回 `(null, shape_mismatch)`，均不再声称无变化 |
+| 比较比例与序列化 | PASS | 相同 JPEG 的比例 0.0 且 `false`，不同纯色 JPEG 的比例大于 0.005 且 `true`，Python 原生 bool 可 JSON 序列化 |
+| 读回未知状态与原因 | PASS | 1/1 回归，返回 `visual_effect: null` 与 `visual_effect_reason: shape_mismatch` |
+| 启动窗口去歧义 | PASS | 1/1 回归，同一窗口 PID 下唯一有标题窗口被登记，即使进程树证据含多个 helper PID |
+| 完整检查 | PASS | `scripts/check.ps1`，Node 94 PASS、0 FAIL、0 SKIP；Python 321 PASS、1 显式真实窗口 SKIP、43 subtests PASS，11.68 s |
+| 真实 DSH 与 QQMusic 冷启动 | NOT RUN | 本轮没有重装后启动 DSH 新会话，也未结束 QQMusic 并实测冷启动 |
+| 双模型验收 | NOT RUN | 未调用 wb/cn:deepseek-v4.1-flash 与 wb/cn:hy4std |
+
+启动筛选改为比较候选窗口记录中的 owning PID。报告中 unique-title 规则原本已存在，但跨候选汇总的 matched process-tree PID 集合会被 helper 子进程扩大，导致规则失效。真实 QQMusic 候选及首次 `visual_effect_changed_ratio` 仍需运行时复验。P7 继续受真实异 DPI、负原点多屏硬件条件阻塞。
+
 复现最后实机检查可在项目根目录执行以下命令，使用新的隔离 home 目录保留已有证据。
 
 ```powershell

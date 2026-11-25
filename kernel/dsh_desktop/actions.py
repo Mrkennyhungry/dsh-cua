@@ -194,7 +194,11 @@ class ActionDispatcher:
 
             # Verify visual effect for UI-affecting actions: check if screenshot actually changed
             visual_effect = None
+            visual_effect_reason = None
+            visual_effect_changed_ratio = None
+            visual_effect_attempted = False
             if before_observation and action in ('click', 'input', 'check'):
+                visual_effect_attempted = True
                 try:
                     before_frames = before_observation.get('observation', {}).get('frames', [])
                     after_frames = observed.get('observation', {}).get('frames', [])
@@ -203,13 +207,22 @@ class ActionDispatcher:
                         after_frame_id = after_frames[0]['frame_id']
                         before_image = self.runtime.observations.image(owner, before_frame_id)
                         after_image = self.runtime.observations.image(owner, after_frame_id)
-                        visual_effect = self._visual_effect_changed(before_image, after_image)
+                        visual_effect, visual_effect_reason, visual_effect_changed_ratio = \
+                            self._compare_visual_effect(before_image, after_image)
+                    else:
+                        visual_effect_reason = 'frame_missing'
+                except RuntimeFault as error:
+                    visual_effect_reason = 'frame_expired' if error.code == 'FRAME_EXPIRED' else 'frame_unavailable'
                 except Exception:
-                    visual_effect = None
+                    visual_effect_reason = 'comparison_failed'
 
             result = {'observation': observed['observation'], 'observation_changed': changed}
-            if visual_effect is not None:
+            if visual_effect_attempted:
                 result['visual_effect'] = visual_effect
+                if visual_effect_reason is not None:
+                    result['visual_effect_reason'] = visual_effect_reason
+                if visual_effect_changed_ratio is not None:
+                    result['visual_effect_changed_ratio'] = visual_effect_changed_ratio
             return result
         except RuntimeFault as error:
             if error.code == 'TARGET_CLOSED':
@@ -218,11 +231,10 @@ class ActionDispatcher:
         except Exception as error:
             return {'readback_warning': str(error), 'observation_changed': None}
 
-    def _visual_effect_changed(self, before_image_bytes, after_image_bytes):
+    def _compare_visual_effect(self, before_image_bytes, after_image_bytes):
         """Compare two JPEG images for significant visual changes.
 
-        Returns True if visual changes detected, False if no changes or decode fails.
-        Uses pixel difference thresholding to detect UI effects (enable/disable, visual feedback).
+        Return a boolean only when both same-sized frames decoded successfully.
         """
         try:
             # Vision packages are optional. Ordinary window/UIA actions must stay importable
@@ -236,8 +248,10 @@ class ActionDispatcher:
             before = cv2.imdecode(before_arr, cv2.IMREAD_COLOR)
             after = cv2.imdecode(after_arr, cv2.IMREAD_COLOR)
 
-            if before is None or after is None or before.shape != after.shape:
-                return False
+            if before is None or after is None:
+                return None, 'decode_failed', None
+            if before.shape != after.shape:
+                return None, 'shape_mismatch', None
 
             # Downscale for efficient comparison
             h, w = before.shape[:2]
@@ -255,10 +269,11 @@ class ActionDispatcher:
             total_pixels = mask.size
 
             # Normalize numpy.bool_ to bool so the bridge can serialize the result.
-            return bool(changed_pixels / total_pixels > 0.005)
+            changed_ratio = changed_pixels / total_pixels
+            return bool(changed_ratio > 0.005), None, round(float(changed_ratio), 6)
         except Exception:
             # Missing or unreadable vision inputs should not be reported as a verified no-op.
-            return None
+            return None, 'comparison_unavailable', None
 
 
 

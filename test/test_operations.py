@@ -452,14 +452,34 @@ class ActionValidationTests(unittest.TestCase):
         changed_ok, changed = cv2.imencode('.jpg', after)
         self.assertTrue(unchanged_ok and changed_ok)
 
-        unchanged_result = dispatcher._visual_effect_changed(unchanged.tobytes(), unchanged.tobytes())
-        changed_result = dispatcher._visual_effect_changed(unchanged.tobytes(), changed.tobytes())
+        unchanged_result, unchanged_reason, unchanged_ratio = dispatcher._compare_visual_effect(
+            unchanged.tobytes(), unchanged.tobytes())
+        changed_result, changed_reason, changed_ratio = dispatcher._compare_visual_effect(
+            unchanged.tobytes(), changed.tobytes())
 
         self.assertIs(type(unchanged_result), bool)
         self.assertIs(type(changed_result), bool)
+        self.assertIsNone(unchanged_reason)
+        self.assertIsNone(changed_reason)
+        self.assertEqual(unchanged_ratio, 0.0)
+        self.assertGreater(changed_ratio, 0.005)
         self.assertFalse(unchanged_result)
         self.assertTrue(changed_result)
         self.assertEqual(json.loads(json.dumps({'visual_effect': changed_result})), {'visual_effect': True})
+
+    def test_visual_effect_comparison_reports_unknown_for_invalid_or_different_frames(self):
+        import cv2
+        import numpy as np
+
+        dispatcher = ActionDispatcher(mock.Mock())
+        small_ok, small = cv2.imencode('.jpg', np.zeros((40, 40, 3), dtype=np.uint8))
+        large_ok, large = cv2.imencode('.jpg', np.zeros((60, 40, 3), dtype=np.uint8))
+        self.assertTrue(small_ok and large_ok)
+
+        self.assertEqual(dispatcher._compare_visual_effect(b'invalid', small.tobytes()),
+                         (None, 'decode_failed', None))
+        self.assertEqual(dispatcher._compare_visual_effect(small.tobytes(), large.tobytes()),
+                         (None, 'shape_mismatch', None))
 
     def test_visual_effect_is_unknown_when_optional_vision_packages_are_unavailable(self):
         original_import = builtins.__import__
@@ -471,9 +491,25 @@ class ActionValidationTests(unittest.TestCase):
 
         dispatcher = ActionDispatcher(mock.Mock())
         with mock.patch('builtins.__import__', side_effect=without_vision):
-            result = dispatcher._visual_effect_changed(b'image', b'image')
+            result = dispatcher._compare_visual_effect(b'image', b'image')
 
-        self.assertIsNone(result)
+        self.assertEqual(result, (None, 'comparison_unavailable', None))
+
+    def test_readback_preserves_unknown_visual_effect_and_reason(self):
+        runtime = mock.Mock()
+        runtime.observations.observe.return_value = {
+            'observation': {'observation_id': 'after', 'frames': [{'frame_id': 'after-frame'}]}}
+        runtime.observations.get.return_value = SimpleNamespace(text='', elements=[])
+        runtime.observations.image.side_effect = [b'before', b'after']
+        dispatcher = ActionDispatcher(runtime)
+        before_observation = {'observation': {'frames': [{'frame_id': 'before-frame'}]}}
+        with mock.patch.object(dispatcher, '_compare_visual_effect',
+                               return_value=(None, 'shape_mismatch', None)):
+            result = dispatcher._readback('owner', 'target', None,
+                                          before_observation=before_observation, action='click')
+
+        self.assertIsNone(result['visual_effect'])
+        self.assertEqual(result['visual_effect_reason'], 'shape_mismatch')
 
     def test_transient_watcher_is_armed_before_dispatch_and_closed(self):
         order = []

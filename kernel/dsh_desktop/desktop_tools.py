@@ -3615,13 +3615,14 @@ def desktop_launch_app(shortcut_path: str, *, scoped: bool = False, scope_owner:
             else:
                 candidates[key] = (target, set(matched_pids))
         # One process can expose a titled app frame plus an untitled helper
-        # window (Tk and Electron both do). When the candidates all belong to a
-        # single process and exactly one of them has a title, that is the frame.
+        # window (Tk and Electron both do). The candidate windows' owning PID
+        # identifies that shared process; matched child PIDs only prove launch
+        # ownership and must not make the frame look ambiguous.
         if len(candidates) > 1:
-            pids = {pid for _win, pidset in candidates.values() for pid in pidset}
+            window_pids = {win.get("pid") for win, _pidset in candidates.values()}
             titled = [(win, pidset) for win, pidset in candidates.values()
                       if (win.get("title") or "").strip()]
-            if len(pids) == 1 and len(titled) == 1:
+            if len(window_pids) == 1 and len(titled) == 1:
                 candidates = {titled[0][0].get("window_key"): titled[0]}
         if len(candidates) == 1:
             win, matched = next(iter(candidates.values()))
