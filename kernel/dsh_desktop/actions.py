@@ -179,7 +179,8 @@ class ActionDispatcher:
 
     def _readback(self, owner, target_id, baseline):
         try:
-            observed = self.runtime.observations.observe(owner, target_id)
+            # Request image to ensure frames and bounds are populated in readback observation
+            observed = self.runtime.observations.observe(owner, target_id, image=True)
             fresh = self.runtime.observations.get(owner, observed['observation']['observation_id'])
             changed = None if baseline is None else (fresh.text != baseline.text or
                 [element.semantic for element in fresh.elements] != [element.semantic for element in baseline.elements])
@@ -224,8 +225,11 @@ class ActionDispatcher:
             x, y, width, height = element.rect
             return element, (x + width / 2, y + height / 2)
         observation = self.runtime.observations.get(context.owner, oid, target.target_id)
-        if location['frame_id'] not in [frame.frame_id for frame in observation.frames]:
-            raise RuntimeFault('FRAME_MISMATCH', 'Frame point must belong to the action observation')
+        valid_frames = [frame.frame_id for frame in observation.frames]
+        if location['frame_id'] not in valid_frames:
+            valid_frames_str = ', '.join(valid_frames) if valid_frames else '(none)'
+            raise RuntimeFault('FRAME_MISMATCH',
+                             f"Frame point must belong to the action observation. Requested: {location['frame_id']}, valid: {valid_frames_str}")
         return None, self.runtime.map_point(context.owner, target.target_id, location['frame_id'], location['x'], location['y'])
 
     def _step(self, context, target, oid, index, step):
