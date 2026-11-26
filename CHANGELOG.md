@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.5.9] - 2026-11-26
+
+### Changed
+
+- Include port, elevated task, effective path and log diagnostics in kernel upgrade and startup errors.
+
 ## [0.5.8] - 2026-11-26
 
 ### Fixed

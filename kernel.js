@@ -200,9 +200,17 @@ export function createKernel(config, options = {}) {
     return outdated || blocked || { kind: 'absent' }
   }
 
+  function upgradeHelp() {
+    return `Inspect the port owner with Get-NetTCPConnection -LocalPort ${config.port} | Select-Object LocalAddress,LocalPort,OwningProcess and Get-Process -Id <OwningProcess>. `
+      + 'Inspect the elevated task with schtasks /Query /TN DshDesktopKernelAdmin /V /FO LIST. '
+      + 'After finishing active operations, stop the old kernel and correct or remove obsolete plugin config overrides through DSH settings. '
+      + `Effective paths: repoRoot=${paths.root}, pythonPath=${paths.python}, homeDir=${paths.home}, stateDir=${paths.state}. `
+      + `Check that homeDir and stateDir are writable; kernel log: ${errLog}.`
+  }
+
   function failure(message) {
     const tail = readTail(errLog)
-    return new Error(`Desktop ${message}; log: ${errLog}${tail ? `\n${tail}` : ''}`)
+    return new Error(`Desktop ${message}; ${upgradeHelp()}${tail ? `\n${tail}` : ''}`)
   }
 
   function reconcileStatePid(pid, token) {
@@ -254,7 +262,7 @@ export function createKernel(config, options = {}) {
     const version = kernelVersion() || 'unknown version'
     throw new Error(
       `Desktop kernel ${version} speaks protocol ${protocol ?? 'none'}, but this plugin requires ${REQUIRED_PROTOCOL} (${where}). `
-      + `Missing capabilities: ${missing.join(', ') || 'none'}. Finish or stop active operations, close the resident kernel, and retry with the installed plugin.`,
+      + `Missing capabilities: ${missing.join(', ') || 'none'}. Finish or stop active operations, close the resident kernel, and retry with the installed plugin. ${upgradeHelp()}`,
     )
   }
 
@@ -458,7 +466,7 @@ export function createKernel(config, options = {}) {
     }
     if (found.kind === 'foreign') {
       throw new Error(
-        `Port ${config.port} is already serving a Desktop bridge that rejects this token (${found.status ?? found.reason}); close that kernel or the Desktop app, then retry`,
+        `Port ${config.port} is already serving a Desktop bridge that rejects this token (${found.status ?? found.reason}); close that kernel or the Desktop app, then retry. ${upgradeHelp()}`,
       )
     }
     if (!config.autoStart) {

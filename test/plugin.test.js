@@ -536,6 +536,9 @@ test('a kernel speaking an older protocol is refused with an upgrade hint', asyn
       assert.match(error.message, /speaks protocol 0/)
       assert.match(error.message, /requires 2/)
       assert.match(error.message, /close the resident kernel/)
+      assert.match(error.message, /Get-NetTCPConnection -LocalPort 65012/)
+      assert.match(error.message, /DshDesktopKernelAdmin/)
+      assert.match(error.message, /stateDir=/)
       return true
     })
   } finally {
