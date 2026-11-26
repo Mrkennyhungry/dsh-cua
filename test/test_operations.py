@@ -91,6 +91,38 @@ class ClipboardActionTests(unittest.TestCase):
                 ActionDispatcher.validate({**base, 'steps': [step]})
 
 
+class FileActionTests(unittest.TestCase):
+    def test_file_lifecycle_and_workspace_escape(self):
+        with tempfile.TemporaryDirectory() as directory:
+            dispatcher = ActionDispatcher(SimpleNamespace(home=Path(directory)))
+            context = mock.Mock()
+            target = SimpleNamespace(kind='window')
+
+            def run(op, **fields):
+                step = {'action': 'file', 'op': op, **fields}
+                ActionDispatcher.validate({'target_id': 't', 'observation_id': 'o', 'steps': [step]})
+                return dispatcher._global_step(context, target, 0, step)
+
+            run('create', path='samples/example.txt', text='one')
+            self.assertEqual(run('read', path='samples/example.txt')['text'], 'one')
+            run('write', path='samples/example.txt', text='two\r\nthree')
+            self.assertEqual(run('read', path='samples/example.txt')['text'], 'two\r\nthree')
+            self.assertEqual(run('list', path='samples')['entries'][0]['name'], 'example.txt')
+            with self.assertRaises(RuntimeFault) as error:
+                run('read', path='../outside.txt')
+            self.assertEqual(error.exception.code, 'PATH_DENIED')
+            run('delete', path='samples/example.txt')
+            self.assertEqual(run('list', path='samples')['entries'], [])
+
+    def test_file_argument_validation(self):
+        base = {'target_id': 't', 'observation_id': 'o'}
+        for step in ({'action': 'file', 'op': 'read'},
+                     {'action': 'file', 'op': 'create', 'path': 'x'},
+                     {'action': 'file', 'op': 'read', 'path': 'x', 'text': 'extra'}):
+            with self.assertRaises(ValueError):
+                ActionDispatcher.validate({**base, 'steps': [step]})
+
+
 class JournalTests(unittest.TestCase):
     def test_restart_retains_completed_and_uncertain_steps_and_owner_identity(self):
         with tempfile.TemporaryDirectory() as directory:

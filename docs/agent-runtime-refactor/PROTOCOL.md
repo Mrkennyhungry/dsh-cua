@@ -19,6 +19,8 @@
 
 默认契约不引入额外规划模型。远程图片描述默认调用次数为零。宿主模型直接使用语义观察和真正送入模型的图片。
 
+文件步骤 `file` 支持 `create`、`write`、`read`、`list` 和 `delete`，路径限定于运行时 home 下的 `desktop_workspace`。文本使用 UTF-8，单次读写上限为 2000000 字节。结果包含在操作步骤的 `method` 中。
+
 ## 2. DSH 适配约束
 
 保留根目录 `AGENTS.md` 中的 Host、Client、打包和生命周期契约。

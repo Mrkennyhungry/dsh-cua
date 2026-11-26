@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.5.11] - 2026-11-26
+
+### Added
+
+- Add workspace-scoped file operations to the unified action tool.
+
 ## [0.5.10] - 2026-11-26
 
 ### Added

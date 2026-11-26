@@ -8,7 +8,7 @@ from .conditions import Conditions, TransientWatcher, validate_condition
 from .targets import RuntimeFault
 
 
-_ACTIONS = {'click', 'input', 'key', 'scroll', 'drag', 'select', 'check', 'hover', 'attach', 'close', 'clipboard'}
+_ACTIONS = {'click', 'input', 'key', 'scroll', 'drag', 'select', 'check', 'hover', 'attach', 'close', 'clipboard', 'file'}
 _KEY_ALIASES = {'control': 'ctrl', 'esc': 'escape', 'meta': 'win', 'arrowleft': 'left',
                 'arrowright': 'right', 'arrowup': 'up', 'arrowdown': 'down', 'return': 'enter'}
 
@@ -47,7 +47,7 @@ class ActionDispatcher:
                   'key': {'keys'}, 'scroll': {'target', 'direction', 'amount'},
                   'drag': {'from', 'to'}, 'select': {'target', 'values'},
                   'check': {'target', 'checked'}, 'hover': {'target'}, 'attach': {'target', 'files'}, 'close': set(),
-                  'clipboard': {'op', 'text', 'path'}}
+                  'clipboard': {'op', 'text', 'path'}, 'file': {'op', 'path', 'text'}}
         for step in steps:
             if not isinstance(step, dict) or step.get('action') not in _ACTIONS:
                 raise ValueError('Unsupported action')
@@ -77,6 +77,17 @@ class ActionDispatcher:
                     raise ValueError('clipboard.paste_file requires an existing absolute file path')
                 if set(step) != {'action', 'op'} | ({'text'} if op == 'set' else {'path'} if op == 'paste_file' else set()):
                     raise ValueError('clipboard fields must match the selected op')
+            if action == 'file':
+                op = step.get('op')
+                if op not in ('create', 'write', 'delete', 'list', 'read'):
+                    raise ValueError('file.op must be create, write, delete, list or read')
+                path = step.get('path', '')
+                if not isinstance(path, str) or len(path) > 4096 or (not path and op != 'list'):
+                    raise ValueError('file.path is required except for list')
+                if op in ('create', 'write') and (not isinstance(step.get('text'), str) or len(step['text'].encode('utf-8')) > 2000000):
+                    raise ValueError('file create/write requires text up to 2000000 UTF-8 bytes')
+                if op not in ('create', 'write') and 'text' in step:
+                    raise ValueError('file.text is only valid for create or write')
             list_key = {'key': 'keys', 'select': 'values', 'attach': 'files'}.get(action)
             if list_key:
                 values = step.get(list_key)
@@ -330,7 +341,7 @@ class ActionDispatcher:
 
     def _step(self, context, target, oid, index, step):
         action = step['action']
-        if action in ('key', 'close', 'clipboard'):
+        if action in ('key', 'close', 'clipboard', 'file'):
             return self._global_step(context, target, index, step)
         element = node = None
         try:
@@ -570,6 +581,38 @@ class ActionDispatcher:
             raise RuntimeFault('TARGET_OCCLUDED', 'Physical point is covered by another window')
 
     def _global_step(self, context, target, index, step):
+        if step['action'] == 'file':
+            root = (self.runtime.home / 'desktop_workspace').resolve()
+            path = (root / step.get('path', '')).resolve()
+            if not path.is_relative_to(root) or (path == root and step['op'] != 'list'):
+                raise RuntimeFault('PATH_DENIED', 'File path must be inside the desktop workspace')
+            context.dispatch(index)
+            op = step['op']
+            if op == 'list':
+                if not path.exists() and path == root:
+                    root.mkdir(parents=True, exist_ok=True)
+                entries = [{'name': item.name, 'directory': item.is_dir()} for item in sorted(path.iterdir())]
+                return {'action': 'file', 'op': op, 'path': str(path), 'entries': entries}
+            if op == 'create':
+                path.parent.mkdir(parents=True, exist_ok=True)
+                with path.open('x', encoding='utf-8', newline='') as stream:
+                    stream.write(step['text'])
+            elif op == 'write':
+                with path.open('r+', encoding='utf-8', newline='') as stream:
+                    stream.seek(0)
+                    stream.write(step['text'])
+                    stream.truncate()
+            elif op == 'delete':
+                path.unlink()
+            else:
+                if path.stat().st_size > 2000000:
+                    raise RuntimeFault('FILE_TOO_LARGE', 'File exceeds 2000000 bytes')
+                with path.open('r', encoding='utf-8', newline='') as stream:
+                    text = stream.read(2000001)
+                if len(text.encode('utf-8')) > 2000000:
+                    raise RuntimeFault('FILE_TOO_LARGE', 'File exceeds 2000000 bytes')
+                return {'action': 'file', 'op': op, 'path': str(path), 'text': text}
+            return {'action': 'file', 'op': op, 'path': str(path)}
         if step['action'] == 'clipboard':
             import struct
             import win32clipboard
