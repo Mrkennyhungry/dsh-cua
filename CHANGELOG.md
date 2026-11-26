@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.5.12] - 2026-11-26
+
+### Added
+
+- Add UI Automation invoke, value and expand pattern actions.
+
 ## [0.5.11] - 2026-11-26
 
 ### Added

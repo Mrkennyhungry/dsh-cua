@@ -10,6 +10,7 @@ DSH 负责规划与模型配置，插件提供六个统一工具。通过 DSH �
 | doraemon_health、旧任务 status/stop | doraemon_status、doraemon_stop，长操作使用 operation_id |
 | bind、foreground、apps/find、launch、web/open | doraemon_open，返回 target_id 与初始观察 |
 | analyze、capture、UIA、elements、web/read、locate | doraemon_observe，返回 observation_id、ref 和可选图片 |
+| invoke | doraemon_act 的 invoke、set_value、expand 步骤使用 UIA ref；select 和 check 对应选择和切换 |
 | files | doraemon_act 的 file 步骤支持 create、write、read、list 和 delete，路径限定在 homeDir\\desktop_workspace，结果位于操作步骤的 method |
 | clipboard | doraemon_act 的 clipboard 步骤支持 get、set 和 paste_file，结果位于操作步骤的 method |
 | click、type、key、scroll、select、attach、web 动作 | doraemon_act，引用最近观察，返回动作后读回 |

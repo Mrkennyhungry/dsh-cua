@@ -52,6 +52,24 @@ class NativeInputTests(unittest.TestCase):
         ])
 
 
+class SemanticActionTests(unittest.TestCase):
+    def test_uia_patterns_dispatch(self):
+        wrapper = mock.Mock()
+        wrapper.is_enabled.return_value = True
+        dispatcher = ActionDispatcher(SimpleNamespace())
+        dispatcher._native_guard = mock.Mock()
+        context = mock.Mock()
+        target = SimpleNamespace(kind='window')
+        element = SimpleNamespace(source='uia')
+        for action, fields in [('invoke', {}), ('set_value', {'value': 'hello'}), ('expand', {})]:
+            step = {'action': action, 'target': {'ref': 'e'}, **fields}
+            ActionDispatcher.validate({'target_id': 't', 'observation_id': 'o', 'steps': [step]})
+            self.assertEqual(dispatcher._native(context, target, 'o', 0, step, element, {'wrapper': wrapper}), 'uia_' + action)
+        wrapper.iface_invoke.Invoke.assert_called_once_with()
+        wrapper.iface_value.SetValue.assert_called_once_with('hello')
+        wrapper.iface_expand_collapse.Expand.assert_called_once_with()
+
+
 class ClipboardActionTests(unittest.TestCase):
     def test_clipboard_set_get_and_file_paste(self):
         clipboard = mock.Mock()

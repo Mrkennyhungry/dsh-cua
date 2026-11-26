@@ -21,6 +21,8 @@
 
 文件步骤 `file` 支持 `create`、`write`、`read`、`list` 和 `delete`，路径限定于运行时 home 下的 `desktop_workspace`。文本使用 UTF-8，单次读写上限为 2000000 字节。结果包含在操作步骤的 `method` 中。
 
+UIA 元素可通过 `invoke`、`set_value` 和 `expand` 步骤调用对应模式，目标必须使用本次观察的 UIA ref。`set_value` 使用 UIA ValuePattern，常规文本输入可使用 `input`。
+
 ## 2. DSH 适配约束
 
 保留根目录 `AGENTS.md` 中的 Host、Client、打包和生命周期契约。

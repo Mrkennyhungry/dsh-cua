@@ -8,7 +8,7 @@ from .conditions import Conditions, TransientWatcher, validate_condition
 from .targets import RuntimeFault
 
 
-_ACTIONS = {'click', 'input', 'key', 'scroll', 'drag', 'select', 'check', 'hover', 'attach', 'close', 'clipboard', 'file'}
+_ACTIONS = {'click', 'input', 'key', 'scroll', 'drag', 'select', 'check', 'hover', 'attach', 'close', 'clipboard', 'file', 'invoke', 'set_value', 'expand'}
 _KEY_ALIASES = {'control': 'ctrl', 'esc': 'escape', 'meta': 'win', 'arrowleft': 'left',
                 'arrowright': 'right', 'arrowup': 'up', 'arrowdown': 'down', 'return': 'enter'}
 
@@ -47,7 +47,8 @@ class ActionDispatcher:
                   'key': {'keys'}, 'scroll': {'target', 'direction', 'amount'},
                   'drag': {'from', 'to'}, 'select': {'target', 'values'},
                   'check': {'target', 'checked'}, 'hover': {'target'}, 'attach': {'target', 'files'}, 'close': set(),
-                  'clipboard': {'op', 'text', 'path'}, 'file': {'op', 'path', 'text'}}
+                  'clipboard': {'op', 'text', 'path'}, 'file': {'op', 'path', 'text'},
+                  'invoke': {'target'}, 'set_value': {'target', 'value'}, 'expand': {'target'}}
         for step in steps:
             if not isinstance(step, dict) or step.get('action') not in _ACTIONS:
                 raise ValueError('Unsupported action')
@@ -67,6 +68,10 @@ class ActionDispatcher:
                 raise ValueError('check requires a boolean checked value')
             if action == 'scroll' and (step.get('direction') not in ('up', 'down', 'left', 'right') or not _integer(step.get('amount', 3), 1, 100)):
                 raise ValueError('scroll requires direction and amount 1..100')
+            if action in ('invoke', 'set_value', 'expand') and set(step.get('target', {})) != {'ref'}:
+                raise ValueError(action + ' requires a semantic ref target')
+            if action == 'set_value' and (not isinstance(step.get('value'), str) or len(step['value']) > 12000):
+                raise ValueError('set_value.value must be a string up to 12000 characters')
             if action == 'clipboard':
                 op = step.get('op')
                 if op not in ('get', 'set', 'paste_file'):
@@ -355,6 +360,8 @@ class ActionDispatcher:
 
     def _dom(self, context, target, oid, index, step, node):
         action = step['action']
+        if action in ('invoke', 'set_value', 'expand'):
+            raise RuntimeFault('UNSUPPORTED_ACTION', 'This action requires a UIA reference')
         blocked = node.evaluate('''el => {
           const dialogs = Array.from(el.ownerDocument.querySelectorAll('dialog[open],[aria-modal=true]'))
             .filter(dialog => dialog.getClientRects().length);
@@ -483,6 +490,20 @@ class ActionDispatcher:
             if not wrapper.is_enabled():
                 raise RuntimeFault('ELEMENT_DISABLED', 'Observed control is disabled')
             self._native_guard(context, target)
+            if action in ('invoke', 'set_value', 'expand'):
+                try:
+                    pattern = {'invoke': 'iface_invoke', 'set_value': 'iface_value', 'expand': 'iface_expand_collapse'}[action]
+                    interface = getattr(wrapper, pattern)
+                except Exception as error:
+                    raise RuntimeFault('UNSUPPORTED_ACTION', f'UIA {action} pattern is unavailable: {error}') from error
+                context.dispatch(index)
+                if action == 'invoke':
+                    interface.Invoke()
+                elif action == 'set_value':
+                    interface.SetValue(step['value'])
+                else:
+                    interface.Expand()
+                return 'uia_' + action
             if action == 'check':
                 if bool(wrapper.get_toggle_state()) == step['checked']:
                     return 'already_satisfied'

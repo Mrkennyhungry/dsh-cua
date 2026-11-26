@@ -111,9 +111,10 @@ export function registerRuntimeTools(ctx, bridge, register) {
       parameters: {
         target_id: { type: 'string', required: true }, observation_id: { type: 'string', required: true },
         steps: { type: 'array', required: true, description: 'One to eight ordered actions. Input requires mode and text.', items: { type: 'object', additionalProperties: false, properties: {
-          action: { type: 'string', required: true, enum: ['click', 'input', 'key', 'scroll', 'drag', 'select', 'check', 'hover', 'attach', 'close', 'clipboard', 'file'] },
-          target: { ...point, description: 'Required for click, input, select, check, hover and attach. Use {ref} from this observation, or {frame_id,x,y}. Key and close omit target.' },
+          action: { type: 'string', required: true, enum: ['click', 'input', 'key', 'scroll', 'drag', 'select', 'check', 'hover', 'attach', 'close', 'clipboard', 'file', 'invoke', 'set_value', 'expand'] },
+          target: { ...point, description: 'Required for click, input, select, check, hover, attach, invoke, set_value and expand. The last three require a UIA ref. Use {ref} from this observation, or {frame_id,x,y}. Key and close omit target.' },
           from: point, to: point,
+          value: { type: 'string', description: 'Value for the UIA set_value action.' },
           text: { type: 'string', description: 'Text for input, clipboard set or file create/write. Input accepts at most 12000 characters.' },
           mode: { type: 'string', enum: ['replace', 'insert'], description: 'Required for input. replace clears the existing value before typing; insert types at the current selection.' },
           button: { type: 'string', enum: ['left', 'right'] }, count: { type: 'integer' },
