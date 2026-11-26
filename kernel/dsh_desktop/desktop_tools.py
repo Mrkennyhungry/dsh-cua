@@ -720,53 +720,127 @@ def _safe_window_title(hwnd: int) -> str:
     return buffer.value if result else ""
 
 
-def _list_visible_windows(*, include_untitled: bool = False) -> list[dict[str, Any]]:
+def _process_details(pid: int, *, ancestry=False) -> dict[str, Any]:
+    details = {"exe": "", "process_created": 0.0, "process_key": None, "process_ancestors": []}
+    try:
+        process = psutil.Process(pid)
+        details.update(exe=process.name(), process_created=process.create_time())
+        details['process_key'] = f"{pid}:{int(details['process_created'] * 1000)}"
+        # Creation times prevent a recycled PID from establishing kinship.
+        for _ in range(8 if ancestry else 0):
+            process = process.parent()
+            if process is None:
+                break
+            details['process_ancestors'].append(f"{process.pid}:{int(process.create_time() * 1000)}")
+    except (psutil.Error, OSError):
+        pass
+    return details
+
+
+def _visible_child_text(hwnd: int) -> str:
+    text = []
+    started = time.monotonic()
+    visited = 0
+    def collect(child, _):
+        nonlocal visited
+        visited += 1
+        if visited > 16 or time.monotonic() - started > 0.1:
+            return False
+        if win32gui.IsWindowVisible(child):
+            value = _safe_window_title(child).strip()
+            if value:
+                text.append(value)
+                return False
+        return True
+    win32gui.EnumChildWindows(hwnd, collect, None)
+    return text[0] if text else ''
+
+
+def _describe_window(hwnd: int, *, include_untitled=True, processes=None) -> dict[str, Any] | None:
     from .decorations import is_decoration_window
-    windows: list[dict[str, Any]] = []
-    def _cb(hwnd: int, _param: Any) -> None:
-        if is_decoration_window(hwnd): return
-        # 最小化窗口不能跳过：实测用户常用应用全是最小化状态
-        # （Edge/企业微信/终端都是 ico=1），一旦过滤掉，内核就"看不见"它们，
-        # 清理和预检都建立在错误清单上。改为照实报告 + minimized 标注。
-        if not win32gui.IsWindowVisible(hwnd):
-            return
-        # 不能因为"有 owner"就跳过：记事本的「是否保留未保存的更改?」、
-        # 各种保存/确认对话框都是 owned popup（class=#32770），
-        # 一律过滤会让内核"看不见"这类阻塞窗口 —— 而它们恰恰会挡住后续所有操作
-        # （实测：这个弹窗让 f_create_save 连续失败，且 /windows 完全看不到它）。
-        # 改为照实报告 + is_popup / owner_hwnd 标注，由调用方决定是否处理。
-        owner_hwnd = win32gui.GetWindow(hwnd, 4)
-        title = _safe_window_title(hwnd)
-        if not title and not include_untitled:
-            return
-        _, pid = win32process.GetWindowThreadProcessId(hwnd)
-        exe = ""
-        process_created = 0.0
+    if is_decoration_window(hwnd) or not win32gui.IsWindowVisible(hwnd):
+        return None
+    window_text = _safe_window_title(hwnd)
+    if not window_text and not include_untitled:
+        return None
+    processes = {} if processes is None else processes
+    def process_info(window):
+        _, pid = win32process.GetWindowThreadProcessId(window)
+        if pid not in processes:
+            processes[pid] = _process_details(pid)
+        return pid, processes[pid]
+    pid, details = process_info(hwnd)
+    class_name = win32gui.GetClassName(hwnd)
+    title, title_source = window_text, 'window_text'
+    if not title:
+        title = _visible_child_text(hwnd)
+        title_source = 'child_text' if title else 'class_name'
+        if not title:
+            title = ' '.join(part for part in (class_name, details['exe']) if part)
+    owner_hwnd = win32gui.GetWindow(hwnd, 4)
+    owner_keys, owner_process_keys = [], []
+    current, seen = owner_hwnd, {hwnd}
+    for _ in range(8):
+        if not current or current in seen:
+            break
+        seen.add(current)
         try:
-            process = psutil.Process(pid)
-            exe = process.name()
-            process_created = process.create_time()
+            owner_pid, owner_details = process_info(current)
         except Exception:
+            break
+        if owner_details['process_key']:
+            owner_keys.append(f"{current}:{owner_pid}:{int(owner_details['process_created'] * 1000)}")
+            owner_process_keys.append(owner_details['process_key'])
+        try:
+            current = win32gui.GetWindow(current, 4)
+        except Exception:
+            break
+    return {"hwnd": hwnd, "window_key": f"{hwnd}:{pid}:{int(details['process_created'] * 1000)}",
+            "title": title[:120], "window_text": window_text[:120], "title_source": title_source,
+            "class_name": class_name, "process": details['exe'], "pid": pid, **details,
+            "owner_hwnd": owner_hwnd, "owner_keys": owner_keys, "owner_process_keys": owner_process_keys,
+            "rect": list(win32gui.GetWindowRect(hwnd))}
+
+
+def _list_visible_windows(*, include_untitled: bool = True) -> list[dict[str, Any]]:
+    windows: list[dict[str, Any]] = []
+    processes = {}
+    def collect(hwnd, _):
+        try:
+            info = _describe_window(hwnd, include_untitled=include_untitled, processes=processes)
+            if info is not None:
+                windows.append(info)
+        except Exception:
+            # Windows can disappear while EnumWindows is visiting them.
             pass
-        left, top, right, bottom = win32gui.GetWindowRect(hwnd)
-        windows.append({
-            "hwnd": hwnd,
-            "window_key": f"{hwnd}:{pid}:{int(process_created * 1000)}",
-            "title": title[:120],
-            "exe": exe,
-            "pid": pid,
-            "process_created": process_created,
-            "rect": [left, top, right, bottom],
-        })
-    win32gui.EnumWindows(_cb, None)
+    win32gui.EnumWindows(collect, None)
     return windows
 
 
 def _window_info(hwnd: int) -> dict[str, Any] | None:
-    for info in _list_visible_windows():
-        if info["hwnd"] == hwnd:
-            return info
-    return None
+    try:
+        return _describe_window(hwnd)
+    except Exception:
+        return None
+
+
+def window_identity_snapshot() -> dict[int, dict[str, Any]]:
+    """Keep action-boundary scans independent of title and child-control reads."""
+    from .decorations import is_decoration_window
+    rows, created = {}, {}
+    def collect(hwnd, _):
+        try:
+            if not win32gui.IsWindowVisible(hwnd) or is_decoration_window(hwnd):
+                return
+            _, pid = win32process.GetWindowThreadProcessId(hwnd)
+            if pid not in created:
+                created[pid] = psutil.Process(pid).create_time()
+            rows[hwnd] = {'hwnd': hwnd, 'pid': pid, 'owner_hwnd': win32gui.GetWindow(hwnd, 4),
+                          'window_key': f'{hwnd}:{pid}:{int(created[pid] * 1000)}'}
+        except Exception:
+            pass
+    win32gui.EnumWindows(collect, None)
+    return rows
 
 
 def window_snapshot() -> dict[int, dict[str, Any]]:
@@ -3621,7 +3695,7 @@ def desktop_launch_app(shortcut_path: str, *, scoped: bool = False, scope_owner:
         if len(candidates) > 1:
             window_pids = {win.get("pid") for win, _pidset in candidates.values()}
             titled = [(win, pidset) for win, pidset in candidates.values()
-                      if (win.get("title") or "").strip()]
+                      if (win.get("window_text", win.get("title")) or "").strip()]
             if len(window_pids) == 1 and len(titled) == 1:
                 candidates = {titled[0][0].get("window_key"): titled[0]}
         if len(candidates) == 1:

@@ -24,6 +24,7 @@ import win32gui
 def child_window(unique, event_log):
     replacement_hwnd = None
     popup_hwnd = None
+    related_child = None
     def popup_procedure(hwnd, message, wparam, lparam):
         nonlocal popup_hwnd
         if message == win32con.WM_COMMAND and (wparam & 65535) == 110:
@@ -35,7 +36,12 @@ def child_window(unique, event_log):
         return win32gui.DefWindowProc(hwnd, message, wparam, lparam)
 
     def procedure(hwnd, message, wparam, lparam):
-        nonlocal replacement_hwnd, popup_hwnd
+        nonlocal replacement_hwnd, popup_hwnd, related_child
+        if message == win32con.WM_COMMAND and (wparam & 65535) == 111:
+            related_child = subprocess.Popen([sys.executable, __file__, '--related-child', unique],
+                                             creationflags=subprocess.CREATE_NO_WINDOW)
+            win32gui.DestroyWindow(hwnd)
+            return 0
         if message == win32con.WM_COMMAND and (wparam & 65535) == 109:
             if popup_hwnd is not None:
                 win32gui.DestroyWindow(popup_hwnd)
@@ -54,6 +60,8 @@ def child_window(unique, event_log):
                 120, 120, 620, 350, 0, 0, window.hInstance, None)
             win32gui.CreateWindow('Static', 'Replacement window text', win32con.WS_CHILD | win32con.WS_VISIBLE,
                 20, 20, 400, 32, replacement_hwnd, 108, window.hInstance, None)
+            win32gui.CreateWindow('Button', 'Open child window', win32con.WS_CHILD | win32con.WS_VISIBLE,
+                20, 70, 200, 32, replacement_hwnd, 111, window.hInstance, None)
             win32gui.ShowWindow(replacement_hwnd, win32con.SW_SHOWNORMAL)
             win32gui.DestroyWindow(hwnd)
             return 0
@@ -77,7 +85,7 @@ def child_window(unique, event_log):
             win32gui.DestroyWindow(hwnd)
             return 0
         if message == win32con.WM_DESTROY:
-            if replacement_hwnd is None or hwnd == replacement_hwnd:
+            if related_child is None and (replacement_hwnd is None or hwnd == replacement_hwnd):
                 win32gui.PostQuitMessage(0)
             return 0
         return win32gui.DefWindowProc(hwnd, message, wparam, lparam)
@@ -114,6 +122,29 @@ def child_window(unique, event_log):
     win32gui.ShowWindow(hwnd, win32con.SW_SHOWNORMAL)
     win32gui.PumpMessages()
 
+
+def related_child_window(unique):
+    def procedure(hwnd, message, wparam, lparam):
+        if message == win32con.WM_DESTROY:
+            win32gui.PostQuitMessage(0)
+            return 0
+        return win32gui.DefWindowProc(hwnd, message, wparam, lparam)
+    window = win32gui.WNDCLASS()
+    window.hInstance = win32api.GetModuleHandle(None)
+    window.lpszClassName = 'P7Related' + unique
+    window.lpfnWndProc = procedure
+    name = win32gui.RegisterClass(window)
+    hwnd = win32gui.CreateWindow(name, '', win32con.WS_OVERLAPPEDWINDOW,
+                                 150, 150, 620, 350, 0, 0, window.hInstance, None)
+    win32gui.CreateWindow('Static', '日志与信任管理', win32con.WS_CHILD | win32con.WS_VISIBLE,
+                          20, 20, 400, 32, hwnd, 112, window.hInstance, None)
+    win32gui.ShowWindow(hwnd, win32con.SW_SHOWNORMAL)
+    win32gui.PumpMessages()
+
+
+if len(sys.argv) > 1 and sys.argv[1] == '--related-child':
+    related_child_window(sys.argv[2])
+    sys.exit(0)
 
 if len(sys.argv) > 1 and sys.argv[1] == '--child':
     child_window(sys.argv[2], sys.argv[3])
@@ -265,6 +296,17 @@ try:
     report['native_transient'] = toast['expectation']
     menu, _ = act(native, observe(native), [{'action': 'click', 'target': ref(observe(native), 'Show owned menu')}],
                   expect={'kind': 'text', 'text': 'Owned menu item', 'transient': True, 'timeout_ms': 1000})
+    directory = runtime.observations.observe('a')['targets']
+    menu_window = next(row for row in directory if row.get('window_text') == '' and row.get('title') == 'Owned menu item')
+    assert menu_window['title_source'] == 'child_text' and menu_window['owner_hwnd'] == hwnd, menu_window
+    assert any(row['hwnd'] == menu_window['hwnd'] for row in menu['new_window_candidates']), menu
+    titled_directory = runtime.observations.observe('a', include_untitled=False)['targets']
+    assert all(row.get('hwnd') != menu_window['hwnd'] for row in titled_directory), titled_directory
+    opened_menu = runtime.open('a', 'open-untitled-hwnd', {'hwnd': menu_window['hwnd']})
+    while opened_menu['status'] in ('accepted', 'running'):
+        opened_menu = runtime.operations.status('a', opened_menu['operation_id'], follow_ms=1000)
+    assert opened_menu['success'] and opened_menu['target_id'] == menu_window['target_id'], opened_menu
+    report['untitled_directory_and_hwnd_open'] = menu_window
     candidate = next(item for item in menu['popup_candidates'] if ''.join(item['raw_text'].split()) == 'Ownedmenuitem')
     assert menu['click_region_frames']['after']['method'] == 'screen_region', menu
     assert candidate['bounds']['frame_id'] == menu['click_region_frames']['after']['frame_id'], menu
@@ -293,6 +335,9 @@ try:
                     {'action': 'input', 'target': ref(snapshot, role='textbox'), 'text': owner, 'mode': 'replace'},
                     {'action': 'click', 'target': ref(snapshot, 'Save fixture')}]}))
         concurrent = [request.result() for request in requests]
+        for index, owner in enumerate(('a', 'b')):
+            while concurrent[index]['status'] in ('accepted', 'running', 'cancelling'):
+                concurrent[index] = runtime.operations.status(owner, concurrent[index]['operation_id'], follow_ms=1000)
         assert all(result['status'] == 'completed' for result in concurrent), concurrent
     logs = [json.loads(line)['saved'] for line in (home / 'native-events.jsonl').read_text(encoding='utf-8').splitlines()]
     assert sorted(logs[-2:]) == ['a', 'b'], logs
@@ -437,7 +482,7 @@ try:
     native_snapshot = observe(native)
     waiting = runtime.act('a', 'wait-releases-input', {'target_id': native.target_id,
         'observation_id': native_snapshot['observation_id'], 'steps': [{'action': 'key', 'keys': ['TAB']}],
-        'expect': {'kind': 'text', 'text': 'never-present-fixture', 'timeout_ms': 2000}}, budget_ms=0)
+        'expect': {'kind': 'text', 'text': 'never-present-fixture', 'timeout_ms': 10000}}, budget_ms=0)
     deadline = time.monotonic() + 2
     while runtime.operations.status('a', waiting['operation_id'])['expectation']['status'] != 'pending':
         assert time.monotonic() < deadline
@@ -517,6 +562,19 @@ try:
         'observation_id': old_observation['observation_id'], 'steps': [{'action': 'key', 'keys': ['TAB']}]})
     assert stale_target['status'] == 'failed' and stale_target['error']['code'] == 'TARGET_STALE', stale_target
     report['native_target_rebind_and_stale_guard'] = 1
+    replacement = runtime.resolve_target('a', rebound['target_id'])
+    child_rebound, _ = act(replacement, rebound['observation'], [
+        {'action': 'click', 'target': ref(rebound['observation'], 'Open child window')}])
+    assert child_rebound.get('closed') and child_rebound.get('rebound'), child_rebound
+    candidate = child_rebound['new_window_candidates'][0]
+    assert candidate['relationship'] == 'child_process', child_rebound
+    assert candidate['pid'] != replacement.metadata['pid'], child_rebound
+    assert candidate['title'] == '日志与信任管理' and candidate['title_source'] == 'child_text', candidate
+    assert '日志与信任管理' in child_rebound['observation']['text'], child_rebound
+    stale = runtime.act('a', 'cross-process-stale', {'target_id': child_rebound['target_id'],
+        'observation_id': rebound['observation']['observation_id'], 'steps': [{'action': 'key', 'keys': ['TAB']}]})
+    assert stale['error']['code'] == 'TARGET_STALE', stale
+    report['child_process_untitled_rebind'] = candidate
     report['parser_initializations'] = runtime.parser_initializations
     report['elapsed_ms'] = round((time.monotonic() - started) * 1000, 3)
 except BaseException:
@@ -525,6 +583,14 @@ except BaseException:
     (home / 'partial-report.json').write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')
     raise
 finally:
+    import psutil
+    try:
+        descendants = psutil.Process(child.pid).children(recursive=True)
+    except psutil.Error:
+        descendants = []
+    related_hwnd = win32gui.FindWindow('P7Related' + unique, None)
+    if related_hwnd:
+        win32gui.PostMessage(related_hwnd, win32con.WM_CLOSE, 0, 0)
     prompt = win32gui.FindWindow(None, 'P4 save prompt ' + unique)
     if prompt:
         win32gui.PostMessage(prompt, win32con.WM_COMMAND, win32con.IDCANCEL, 0)
@@ -536,6 +602,14 @@ finally:
     except subprocess.TimeoutExpired:
         child.terminate()
         child.wait(timeout=5)
+    for descendant in descendants:
+        try:
+            descendant.wait(timeout=2)
+        except psutil.TimeoutExpired:
+            descendant.terminate()
+            descendant.wait(timeout=5)
+        except psutil.NoSuchProcess:
+            pass
     runtime.shutdown()
     server.shutdown()
     server.server_close()

@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.5.15] - 2026-11-26
+
+### Added
+
+- Discover visible untitled windows by default, with raw window text, readable fallback titles, title provenance, HWND, PID and process name. Add directory include_untitled filtering and explicit open by HWND.
+- Return new_window_candidates after native clicks and invocations, with process-instance and owner-chain relationship evidence.
+
+### Fixed
+
+- Follow unique replacement windows across descendant processes and owner chains while retaining stale-observation rejection and dispatched action results.
+- Preserve raw-title launch disambiguation when helper windows receive synthesized display titles.
+
 ## [0.5.14] - 2026-11-26
 
 ### Added

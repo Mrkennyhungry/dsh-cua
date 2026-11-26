@@ -36,6 +36,8 @@ test('runtime adapter registers six tools and forwards operation identity and ca
   const signal = new AbortController().signal
   const exec = { callId: 'call-1', signal, agent: { session: { id: 'session-1' } } }
   assert.match(tools.get('doraemon_open').parameters.properties.args.description, /absolute path/)
+  assert.equal(tools.get('doraemon_open').parameters.properties.hwnd.type, 'integer')
+  assert.equal(tools.get('doraemon_observe').parameters.properties.include_untitled.type, 'boolean')
   assert.match(tools.get('doraemon_observe').parameters.properties.query.description, /Literal, case-insensitive substring/)
   assert.match(tools.get('doraemon_act').parameters.properties.steps.items.properties.keys.description, /\["CTRL", "S"\]/)
   assert.equal(tools.get('doraemon_status').parameters.properties.request_key.type, 'string')

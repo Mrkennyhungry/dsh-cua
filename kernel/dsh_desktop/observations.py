@@ -439,8 +439,12 @@ class ObservationService:
 
     @staticmethod
     def validate_arguments(arguments):
-        if not isinstance(arguments, dict) or set(arguments) - {'target_id', 'query', 'region', 'cursor', 'image', 'source'}:
+        if not isinstance(arguments, dict) or set(arguments) - {'target_id', 'query', 'region', 'cursor', 'image', 'source', 'include_untitled'}:
             raise ValueError('Unknown observe arguments')
+        if 'include_untitled' in arguments and not isinstance(arguments['include_untitled'], bool):
+            raise ValueError('include_untitled must be boolean')
+        if 'include_untitled' in arguments and (arguments.get('target_id') or arguments.get('cursor')):
+            raise ValueError('include_untitled applies to the target directory only')
         if arguments.get('source', 'auto') not in ('auto', 'ocr', 'image', 'combined'):
             raise ValueError('source must be auto, ocr, image or combined')
         if arguments.get('source', 'auto') != 'auto' and not arguments.get('target_id'):
@@ -467,9 +471,10 @@ class ObservationService:
         if arguments.get('cursor') and any(arguments.get(key) is not None for key in ('query', 'region', 'image', 'source')):
             raise ValueError('Cursor cannot be combined with query, region, image or source')
 
-    def observe(self, owner, target_id=None, *, query=None, region=None, cursor=None, image=None, source='auto'):
+    def observe(self, owner, target_id=None, *, query=None, region=None, cursor=None, image=None, source='auto', include_untitled=None):
         self.validate_arguments({key: value for key, value in dict(target_id=target_id, query=query, region=region,
-                                                                  cursor=cursor, image=image, source=source).items()
+                                                                  cursor=cursor, image=image, source=source,
+                                                                  include_untitled=include_untitled).items()
                                  if value is not None and (key != 'source' or value != 'auto')})
         if cursor:
             if query is not None or region is not None or image is not None:
@@ -486,8 +491,9 @@ class ObservationService:
                 raise ValueError('Cursor is outside the saved observation')
             return self._page(observation, element_offset, text_offset, include_image=False)
         if target_id is None:
-            targets = [{key: row[key] for key in ('target_id', 'kind', 'title', 'url', 'active', 'revision', 'tab_id', 'frame_name') if key in row}
-                       for row in self.runtime.target_directory(owner)]
+            targets = [{key: row[key] for key in ('target_id', 'kind', 'title', 'url', 'active', 'revision', 'tab_id', 'frame_name',
+                                                 'hwnd', 'pid', 'process', 'window_text', 'title_source', 'class_name', 'owner_hwnd') if key in row}
+                       for row in self.runtime.target_directory(owner, include_untitled=include_untitled is not False)]
             desktop_id = next(row['target_id'] for row in targets if row['kind'] == 'desktop')
             result = {'success': True, 'targets': targets, 'desktop_target_id': desktop_id}
             if image:

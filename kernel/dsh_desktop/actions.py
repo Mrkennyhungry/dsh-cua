@@ -159,6 +159,7 @@ class ActionDispatcher:
                 before_observation = None
                 before_local = None
                 verification_error = None
+                window_keys = None
                 try:
                     expect = arguments.get('expect')
                     watch_step = (expect and expect.get('transient') and
@@ -217,6 +218,12 @@ class ActionDispatcher:
                                 before_local = runtime.observations.capture_frame(owner, target_id, screen_point=click_point)
                             except Exception as error:
                                 result['screen_region_warning'] = str(error)
+                        if target.kind == 'window' and step['action'] in ('click', 'invoke'):
+                            try:
+                                from .desktop_tools import window_identity_snapshot
+                                window_keys = {row['window_key'] for row in window_identity_snapshot().values()}
+                            except Exception as error:
+                                result['window_discovery_warning'] = str(error)
                         method = self._step(context, target, oid, index, step)
                         context.completed(index, method)
                         result['action'] = {'status': 'dispatched', 'step': index, 'method': method}
@@ -244,6 +251,26 @@ class ActionDispatcher:
                             except Exception as error:
                                 result['post_click_frame_warning'] = str(error)
                         time.sleep(0.03)
+                        if window_keys is not None:
+                            try:
+                                # A launcher can create a child-process HWND after its
+                                # menu disappears. Poll briefly without replaying input.
+                                candidates = []
+                                import win32gui
+                                deadline = time.monotonic() + (0.5 if win32gui.IsWindow(target.handle) else 3.0)
+                                while True:
+                                    context.check()
+                                    candidates = runtime.new_window_candidates(owner, target, window_keys)
+                                    if candidates or time.monotonic() >= deadline:
+                                        break
+                                    context.cancelled.wait(0.05)
+                                result['new_window_candidates'] = candidates
+                                if candidates:
+                                    result['next_action'] = 'Inspect new_window_candidates. Open the intended target_id or hwnd and obtain fresh observation refs before continuing.'
+                            except Cancelled:
+                                raise
+                            except Exception as error:
+                                result['window_discovery_warning'] = str(error)
                         try:
                             current = self._boundary(owner, target_id)
                         except RuntimeFault as error:
@@ -253,12 +280,16 @@ class ActionDispatcher:
                         if step['action'] == 'close' and current != ('closed',):
                             current = ('close_requested',)
                             result['close_pending'] = True
+                        if result.get('new_window_candidates'):
+                            current = ('new_windows', current, tuple(row['target_id'] for row in result['new_window_candidates']))
                         last = index == len(arguments['steps']) - 1
                         if last or current != previous:
                             if step['action'] == 'window' and step['op'] in ('unbind', 'cleanup'):
                                 result.update(binding_released=True)
                             else:
-                                result.update(self._readback(owner, target_id, baseline, before_observation=before_observation, action=step.get('action'), target=target))
+                                result.update(self._readback(owner, target_id, baseline, before_observation=before_observation,
+                                                             action=step.get('action'), target=target,
+                                                             candidates=result.get('new_window_candidates')))
                     expect = arguments.get('expect')
                     if expect and index == expect.get('after_step', len(arguments['steps']) - 1):
                         # Keep target order, release physical input while waiting.
@@ -403,7 +434,7 @@ class ActionDispatcher:
             result['next_action'] = 'Inspect post_click_frame and the observed control state before deciding whether to repeat the action.'
         return result
 
-    def _readback(self, owner, target_id, baseline, before_observation=None, action=None, target=None):
+    def _readback(self, owner, target_id, baseline, before_observation=None, action=None, target=None, candidates=None):
         try:
             # Request image to ensure frames and bounds are populated in readback observation
             observed = self.runtime.observations.observe(owner, target_id, image=True)
@@ -447,7 +478,7 @@ class ActionDispatcher:
             if error.code == 'TARGET_CLOSED':
                 if target is not None and target.kind == 'window' and action != 'close':
                     try:
-                        replacement = self.runtime.rebind_window(owner, target)
+                        replacement = self.runtime.rebind_window(owner, target, candidates=candidates)
                         if replacement is not None:
                             observed = self.runtime.observations.observe(owner, replacement.target_id, image=True)
                             observed['observation']['rebound_from'] = target_id
@@ -455,7 +486,8 @@ class ActionDispatcher:
                                     'observation': observed['observation'], 'observation_changed': True}
                     except Exception:
                         pass
-                return {'closed': True, 'observation_changed': True}
+                return {'closed': True, 'observation_changed': True,
+                        'next_action': 'Inspect new_window_candidates and refresh the target directory for delayed windows. Open the intended target and obtain fresh refs before continuing.'}
             return {'readback_warning': str(error), 'observation_changed': None}
         except Exception as error:
             return {'readback_warning': str(error), 'observation_changed': None}
@@ -519,9 +551,9 @@ class ActionDispatcher:
                     tuple(id(page) for page in page.context.pages), dialogs)
         if target.kind == 'window':
             import win32gui
-            from .desktop_tools import _list_visible_windows
-            owned = tuple(sorted(row['hwnd'] for row in _list_visible_windows()
-                                 if win32gui.GetWindow(row['hwnd'], 4) == target.handle or
+            from .desktop_tools import window_identity_snapshot
+            owned = tuple(sorted(row['hwnd'] for row in window_identity_snapshot().values()
+                                 if row['owner_hwnd'] == target.handle or
                                  row.get('pid') == target.metadata.get('pid') and row['hwnd'] != target.handle))
             return target.identity, owned, bool(win32gui.IsWindowEnabled(target.handle))
         return target.identity,

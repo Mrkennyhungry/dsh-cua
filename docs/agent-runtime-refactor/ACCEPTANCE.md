@@ -665,3 +665,23 @@ P7 仍受真实异 DPI、负原点多屏硬件条件阻塞。
 上段「未观察到菜单弹出」已由本轮桌面局部图修正。owned popup 夹具初次断言因 OCR 返回 Ownedmenuitem 而非含空格文字失败，断言改为忽略空白后 v6 通过，raw_text 保留 OCR 原文。像素变化与 OCR 候选均作为证据返回，popup_detected=null、appearance_verified=false 表示弹层语义尚未由控件状态确认。
 
 本机复现证据分别位于 .runtime/check-final.log、.runtime/actions-screen-region-v6.log、.runtime/runtime-final.log、.runtime/security-screen-region-click.log，以及 %TEMP%\\dsh-local-evidence-20261126-v6\\actions-probe.json、%TEMP%\\dsh-local-click-_hafobe_、%TEMP%\\dsh-combined-hw8epnvd\\report.json。P7 继续进行中，固定单屏范围内可交 DSH 体验验收；真实双屏、异 DPI 与负原点多屏按用户决定保持挂起。
+
+### 0.5.15 无标题窗口发现与跨进程跟随
+
+2026-11-26 针对 DSH 实测空标题日志窗口未被发现的反馈，增加窗口标题来源、目录过滤与 HWND 打开入口，并沿 owner 链和子进程关系发现新 HWND。开工分支为 codex/agent-runtime-refactor，HEAD babc4c4，工作树干净。基线 scripts/check.ps1 为 Node 95 PASS、0 SKIP、2972.3387 ms，Python 347 PASS、1 SKIP、43 subtests PASS、21.54 s。包与内核版本同步至 0.5.15。
+
+| 检查项 | 状态 | 实测结果 |
+| --- | --- | --- |
+| 完整检查 | PASS | scripts/check.ps1，Node 95 PASS、0 FAIL、0 SKIP、2833.2684 ms；Python 359 PASS、1 显式真实窗口 SKIP、57 subtests PASS、20.65 s；Host/Client 语法通过 |
+| 无标题窗口与 HWND 打开 | PASS | actions_probe v5 的真实 owned popup 顶层 window_text 为空，title_source=child_text，目录保留 HWND/PID/process/owner；默认发现、include_untitled=false 过滤与 public open(hwnd) 激活及初始观察全部通过 |
+| 跨子进程重绑定 | PASS | 源 fixture PID 27620 销毁 HWND 后，发现子进程 PID 25056 的 HWND 14946700，owner_hwnd=0、window_text=""、title=日志与信任管理、title_source=child_text、relationship=child_process；动作 1154.545 ms，自动重绑定、新观察及旧 observation 的 TARGET_STALE 校验通过 |
+| 关联与去歧义回归 | PASS | 带创建时间的 owner/进程实例匹配、无关共同祖先排除、已存在窗口排除、多候选保留、延迟候选采样、派发结果保留与停止后续批量步骤全部通过 |
+| 真实动作矩阵 | PASS | actions_probe v5，30 个 operation 全部 completed，总耗时 60203 ms；原生/浏览器表单、瞬态提示、窗口控件、Web 查询与稳定等待、同进程 HWND 重建、取消及重放通过，重放额外派发 0，parser 初始化 1，caption 0，模型请求 0 |
+| 独立弹层与局部图 | PASS | owned popup OCR confidence=0.995，local_changed_ratio=0.1284，p ref 点击后读回成功；浏览器浅色弹层全图比例 0.001536、局部比例 0.077371，第二次点击关闭且 toggle=true |
+| 轻量 runtime | PASS | protocol 2，目录 52 个窗口，其中原始标题为空 21 个，元数据完整与无标题过滤均通过；health/目录等检查合计 266 ms，退役路由缺失 5/5，禁止依赖导入 0，parser 初始化 0，runtime 释放成功 |
+| 发布检查 | PASS | npm pack --dry-run，0.5.15，104 文件，2613316 bytes，解包 3315189 bytes；三个 DSH SDK peers 均为 optional；git diff --check 通过 |
+| 当前版本 DSH 与两模型 | NOT RUN | 0.5.15 尚待真实新会话复验六工具、status、图片附件与云智菜单跨进程路径，以及 wb/cn:deepseek-v4.1-flash、wb/cn:hy4std 请求；前文历史模型数值继续保留 |
+
+实机探针 v1–v4 保留失败记录。完整窗口描述用于每次动作边界时开销过高，已改为轻量身份快照，并仅在新候选需要子进程证明时读取 ancestry。探针改为通过 operation/status 跟随完成，并将输入锁等待检查延长至 10 秒。500 ms 采样曾漏掉源窗口关闭后的延迟子窗口，销毁路径现使用 3 秒预算，v5 全部通过。探针 finally 清理自身子进程，已精确清理 v4 遗留的夹具进程。
+
+证据保留于 .runtime/check-window-discovery-baseline.log、.runtime/check-window-discovery-final.log、.runtime/actions-window-discovery-v1.log 至 v5.log、.runtime/runtime-window-discovery.log、.runtime/pack-window-discovery.json 及 %TEMP%\\dsh-window-discovery-20261126-v5\\actions-probe.json。P7 继续进行中，真实双屏、异 DPI 与负原点多屏按用户决定保持挂起。

@@ -293,6 +293,23 @@ class OperationTests(unittest.TestCase):
             release.set()
             worker.shutdown()
 
+    def test_open_hwnd_activates_and_returns_initial_observation_once(self):
+        self.runtime.operations = self.manager
+        self.runtime._input_lock = threading.Lock()
+        self.runtime.window = mock.Mock()
+        self.runtime.open_target = mock.Mock(return_value=SimpleNamespace(
+            target_id='native', kind='window', identity='42', handle=42))
+        self.runtime.observations = mock.Mock()
+        self.runtime.observations.uia.call.side_effect = lambda function, **kwargs: function()
+        self.runtime.observations.observe.return_value = {'success': True, 'observation': {'observation_id': 'o'}}
+        first = DesktopRuntime.open(self.runtime, 'a', 'hwnd-open', {'hwnd': 42})
+        replay = DesktopRuntime.open(self.runtime, 'a', 'hwnd-open', {'hwnd': 42})
+        self.assertEqual(first['status'], 'completed')
+        self.assertEqual(first['target_id'], 'native')
+        self.assertEqual(first['operation_id'], replay['operation_id'])
+        self.runtime.open_target.assert_called_once_with('a', hwnd=42)
+        self.runtime.window.force_foreground.assert_called_once_with(42)
+
     def test_observe_rejects_invalid_arguments_before_operation_registration(self):
         self.runtime.operations = self.manager
         for arguments in ({'unknown': 1}, {'image': 1}, {'target_id': ''}, {'query': ''},
@@ -305,7 +322,9 @@ class OperationTests(unittest.TestCase):
         self.runtime.operations = self.manager
         for arguments in ({}, {'app': 'notepad', 'url': 'https://example.test'},
                           {'connect': 'configured', 'target_id': 't'}, {'args': []},
-                          {'url': 'https://example.test', 'image': 1}):
+                          {'url': 'https://example.test', 'image': 1}, {'hwnd': True}, {'hwnd': 0},
+                          {'hwnd': '42'}, {'hwnd': 1.5}, {'hwnd': 42, 'app': 'notepad'},
+                          {'hwnd': 42, 'target_id': 't'}, {'hwnd': 42, 'args': []}):
             with self.subTest(arguments=arguments), self.assertRaises(ValueError):
                 DesktopRuntime.open(self.runtime, 'a', 'key', arguments)
 

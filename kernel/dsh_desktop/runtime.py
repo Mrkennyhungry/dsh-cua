@@ -193,19 +193,23 @@ class DesktopRuntime:
                                       budget_ms=budget_ms, cancelled=cancelled)
 
     def open(self, owner, request_key, arguments, *, budget_ms=5000, cancelled=None):
-        if not isinstance(arguments, dict) or set(arguments) - {'url', 'app', 'args', 'target_id', 'connect', 'image'}:
+        if not isinstance(arguments, dict) or set(arguments) - {'url', 'app', 'args', 'target_id', 'hwnd', 'connect', 'image'}:
             raise ValueError('Unknown open arguments')
         for name in ('url', 'app', 'target_id', 'connect'):
             if name in arguments and (not isinstance(arguments[name], str) or not arguments[name].strip()):
                 raise ValueError(name + ' must be a nonempty string')
         if 'image' in arguments and not isinstance(arguments['image'], bool):
             raise ValueError('image must be boolean')
+        requested_hwnd = arguments.get('hwnd')
+        if 'hwnd' in arguments and (not isinstance(requested_hwnd, int) or isinstance(requested_hwnd, bool) or requested_hwnd <= 0):
+            raise ValueError('hwnd must be a positive integer')
         args = arguments.get('args', [])
         if not isinstance(args, list) or len(args) > 32 or any(not isinstance(arg, str) or len(arg) > 4096 for arg in args):
             raise ValueError('args must be an array of at most 32 strings')
         url, app = arguments.get('url'), arguments.get('app')
         target_id, connect = arguments.get('target_id'), arguments.get('connect')
-        if (not any((url, app, target_id, connect)) or
+        if (not any((url, app, target_id, connect, requested_hwnd)) or
+                (requested_hwnd and any((url, app, target_id, connect))) or
                 (app and (url or target_id or connect)) or
                 (connect and (url or target_id)) or ('args' in arguments and not app)):
             raise ValueError('Select an app, a connection, or a URL and/or existing target')
@@ -272,7 +276,8 @@ class DesktopRuntime:
                         target = self.open_target(owner, url=url, target_id=target_id, call_id=request_key)
                         context.completed(0, 'navigate')
             else:
-                target = self.resolve_target(owner, target_id)
+                target = (self.open_target(owner, hwnd=requested_hwnd) if requested_hwnd
+                          else self.resolve_target(owner, target_id))
                 with context.hold(self.operations.target_lock(target)):
                     with context.hold(self._input_lock):
                         context.dispatch(0)
@@ -419,7 +424,7 @@ class DesktopRuntime:
                 'topmost': bool(win32gui.GetWindowLong(info['hwnd'], -20) & 8),
                 'active': win32gui.GetForegroundWindow() == info['hwnd']}
 
-    def target_directory(self, owner):
+    def target_directory(self, owner, *, include_untitled=True):
         from . import desktop_tools
         import win32api
         monitors = [dict(win32api.GetMonitorInfo(handle)) for handle, _, _ in win32api.EnumDisplayMonitors()]
@@ -441,7 +446,8 @@ class DesktopRuntime:
             except RuntimeFault as error:
                 if error.code != 'TARGET_CLOSED':
                     raise
-        return self.targets.directory(owner)
+        return [row for row in self.targets.directory(owner)
+                if include_untitled or row['kind'] != 'window' or row.get('window_text', row.get('title'))]
 
     def open_target(self, owner, *, target_id=None, hwnd=None, url=None, call_id=None, connect=None):
         from . import desktop_tools
@@ -477,12 +483,57 @@ class DesktopRuntime:
             self.targets.refresh(target, {'title': 'Desktop', 'monitors': monitors, 'virtual_origin': capture.virtual_origin()})
         return target
 
-    def rebind_window(self, owner, old_target):
-        """Resolve a replacement only when title and process instance uniquely match."""
-        if old_target.kind != 'window' or not old_target.metadata.get('title'):
+    @staticmethod
+    def _window_relationship(old, candidate):
+        old_key = old.get('window_key')
+        owners = set(old.get('owner_keys', []))
+        candidate_owners = set(candidate.get('owner_keys', []))
+        if old_key in candidate_owners or owners.intersection(candidate_owners) or candidate.get('window_key') in owners:
+            return 'owner_chain'
+        anchors = set(old.get('owner_process_keys', []))
+        process_key = old.get('process_key')
+        if process_key:
+            anchors.add(process_key)
+        if candidate.get('process_key') in anchors:
+            return 'same_process'
+        if anchors.intersection(candidate.get('process_ancestors', [])):
+            return 'child_process'
+        return None
+
+    def new_window_candidates(self, owner, old_target, before_keys):
+        from . import desktop_tools
+        candidates = []
+        for identity in desktop_tools.window_identity_snapshot().values():
+            if identity['window_key'] in before_keys:
+                continue
+            info = desktop_tools._window_info(identity['hwnd'])
+            if info is None or info['window_key'] != identity['window_key']:
+                continue
+            relation = self._window_relationship(old_target.metadata, info)
+            if relation is None:
+                process = desktop_tools._process_details(info['pid'], ancestry=True)
+                if process['process_key'] != info.get('process_key'):
+                    continue
+                relation = self._window_relationship(old_target.metadata, {**info, 'process_ancestors': process['process_ancestors']})
+            if relation:
+                token = self.window_identities.acquire(info['hwnd'], info['window_key'])
+                target = self.targets.adopt(owner, 'window', token, info['hwnd'], self._native_metadata(info))
+                if target.target_id == old_target.target_id:
+                    continue
+                row = target.summary()
+                candidates.append({**{key: row[key] for key in (
+                    'target_id', 'hwnd', 'pid', 'process', 'title', 'window_text', 'title_source', 'class_name', 'owner_hwnd'
+                ) if key in row}, 'relationship': relation})
+        return candidates
+
+    def rebind_window(self, owner, old_target, candidates=None):
+        """Follow one proven new window, or an unambiguous same-title recreation."""
+        if old_target.kind != 'window':
             return None
+        if candidates:
+            return self.resolve_target(owner, candidates[0]['target_id']) if len(candidates) == 1 else None
         old_key = str(old_target.metadata.get('window_key', '')).split(':')
-        if len(old_key) != 3 or not all(old_key[1:]):
+        if len(old_key) != 3 or not all(old_key[1:]) or old_key[2] == '0' or not old_target.metadata.get('title'):
             return None
         candidates = []
         for row in self.target_directory(owner):

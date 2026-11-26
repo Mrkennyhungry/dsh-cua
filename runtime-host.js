@@ -96,6 +96,7 @@ export function registerRuntimeTools(ctx, bridge, register) {
         app: { type: 'string', description: 'Installed application name or executable path.' },
         args: { ...strings, description: 'Application arguments. To open a file directly, set app to notepad and args to an array containing its absolute path.' },
         target_id: { type: 'string', description: 'Existing target to activate.' },
+        hwnd: { type: 'integer', description: 'Positive native window handle from the target directory. Use alone to bind and activate a window, including an untitled window.' },
         connect: { type: 'string', description: 'Explicit CDP endpoint for an existing browser.' }, image: { type: 'boolean' },
       }, path: '/runtime/open', operation: true,
     },
@@ -104,6 +105,7 @@ export function registerRuntimeTools(ctx, bridge, register) {
       description: 'List desktop targets or read a target, returning elements, observation references and an optional image.',
       parameters: {
         target_id: { type: 'string', description: 'Omit to list available targets.' },
+        include_untitled: { type: 'boolean', description: 'Directory only. Defaults to true. Untitled visible windows have a readable title, raw window_text and title_source.' },
         query: { type: 'string', description: 'Literal, case-insensitive substring of observed text or element fields. Omit to read all content or list targets. An unmatched query can trigger OCR/YOLO.' },
         cursor: { type: 'string', description: 'Continue a paginated observation without rescanning.' },
         image: { type: 'boolean', description: 'Request an image explicitly, otherwise use the runtime image policy.' },
@@ -116,7 +118,7 @@ export function registerRuntimeTools(ctx, bridge, register) {
     },
     {
       name: 'doraemon_act',
-      description: 'Execute a short sequence using references or image coordinates from an observation and return a readback. A click may return post_click_frame, click_region_frames.before/after and short-lived popup_candidates. Native local images capture desktop composition including popup windows. Inspect local images and local_visual_effect alongside full-frame visual_effect and verification before retrying. To act on a popup candidate, use its ref with popup_observation_id.',
+      description: 'Execute a short sequence using references or image coordinates from an observation and return a readback. A click may return post_click_frame, click_region_frames.before/after and short-lived popup_candidates. Native local images capture desktop composition including popup windows. Inspect local images and local_visual_effect alongside full-frame visual_effect and verification before retrying. To act on a popup candidate, use its ref with popup_observation_id. new_window_candidates lists new related HWNDs, including child processes. When closed=true, a unique replacement may be rebound. Otherwise open a candidate target_id or hwnd and obtain fresh refs.',
       parameters: {
         target_id: { type: 'string', required: true }, observation_id: { type: 'string', required: true },
         steps: { type: 'array', required: true, description: 'One to eight ordered actions. Input requires mode and text.', items: { type: 'object', additionalProperties: false, properties: {

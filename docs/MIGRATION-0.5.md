@@ -64,3 +64,9 @@ click/invoke 返回 `post_click_frame` 与 `click_region_frames.before/after`。
 WeightsDir 内应包含 icon_detect\model.onnx，可同时提供 rapidocr 模型目录。OCR 使用 RapidOCR 包内模型作为后备。既有 homeDir\weights 继续可用。缺少视觉包或图标权重时，观察返回后端诊断与已有 DOM/UIA/图片，安装后重试观察即可。
 
 0.5 系列保留 commandFeedback、companionSelection 和原有自定义路径配置。waitSeconds、apiKeyFile、enableExperimentalPageCache 是历史配置兼容字段。DSH 模型设置决定主模型，默认 caption 请求数为 0。companion 通过插件配置页开启 commandFeedback，构建方法见 commander-mode.md。
+
+## 0.5.15 窗口发现
+
+无 target 的 observe 默认包含可见无标题窗口。识别时可查看 window_text 原始标题和 title_source，目录返回 hwnd、pid、process。若只需原本有标题的窗口，可传 include_untitled=false。open 可使用目录中的 target_id 或正整数 hwnd。
+
+菜单操作后的 new_window_candidates 提供本次新出现的 owner 链或子进程窗口。closed=true 时唯一关联窗口可自动重绑定，返回新 target_id 和观察。存在多个候选时，用 open 选定目标，再使用新观察中的 ref 继续操作。

@@ -589,4 +589,12 @@ expect.transient 另用最多 6 秒的独立区域 OCR 对比前后文字，新�
 
 observe.source 默认 auto。ocr 跳过 DOM/UIA，image 直接返回截图，combined 在结构化观察后补充 OCR，保留控件 selected/enabled/value 与画面 raw_text。显式通道要求 target_id 并返回图片，可用 region 约束识别范围。原生窗口的纯视觉观察使用独立 OCR worker，整个采集预算为 10 秒。auto 仅在查询缺失、指定区域或 UIA 失败时触发视觉识别。
 
-窗口关闭后的自动重绑定要求标题、PID 和进程实例一致且候选唯一。成功结果返回 rebound=true、original_target_id 和当前 target_id，observation.rebound_from 标注来源。用旧观察操作重绑定后的目标返回 TARGET_STALE。
+窗口关闭后的自动重绑定优先采用本次动作后新出现的唯一关联窗口，关系由 owner 链和进程实例证明，允许子进程承载新窗口。缺少新窗口证据时，可按同标题、同 PID 和同进程实例的唯一候选恢复。成功结果返回 rebound=true、original_target_id 和当前 target_id，observation.rebound_from 标注来源。用旧观察操作重绑定后的目标返回 TARGET_STALE。
+
+### 无标题窗口与新窗口跟随（0.5.15）
+
+observe 省略 target_id 时默认 include_untitled=true。目录中的原生窗口保留 hwnd、pid、process、class_name、owner_hwnd、window_text 与 title_source。window_text 保存原始顶层标题，空字符串仍保留。title 优先使用原始标题，其次使用首个可见子窗口文本，最后组合窗口类名与进程名，title_source 对应 window_text、child_text 或 class_name。子窗口读取最多访问 16 个控件，单次消息等待上限 50 ms，扫描在 100 ms 后停止派发新读取。目录发现复用 Win32 查询。include_untitled=false 根据原始标题过滤，已在会话中登记的无标题窗口同样被过滤。该选项仅用于目录，禁止与 target_id 或 cursor 混用。
+
+open 接受正整数 hwnd，使用它绑定、激活窗口并返回初始观察。hwnd 与 app、url、target_id、connect 互斥。目录与候选清单中的 target_id 均可直接用于 open。
+
+原生 click/invoke 派发前保存可见窗口身份集合，派发后检查新窗口，普通点击采样上限 500 ms，源 HWND 已销毁时上限 3 秒，返回 new_window_candidates。每项包含 target_id、hwnd、pid、process、title、window_text、title_source、class_name、owner_hwnd 与 relationship。relationship 为 owner_chain、same_process 或 child_process。owner 链与进程关联均使用 PID 和创建时间，扫描最多 8 级。普通目录只读取进程自身身份，需要证明新候选的子进程关系时才读取 ancestry。候选限定本次新出现的关联窗口，普通共同祖先进程不构成关联。新窗口出现会中断剩余批量步骤。多个候选保留清单，后续用 open 选定目标并重新观察。探测失败保留已派发动作和 window_discovery_warning。
