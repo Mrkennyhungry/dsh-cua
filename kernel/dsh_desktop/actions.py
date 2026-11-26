@@ -467,18 +467,6 @@ class ActionDispatcher:
                 context.dispatch(index)
                 wrapper.toggle()
                 return 'uia_toggle'
-            if action == 'input' and step['mode'] == 'replace':
-                if not element.semantic.get('editable'):
-                    raise RuntimeFault('UNSUPPORTED_ACTION', 'The observed native control is not editable')
-                from pywinauto.uia_defines import NoPatternInterfaceError
-                try:
-                    pattern = wrapper.iface_value
-                except NoPatternInterfaceError:
-                    pattern = None
-                if pattern is not None:
-                    context.dispatch(index)
-                    pattern.SetValue(step['text'])
-                    return 'uia_value'
             if action == 'select':
                 if len(step['values']) != 1:
                     raise RuntimeFault('UNSUPPORTED_ACTION', 'This native selection accepts one exact label')

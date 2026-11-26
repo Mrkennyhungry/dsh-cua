@@ -23,6 +23,35 @@ from dsh_desktop.worker import ApartmentWorker
 from dsh_desktop.runtime import DesktopRuntime
 
 
+class NativeInputTests(unittest.TestCase):
+    def test_replace_uses_keyboard_events_even_when_value_pattern_exists(self):
+        wrapper = mock.Mock()
+        wrapper.is_enabled.return_value = True
+        wrapper.has_keyboard_focus.return_value = True
+        wrapper.element_info.rectangle = SimpleNamespace(left=0, top=0, right=100, bottom=20)
+        input_service = mock.Mock()
+        input_service.dispatch_context.return_value = nullcontext()
+        runtime = SimpleNamespace(input=input_service)
+        dispatcher = ActionDispatcher(runtime)
+        dispatcher._native_guard = mock.Mock()
+        dispatcher._verify_hit = mock.Mock()
+        context = mock.Mock()
+        target = SimpleNamespace(kind='window', metadata={})
+        element = SimpleNamespace(source='uia', semantic={'editable': True})
+        result = dispatcher._native(context, target, 'observation', 0,
+                                    {'action': 'input', 'mode': 'replace', 'text': 'hello'},
+                                    element, {'wrapper': wrapper})
+        self.assertEqual(result, 'physical_input')
+        wrapper.iface_value.SetValue.assert_not_called()
+        wrapper.set_focus.assert_called_once()
+        self.assertEqual(input_service.method_calls, [
+            mock.call.dispatch_context(mock.ANY),
+            mock.call.hotkey('ctrl', 'a'),
+            mock.call.press_key('backspace', wait_time=0),
+            mock.call.type_text('hello'),
+        ])
+
+
 class JournalTests(unittest.TestCase):
     def test_restart_retains_completed_and_uncertain_steps_and_owner_identity(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -17,6 +17,10 @@ DSH 负责规划与模型配置，插件提供六个统一工具。通过 DSH �
 
 默认 HTTP 桥接提供 /runtime/*、/health 及可选 companion 状态接口。旧 /windows/*、/web、/tasks、/kb 等调用者应迁移到六工具。浏览器显式连接保留在 open.connect，传入 CDP URL 或 configured。
 
+## 输入模式
+
+`doraemon_act` 的 `input` 需要明确指定 `mode`。`replace` 聚焦目标后全选、删除并键入新文本，`insert` 在当前插入位置键入文本。原生控件使用键盘输入，让依赖输入事件的界面能够更新状态。
+
 ## 数据与恢复
 
 | 数据 | 位置与读取方式 |

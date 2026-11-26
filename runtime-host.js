@@ -115,7 +115,7 @@ export function registerRuntimeTools(ctx, bridge, register) {
           target: { ...point, description: 'Required for click, input, select, check, hover and attach. Use {ref} from this observation, or {frame_id,x,y}. Key and close omit target.' },
           from: point, to: point,
           text: { type: 'string', description: 'Required for input, at most 12000 characters.' },
-          mode: { type: 'string', enum: ['replace', 'insert'], description: 'Required for input. Choose replace or insert explicitly.' },
+          mode: { type: 'string', enum: ['replace', 'insert'], description: 'Required for input. replace clears the existing value before typing; insert types at the current selection.' },
           button: { type: 'string', enum: ['left', 'right'] }, count: { type: 'integer' },
           keys: { ...strings, description: 'For key actions, provide each key separately. Ctrl+O is ["CTRL", "O"], Ctrl+S is ["CTRL", "S"]. All keys in the array form one shortcut.' },
           direction: { type: 'string', enum: ['up', 'down', 'left', 'right'] },

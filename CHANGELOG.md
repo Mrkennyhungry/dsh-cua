@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.5.8] - 2026-11-26
+
+### Fixed
+
+- Use keyboard input for native text replacement so applications receive input events.
+
 ## [0.5.7] - 2026-11-26
 
 ### Fixed

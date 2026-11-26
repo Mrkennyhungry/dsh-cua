@@ -620,3 +620,16 @@ python scripts/run-live-probe.py test/test_cleanup_dialog_live.py
 ```
 
 受影响模型任务的命令沿用 README 的基准入口，增加 --tasks=notepad,upload,persistence，每次使用空输出目录。原始会话和请求日志继续位于本机忽略目录，归档 JSON 排除工具全文、模型全文、凭据和图片原文。更新 HIGH_HANDOFF 中过期的 P5 状态与测试基线，后续进度以 PHASES 顶部表为准。
+
+### 0.5.8 原生输入事件修复
+
+2026-11-26 针对 Electron 输入框替换文本后界面状态未更新的问题，原生 `replace` 改为聚焦后全选、删除并键入，取消 UIA SetValue 快路径。
+
+| 检查项 | 状态 | 实测结果 |
+| --- | --- | --- |
+| 完整检查 | PASS | `scripts/check.ps1`，Node 94 PASS，Python 322 PASS、1 SKIP、43 subtests PASS，19.33 s |
+| 原生输入批量动作 | PASS | 隔离 `actions_probe.py`，replace 与 END 按键 2/2 完成，读回 `batch input`，总耗时 44937 ms；原生与浏览器短提示均命中，parser 初始化与 caption 均为 0 |
+| Electron / WorkBuddy | NOT RUN | 尚未验证替换后发送按钮 enabled，也未向对话发送消息 |
+| 双模型请求 | NOT RUN | 本次未重新发起两个模型请求 |
+
+P7 仍受真实异 DPI、负原点多屏硬件条件阻塞。

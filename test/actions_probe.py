@@ -201,6 +201,14 @@ try:
     assert toast['expectation']['evidence']['source'] == 'uia', toast
     report['native_transient'] = toast['expectation']
     report['native_form_steps'] = 4
+    batch_observation = observe(native)
+    batch, _ = act(native, batch_observation, [
+        {'action': 'input', 'target': ref(batch_observation, role='textbox'), 'text': 'batch input', 'mode': 'replace'},
+        {'action': 'key', 'keys': ['END']},
+    ])
+    assert batch['completed_steps'] == [0, 1], batch
+    assert next(element['value'] for element in batch['observation']['elements'] if element['role'] == 'textbox') == 'batch input', batch
+    report['native_input_key_batch'] = 1
     native_b = runtime.open_target('b', hwnd=hwnd)
     first_observation = observe(native)
     second_observation = runtime.observations.observe('b', native_b.target_id)['observation']
