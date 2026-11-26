@@ -133,6 +133,17 @@ $env:TEMP = $env:TMP = Join-Path (Get-Location) '.runtime/test-temp'
 - **每完成一个可见行为变更就追加一条**，不要等发布前凭记忆补。
 - 被迁出的能力（内置 Agent、IM、WeCom、cron、独立 Web UI）必须在 `Removed` 段写明旧入口与数据去向。
 
+### 发布清单（每版都要走完）
+
+0.5.0–0.5.15 期间只在 `package.json` 涨了版本号，既没打 tag 也没建 GitHub Release，导致外部无法确认用户装的是哪一版、出问题也无法定位到具体提交。之后每发一版按顺序做完这四步：
+
+1. **三处版本号同步**：`package.json`、`kernel/dsh_desktop/version.py`、`CHANGELOG.md` 最新段标题必须一致——`doraemon_status` 报的是 kernel 的版本号，两者不同步会让「装的是哪版」无法判断。
+2. **提交并快进 main**：`git push origin <branch>:main`；能 fast-forward 就不要造合并提交，也不要 `--force`（会打断别人的 clone 与 PR 历史）。
+3. **打 annotated tag 并推送**：`git tag -a v<version> -m "<summary>"`，再 `git push origin v<version>`。
+4. **建 GitHub Release**：`gh release create v<version> --title "<name>" --notes-file <notes> --verify-tag`，正文至少覆盖 Highlights / Breaking Changes / 已知问题。只推 tag 不建 Release，对使用者等于没发布。
+
+发布后用 `git describe --tags --exact-match HEAD` 和 `doraemon_status` 双向确认 tag 与运行版本一致。
+
 ## 6. 本地检查脚本
 
 在 `scripts/check.ps1` 提供一键检查，任何一项失败即非零退出：
