@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.5.13] - 2026-11-26
+
+### Added
+
+- Add independent transient text watches with bounded timelines and expose status lookup by request key.
+
 ## [0.5.12] - 2026-11-26
 
 ### Added

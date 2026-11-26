@@ -678,6 +678,54 @@ class ActionValidationTests(unittest.TestCase):
         self.assertEqual(result['expectation']['evidence']['source'], 'uia')
         self.assertFalse(runtime._transient_lock.locked())
 
+    def test_independent_watch_collects_multiple_native_appearances(self):
+        runtime = SimpleNamespace(_transient_lock=threading.Lock())
+        context = mock.Mock(cancelled=threading.Event())
+        samples = iter([False, True, False, True])
+        with mock.patch.object(TransientWatcher, '_sample_native', side_effect=lambda: next(samples, False)):
+            watcher = TransientWatcher(runtime, context, SimpleNamespace(kind='window'),
+                                       {'kind': 'transient_watch', 'text': 'toast', 'timeout_ms': 650})
+            try:
+                watcher.dispatch(0)
+                result = watcher.wait()['expectation']
+            finally:
+                watcher.close()
+        self.assertEqual(result['status'], 'met')
+        self.assertEqual(len(result['timeline']), 2)
+        self.assertFalse(runtime._transient_lock.locked())
+
+    def test_wait_entry_closes_independent_watcher_on_cancellation(self):
+        runtime = mock.Mock()
+        runtime.resolve_target.return_value = SimpleNamespace(kind='browser')
+        context = mock.Mock()
+        runtime.operations.submit.side_effect = lambda *a, **kw: a[4](context)
+        with mock.patch('dsh_desktop.conditions.TransientWatcher') as factory:
+            factory.return_value.wait.side_effect = Cancelled('cancel')
+            with self.assertRaises(Cancelled):
+                DesktopRuntime.wait(runtime, 'owner', 'key', {'target_id': 't',
+                    'condition': {'kind': 'transient_watch', 'text': 'toast'}, 'duration_ms': 90000})
+            self.assertTrue(factory.call_args.kwargs['browser_calls'])
+            factory.return_value.close.assert_called_once()
+
+    def test_browser_independent_watch_yields_worker_and_releases_resources(self):
+        frame = mock.Mock()
+        frame.evaluate.side_effect = [{'baseline_present': False}, None,
+            {'baseline_present': False, 'samples': 2, 'dispatched_at': 'now', 'matched_at': None,
+             'timeline': [], 'dropped': 0}, None]
+        runtime = SimpleNamespace(_transient_lock=threading.Lock(),
+                                  browser=SimpleNamespace(call=lambda f: f()))
+        context = mock.Mock(cancelled=threading.Event())
+        watcher = TransientWatcher(runtime, context, SimpleNamespace(kind='browser', handle=(None, frame)),
+                                   {'kind': 'transient_watch', 'text': 'toast', 'timeout_ms': 1}, browser_calls=True)
+        self.assertFalse(runtime._transient_lock.locked())
+        try:
+            watcher.dispatch(0)
+            with mock.patch('dsh_desktop.conditions.time.monotonic', return_value=watcher.started + 1):
+                self.assertEqual(watcher.wait()['expectation']['timeline'], [])
+        finally:
+            watcher.close()
+        self.assertIn('close()', frame.evaluate.call_args.args[0])
+
     def test_invalid_batch_and_point_inputs_fail_before_execution(self):
         base = {'target_id': 't', 'observation_id': 'o'}
         invalid = [[], [{'action': 'close'}] * 9, [{'action': 'click', 'target': {'ref': 'e', 'x': 1}}],

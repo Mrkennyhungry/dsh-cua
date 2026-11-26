@@ -14,7 +14,7 @@ const condition = {
   properties: {
     kind: { type: 'string', required: true, enum: ['text', 'element', 'window', 'state'] },
     text: { type: 'string', description: 'Match observation.text. Browser text comes from the visible page body. Read editable values from observation.elements[].value.' },
-    match: { type: 'string', enum: ['contains', 'exact'] }, ref: { type: 'string' },
+    match: { type: 'string', enum: ['contains', 'exact'], description: 'Only for text, transient_watch or window conditions.' }, ref: { type: 'string' },
     title: { type: 'string' },
     state: { type: 'string', enum: ['ready', 'closed', 'url_changed', 'visible', 'hidden', 'enabled', 'disabled', 'checked', 'unchecked', 'focused'],
       description: 'For kind=state use ready, closed or url_changed. For kind=element use visible, hidden, enabled, disabled, checked, unchecked or focused.' },
@@ -133,18 +133,20 @@ export function registerRuntimeTools(ctx, bridge, register) {
     },
     {
       name: 'doraemon_wait',
-      description: 'Wait for a concrete text, element, window or state condition and return the evidence or a queryable operation handle.',
+      description: 'Wait for a concrete text, transient_watch, element, window or state condition and return the evidence or a queryable operation handle.',
       parameters: {
         target_id: { type: 'string' }, observation_id: { type: 'string' },
-        condition: { ...condition, required: true, description: 'Concrete condition. Set the wait timeout in the top-level timeout_ms field.' },
+        condition: { ...condition, properties: { ...condition.properties, kind: { ...condition.properties.kind, enum: ['text', 'transient_watch', 'element', 'window', 'state'] } }, required: true, description: 'Concrete condition. transient_watch samples new text appearances for the full duration and returns a bounded timeline. Set time limits at the top level.' },
         timeout_ms: { type: 'integer', description: 'Top-level timeout from 100 to 30000 milliseconds, default 5000.' },
+        duration_ms: { type: 'integer', description: 'For transient_watch only, monitor for 100 to 90000 milliseconds. Replaces timeout_ms. Follow or cancel through status/stop.' },
       }, path: '/runtime/wait', operation: true,
     },
     {
       name: 'doraemon_status',
       description: 'Report runtime health or follow an operation for a bounded interval, including completed steps and captured condition evidence.',
       parameters: {
-        operation_id: { type: 'string', description: 'Omit to report runtime health.' },
+        operation_id: { type: 'string', description: 'Omit both operation_id and request_key to report runtime health.' },
+        request_key: { type: 'string', description: 'Find an operation by the original call ID in this session.' },
         follow_ms: { type: 'integer', description: 'Follow the operation for 0 to 10000 milliseconds.' },
       }, path: '/runtime/status',
     },

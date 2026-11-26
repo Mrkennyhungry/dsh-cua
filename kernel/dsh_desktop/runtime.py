@@ -252,8 +252,8 @@ class DesktopRuntime:
                                       cancelled=cancelled)
 
     def wait(self, owner, request_key, arguments, *, budget_ms=5000, cancelled=None):
-        from .conditions import Conditions, validate_condition
-        if not isinstance(arguments, dict) or set(arguments) - {'target_id', 'observation_id', 'condition', 'timeout_ms'}:
+        from .conditions import Conditions, TransientWatcher, validate_condition
+        if not isinstance(arguments, dict) or set(arguments) - {'target_id', 'observation_id', 'condition', 'timeout_ms', 'duration_ms'}:
             raise ValueError('Unknown wait arguments')
         condition = arguments.get('condition')
         validate_condition(condition)
@@ -267,9 +267,25 @@ class DesktopRuntime:
         timeout_ms = arguments.get('timeout_ms', 5000)
         if not isinstance(timeout_ms, int) or isinstance(timeout_ms, bool) or not 100 <= timeout_ms <= 30000:
             raise ValueError('timeout_ms must be an integer from 100 to 30000')
+        if 'duration_ms' in arguments:
+            if condition['kind'] != 'transient_watch' or 'timeout_ms' in arguments:
+                raise ValueError('duration_ms is only for transient_watch and replaces timeout_ms')
+            timeout_ms = arguments['duration_ms']
+            if not isinstance(timeout_ms, int) or isinstance(timeout_ms, bool) or not 100 <= timeout_ms <= 90000:
+                raise ValueError('duration_ms must be an integer from 100 to 90000')
 
         def run(context):
-            result = Conditions(self).wait(context, target_id, observation_id, condition, timeout_ms)
+            if condition['kind'] == 'transient_watch':
+                target = self.resolve_target(owner, target_id)
+                watcher = TransientWatcher(self, context, target, {**condition, 'timeout_ms': timeout_ms},
+                                           browser_calls=target.kind == 'browser')
+                try:
+                    watcher.dispatch(0)
+                    result = watcher.wait()
+                finally:
+                    watcher.close()
+            else:
+                result = Conditions(self).wait(context, target_id, observation_id, condition, timeout_ms)
             if result['expectation']['status'] == 'timeout':
                 result.update(success=False, outcome='interrupted',
                               error={'code': 'EXPECTATION_TIMEOUT', 'message': 'Condition did not become true'})

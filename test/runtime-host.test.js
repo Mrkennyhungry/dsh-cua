@@ -38,6 +38,9 @@ test('runtime adapter registers six tools and forwards operation identity and ca
   assert.match(tools.get('doraemon_open').parameters.properties.args.description, /absolute path/)
   assert.match(tools.get('doraemon_observe').parameters.properties.query.description, /Literal, case-insensitive substring/)
   assert.match(tools.get('doraemon_act').parameters.properties.steps.items.properties.keys.description, /\["CTRL", "S"\]/)
+  assert.equal(tools.get('doraemon_status').parameters.properties.request_key.type, 'string')
+  assert.ok(tools.get('doraemon_wait').parameters.properties.condition.properties.kind.enum.includes('transient_watch'))
+  assert.ok(!tools.get('doraemon_act').parameters.properties.expect.properties.kind.enum.includes('transient_watch'))
   assert.deepEqual(tools.get('doraemon_wait').parameters.properties.condition.properties.state.enum,
     ['ready', 'closed', 'url_changed', 'visible', 'hidden', 'enabled', 'disabled', 'checked', 'unchecked', 'focused'])
   await tools.get('doraemon_open').execute({ url: 'https://example.test' }, exec)

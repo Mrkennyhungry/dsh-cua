@@ -564,3 +564,7 @@ Host 以 `exec.callId` 生成或关联稳定请求键。内核在首个可能产
 6. DSH session owner 的稳定来源，以及上下文缺省与 Host 重载后的对应关系。
 
 协议规定身份、坐标、取消和副作用记录的正确性。输出预算、同步预算、采样频率及图片分辨率通过实测调整。首版 open/act/wait 同步预算建议 5000 毫秒，普通动作尽量同次返回读回，长操作到期返回可查询 handle。调优时计入新增 status 所需的模型轮次与延迟。observe 同样有界执行，慢采集登记只读 operation 并通过 status 查询，健康查询自身保持轻量。
+
+### 独立提示监听（0.5.13）
+
+`wait.condition.kind=transient_watch` 监听窗口或浏览器的新文本出现，使用 text 与可选 match。顶层 duration_ms 为 100–90000，默认 5000，可用原有 timeout_ms 指定 100–30000，两个时间字段互斥。监听持续整个时段，返回 expectation.timeline，最多 100 条，溢出计数为 dropped。无命中时返回空时间线并正常完成。已有文本须消失后重现才计入。status/stop 查询或取消长监听，浏览器每轮读取让出执行线程。status 的 request_key 使用当前会话的原始调用 ID 查询操作，同时传 operation_id 时 request_key 优先。

@@ -14,7 +14,7 @@ DSH 负责规划与模型配置，插件提供六个统一工具。通过 DSH �
 | files | doraemon_act 的 file 步骤支持 create、write、read、list 和 delete，路径限定在 homeDir\\desktop_workspace，结果位于操作步骤的 method |
 | clipboard | doraemon_act 的 clipboard 步骤支持 get、set 和 paste_file，结果位于操作步骤的 method |
 | click、type、key、scroll、select、attach、web 动作 | doraemon_act，引用最近观察，返回动作后读回 |
-| watch、wait-stable、wait-window | doraemon_wait，动作触发的短提示放在 act.expect，设置 transient=true |
+| watch、wait-stable、wait-window | doraemon_wait 的 transient_watch 返回独立监听时间线，duration_ms 控制时长；动作触发的短提示放在 act.expect，设置 transient=true |
 | act_by_goal、decide、KB 自动挑选与复盘 | DSH 根据当前观察选择动作 |
 | 内置工作台、IM、WeCom、cron、自主 Agent | 源码中的 standalone 历史边界与旧版本恢复入口 |
 
