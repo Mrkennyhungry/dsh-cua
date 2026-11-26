@@ -23,6 +23,124 @@ from dsh_desktop.worker import ApartmentWorker
 from dsh_desktop.runtime import DesktopRuntime
 
 
+class NativeInputTests(unittest.TestCase):
+    def test_replace_uses_keyboard_events_even_when_value_pattern_exists(self):
+        wrapper = mock.Mock()
+        wrapper.is_enabled.return_value = True
+        wrapper.has_keyboard_focus.return_value = True
+        wrapper.element_info.rectangle = SimpleNamespace(left=0, top=0, right=100, bottom=20)
+        input_service = mock.Mock()
+        input_service.dispatch_context.return_value = nullcontext()
+        runtime = SimpleNamespace(input=input_service)
+        dispatcher = ActionDispatcher(runtime)
+        dispatcher._native_guard = mock.Mock()
+        dispatcher._verify_hit = mock.Mock()
+        context = mock.Mock()
+        target = SimpleNamespace(kind='window', metadata={})
+        element = SimpleNamespace(source='uia', semantic={'editable': True})
+        result = dispatcher._native(context, target, 'observation', 0,
+                                    {'action': 'input', 'mode': 'replace', 'text': 'hello'},
+                                    element, {'wrapper': wrapper})
+        self.assertEqual(result, 'physical_input')
+        wrapper.iface_value.SetValue.assert_not_called()
+        wrapper.set_focus.assert_called_once()
+        self.assertEqual(input_service.method_calls, [
+            mock.call.dispatch_context(mock.ANY),
+            mock.call.hotkey('ctrl', 'a'),
+            mock.call.press_key('backspace', wait_time=0),
+            mock.call.type_text('hello'),
+        ])
+
+
+class SemanticActionTests(unittest.TestCase):
+    def test_uia_patterns_dispatch(self):
+        wrapper = mock.Mock()
+        wrapper.is_enabled.return_value = True
+        dispatcher = ActionDispatcher(SimpleNamespace())
+        dispatcher._native_guard = mock.Mock()
+        context = mock.Mock()
+        target = SimpleNamespace(kind='window')
+        element = SimpleNamespace(source='uia')
+        for action, fields in [('invoke', {}), ('set_value', {'value': 'hello'}), ('expand', {})]:
+            step = {'action': action, 'target': {'ref': 'e'}, **fields}
+            ActionDispatcher.validate({'target_id': 't', 'observation_id': 'o', 'steps': [step]})
+            self.assertEqual(dispatcher._native(context, target, 'o', 0, step, element, {'wrapper': wrapper}), 'uia_' + action)
+        wrapper.iface_invoke.Invoke.assert_called_once_with()
+        wrapper.iface_value.SetValue.assert_called_once_with('hello')
+        wrapper.iface_expand_collapse.Expand.assert_called_once_with()
+
+
+class ClipboardActionTests(unittest.TestCase):
+    def test_clipboard_set_get_and_file_paste(self):
+        clipboard = mock.Mock()
+        clipboard.CF_UNICODETEXT = 13
+        clipboard.CF_HDROP = 15
+        clipboard.IsClipboardFormatAvailable.return_value = True
+        clipboard.GetClipboardData.return_value = 'hello'
+        clipboard.RegisterClipboardFormat.return_value = 42
+        input_service = mock.Mock()
+        input_service.dispatch_context.return_value = nullcontext()
+        dispatcher = ActionDispatcher(SimpleNamespace(input=input_service))
+        dispatcher._native_guard = mock.Mock()
+        context = mock.Mock()
+        target = SimpleNamespace(kind='window')
+        with mock.patch.dict(sys.modules, {'win32clipboard': clipboard}):
+            result = dispatcher._global_step(context, target, 0, {'action': 'clipboard', 'op': 'set', 'text': 'hello'})
+            self.assertEqual(result['op'], 'set')
+            result = dispatcher._global_step(context, target, 1, {'action': 'clipboard', 'op': 'get'})
+            self.assertEqual(result['text'], 'hello')
+            with tempfile.NamedTemporaryFile() as file:
+                result = dispatcher._global_step(context, target, 2, {'action': 'clipboard', 'op': 'paste_file', 'path': file.name})
+                self.assertEqual(result['op'], 'paste_file')
+                payload = next(call.args[1] for call in clipboard.SetClipboardData.call_args_list if call.args[0] == 15)
+                self.assertEqual(payload[20:].decode('utf-16le'), str(Path(file.name).resolve()) + '\0\0')
+            input_service.hotkey.assert_called_once_with('ctrl', 'v')
+        self.assertEqual(clipboard.CloseClipboard.call_count, 3)
+
+    def test_clipboard_argument_validation(self):
+        base = {'target_id': 'target', 'observation_id': 'observation'}
+        for step in ({'action': 'clipboard', 'op': 'get'},
+                     {'action': 'clipboard', 'op': 'set', 'text': 'hello'}):
+            ActionDispatcher.validate({**base, 'steps': [step]})
+        for step in ({'action': 'clipboard', 'op': 'unknown'},
+                     {'action': 'clipboard', 'op': 'set'},
+                     {'action': 'clipboard', 'op': 'get', 'text': 'unexpected'}):
+            with self.assertRaises(ValueError):
+                ActionDispatcher.validate({**base, 'steps': [step]})
+
+
+class FileActionTests(unittest.TestCase):
+    def test_file_lifecycle_and_workspace_escape(self):
+        with tempfile.TemporaryDirectory() as directory:
+            dispatcher = ActionDispatcher(SimpleNamespace(home=Path(directory)))
+            context = mock.Mock()
+            target = SimpleNamespace(kind='window')
+
+            def run(op, **fields):
+                step = {'action': 'file', 'op': op, **fields}
+                ActionDispatcher.validate({'target_id': 't', 'observation_id': 'o', 'steps': [step]})
+                return dispatcher._global_step(context, target, 0, step)
+
+            run('create', path='samples/example.txt', text='one')
+            self.assertEqual(run('read', path='samples/example.txt')['text'], 'one')
+            run('write', path='samples/example.txt', text='two\r\nthree')
+            self.assertEqual(run('read', path='samples/example.txt')['text'], 'two\r\nthree')
+            self.assertEqual(run('list', path='samples')['entries'][0]['name'], 'example.txt')
+            with self.assertRaises(RuntimeFault) as error:
+                run('read', path='../outside.txt')
+            self.assertEqual(error.exception.code, 'PATH_DENIED')
+            run('delete', path='samples/example.txt')
+            self.assertEqual(run('list', path='samples')['entries'], [])
+
+    def test_file_argument_validation(self):
+        base = {'target_id': 't', 'observation_id': 'o'}
+        for step in ({'action': 'file', 'op': 'read'},
+                     {'action': 'file', 'op': 'create', 'path': 'x'},
+                     {'action': 'file', 'op': 'read', 'path': 'x', 'text': 'extra'}):
+            with self.assertRaises(ValueError):
+                ActionDispatcher.validate({**base, 'steps': [step]})
+
+
 class JournalTests(unittest.TestCase):
     def test_restart_retains_completed_and_uncertain_steps_and_owner_identity(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -175,6 +293,23 @@ class OperationTests(unittest.TestCase):
             release.set()
             worker.shutdown()
 
+    def test_open_hwnd_activates_and_returns_initial_observation_once(self):
+        self.runtime.operations = self.manager
+        self.runtime._input_lock = threading.Lock()
+        self.runtime.window = mock.Mock()
+        self.runtime.open_target = mock.Mock(return_value=SimpleNamespace(
+            target_id='native', kind='window', identity='42', handle=42))
+        self.runtime.observations = mock.Mock()
+        self.runtime.observations.uia.call.side_effect = lambda function, **kwargs: function()
+        self.runtime.observations.observe.return_value = {'success': True, 'observation': {'observation_id': 'o'}}
+        first = DesktopRuntime.open(self.runtime, 'a', 'hwnd-open', {'hwnd': 42})
+        replay = DesktopRuntime.open(self.runtime, 'a', 'hwnd-open', {'hwnd': 42})
+        self.assertEqual(first['status'], 'completed')
+        self.assertEqual(first['target_id'], 'native')
+        self.assertEqual(first['operation_id'], replay['operation_id'])
+        self.runtime.open_target.assert_called_once_with('a', hwnd=42)
+        self.runtime.window.force_foreground.assert_called_once_with(42)
+
     def test_observe_rejects_invalid_arguments_before_operation_registration(self):
         self.runtime.operations = self.manager
         for arguments in ({'unknown': 1}, {'image': 1}, {'target_id': ''}, {'query': ''},
@@ -187,7 +322,9 @@ class OperationTests(unittest.TestCase):
         self.runtime.operations = self.manager
         for arguments in ({}, {'app': 'notepad', 'url': 'https://example.test'},
                           {'connect': 'configured', 'target_id': 't'}, {'args': []},
-                          {'url': 'https://example.test', 'image': 1}):
+                          {'url': 'https://example.test', 'image': 1}, {'hwnd': True}, {'hwnd': 0},
+                          {'hwnd': '42'}, {'hwnd': 1.5}, {'hwnd': 42, 'app': 'notepad'},
+                          {'hwnd': 42, 'target_id': 't'}, {'hwnd': 42, 'args': []}):
             with self.subTest(arguments=arguments), self.assertRaises(ValueError):
                 DesktopRuntime.open(self.runtime, 'a', 'key', arguments)
 
@@ -381,6 +518,7 @@ class OperationTests(unittest.TestCase):
         self.runtime.resolve_target = lambda owner, target_id: target
         self.runtime.observations = mock.Mock()
         self.runtime.observations.get.return_value = SimpleNamespace(metadata={})
+        self.runtime.observations.capture_frame.side_effect = RuntimeFault('FRAME_UNAVAILABLE', 'fixture')
         self.runtime.operations = self.manager
         self.runtime._input_lock = threading.Lock()
         dispatcher = ActionDispatcher(self.runtime)
@@ -441,6 +579,81 @@ class OperationTests(unittest.TestCase):
 
 
 class ActionValidationTests(unittest.TestCase):
+    def test_rebound_status_exposes_current_target_and_retains_original_identity(self):
+        manager = mock.Mock()
+        manager._changed = threading.Condition()
+        manager._validate_follow = OperationManager._validate_follow
+        manager.journal.get.return_value = {
+            'status': 'completed', 'target_id': 'old',
+            'result': {'rebound': True, 'target_id': 'new', 'observation': {'target_id': 'new'}}}
+        result = OperationManager.status(manager, 'a', 'operation')
+        self.assertEqual(result['target_id'], 'new')
+        self.assertEqual(result['original_target_id'], 'old')
+        self.assertEqual(result['observation']['target_id'], 'new')
+
+    def test_local_click_evidence_detects_low_contrast_change_and_retains_crops(self):
+        import cv2
+        import numpy as np
+        from dsh_desktop.geometry import FrameGeometry
+
+        runtime = mock.Mock()
+        dispatcher = ActionDispatcher(runtime)
+        runtime.observations.previous_click.return_value = None
+        before = np.full((904, 1366, 3), 240, dtype=np.uint8)
+        after = before.copy()
+        after[400:440, 650:750] = 225
+        images = [cv2.imencode('.jpg', image)[1].tobytes() for image in (before, after)]
+        geometry = FrameGeometry((0, 0, 1366, 904), (1366, 904))
+        runtime.observations.get.side_effect = [SimpleNamespace(frames=[SimpleNamespace(frame_id=frame_id, geometry=geometry)])
+                                                for frame_id in ('before', 'after')]
+        runtime.observations.image.side_effect = images
+        runtime.observations.crop_frame.side_effect = [{'frame_id': 'local-before'}, {'frame_id': 'local-after'}]
+        result = dispatcher._click_evidence('a', mock.Mock(), (700, 400),
+            {'observation': {'frames': [{'frame_id': 'before', 'observation_id': 'o-before'}]}},
+            {'frame_id': 'after', 'observation_id': 'o-after'})
+        global_result = dispatcher._compare_visual_effect(*images)
+        self.assertFalse(global_result['visual_effect'])
+        self.assertTrue(result['local_visual_effect'])
+        self.assertGreater(result['local_visual_effect_changed_ratio'], 0.005)
+        self.assertIsNone(result['popup_detected'])
+        self.assertEqual(result['click_region_frames']['before']['frame_id'], 'local-before')
+        self.assertEqual(result['local_sample_region'],
+                         {'frame_id': 'after', 'x': 500, 'y': 200, 'width': 400, 'height': 400})
+        self.assertIn('toggle', result['next_action'])
+        runtime.observations.get.side_effect = [SimpleNamespace(frames=[SimpleNamespace(frame_id=frame_id, geometry=geometry)])
+                                                for frame_id in ('before', 'after')]
+        runtime.observations.image.side_effect = images[::-1]
+        runtime.observations.previous_click.return_value = tuple(images)
+        runtime.observations.crop_frame.side_effect = [{'frame_id': 'local-before'}, {'frame_id': 'local-after'}]
+        reversed_result = dispatcher._click_evidence('a', mock.Mock(), (700, 400),
+            {'observation': {'frames': [{'frame_id': 'before', 'observation_id': 'o-before'}]}},
+            {'frame_id': 'after', 'observation_id': 'o-after'})
+        self.assertTrue(reversed_result['toggle'])
+        self.assertEqual(reversed_result['toggle_evidence']['scope'], 'local_pixels')
+
+    def test_local_click_evidence_clips_edges_and_ignores_distant_changes(self):
+        import cv2
+        import numpy as np
+        from dsh_desktop.geometry import FrameGeometry
+
+        runtime = mock.Mock()
+        dispatcher = ActionDispatcher(runtime)
+        runtime.observations.previous_click.return_value = None
+        before = np.full((400, 800, 3), 240, dtype=np.uint8)
+        after = before.copy()
+        after[:, 500:] = 0
+        geometry = FrameGeometry((-100, 20, 1600, 800), (800, 400))
+        runtime.observations.get.side_effect = [SimpleNamespace(frames=[SimpleNamespace(frame_id=frame_id, geometry=geometry)])
+                                                for frame_id in ('before', 'after')]
+        runtime.observations.image.side_effect = [cv2.imencode('.jpg', image)[1].tobytes() for image in (before, after)]
+        result = dispatcher._click_evidence('a', mock.Mock(), (-100, 20),
+            {'observation': {'frames': [{'frame_id': 'before', 'observation_id': 'o-before'}]}},
+            {'frame_id': 'after', 'observation_id': 'o-after'})
+        self.assertFalse(result['local_visual_effect'])
+        self.assertEqual(result['local_visual_effect_changed_ratio'], 0)
+        self.assertEqual(result['local_sample_region'],
+                         {'frame_id': 'after', 'x': 0, 'y': 0, 'width': 100, 'height': 100})
+
     def test_visual_effect_uses_supported_decode_flag_and_json_boolean(self):
         import cv2
         import numpy as np
@@ -546,6 +759,33 @@ class ActionValidationTests(unittest.TestCase):
         self.assertEqual(order, ['armed', 'step', 'dispatch', 'closed'])
         self.assertIsNone(context.before_dispatch)
 
+    def test_failed_transient_arm_does_not_prevent_dispatch(self):
+        runtime = mock.Mock()
+        runtime._transient_lock = threading.Lock()
+        runtime.resolve_target.return_value = SimpleNamespace(kind='browser')
+        runtime.observations.get.return_value = SimpleNamespace(metadata={})
+        context = mock.Mock()
+        context.owner = 'a'
+        context.hold.side_effect = lambda _lock: nullcontext()
+        dispatcher = ActionDispatcher(runtime)
+        dispatcher._boundary = mock.Mock(return_value=('unchanged',))
+        dispatcher._readback = mock.Mock(return_value={})
+        dispatcher._step = mock.Mock(return_value='dom_click')
+        arguments = {'target_id': 't', 'observation_id': 'o',
+                     'steps': [{'action': 'click', 'target': {'ref': 'e'}}],
+                     'expect': {'kind': 'text', 'text': 'saved', 'transient': True}}
+        def failed_arm(*args, **kwargs):
+            runtime._transient_lock.release()
+            raise RuntimeFault('UIA_BATCH_TIMEOUT', 'scan timed out')
+        with mock.patch('dsh_desktop.actions.TransientWatcher', side_effect=failed_arm):
+            result = dispatcher._batch(context, arguments)
+        dispatcher._step.assert_called_once()
+        self.assertTrue(result['success'])
+        self.assertEqual(result['action']['status'], 'dispatched')
+        self.assertEqual(result['verification']['status'], 'unknown')
+        self.assertIn('scan timed out', result['expectation']['reason'])
+        self.assertFalse(runtime._transient_lock.locked())
+
     def test_transient_native_watcher_records_reappearance_after_dispatch(self):
         runtime = SimpleNamespace(_transient_lock=threading.Lock())
         context = mock.Mock()
@@ -562,6 +802,54 @@ class ActionValidationTests(unittest.TestCase):
         self.assertTrue(result['expectation']['baseline_present'])
         self.assertEqual(result['expectation']['evidence']['source'], 'uia')
         self.assertFalse(runtime._transient_lock.locked())
+
+    def test_independent_watch_collects_multiple_native_appearances(self):
+        runtime = SimpleNamespace(_transient_lock=threading.Lock())
+        context = mock.Mock(cancelled=threading.Event())
+        samples = iter([False, True, False, True])
+        with mock.patch.object(TransientWatcher, '_sample_native', side_effect=lambda: next(samples, False)):
+            watcher = TransientWatcher(runtime, context, SimpleNamespace(kind='window'),
+                                       {'kind': 'transient_watch', 'text': 'toast', 'timeout_ms': 650})
+            try:
+                watcher.dispatch(0)
+                result = watcher.wait()['expectation']
+            finally:
+                watcher.close()
+        self.assertEqual(result['status'], 'met')
+        self.assertEqual(len(result['timeline']), 2)
+        self.assertFalse(runtime._transient_lock.locked())
+
+    def test_wait_entry_closes_independent_watcher_on_cancellation(self):
+        runtime = mock.Mock()
+        runtime.resolve_target.return_value = SimpleNamespace(kind='browser')
+        context = mock.Mock()
+        runtime.operations.submit.side_effect = lambda *a, **kw: a[4](context)
+        with mock.patch('dsh_desktop.conditions.TransientWatcher') as factory:
+            factory.return_value.wait.side_effect = Cancelled('cancel')
+            with self.assertRaises(Cancelled):
+                DesktopRuntime.wait(runtime, 'owner', 'key', {'target_id': 't',
+                    'condition': {'kind': 'transient_watch', 'text': 'toast'}, 'duration_ms': 90000})
+            self.assertTrue(factory.call_args.kwargs['browser_calls'])
+            factory.return_value.close.assert_called_once()
+
+    def test_browser_independent_watch_yields_worker_and_releases_resources(self):
+        frame = mock.Mock()
+        frame.evaluate.side_effect = [{'baseline_present': False}, None,
+            {'baseline_present': False, 'samples': 2, 'dispatched_at': 'now', 'matched_at': None,
+             'timeline': [], 'dropped': 0}, None]
+        runtime = SimpleNamespace(_transient_lock=threading.Lock(),
+                                  browser=SimpleNamespace(call=lambda f: f()))
+        context = mock.Mock(cancelled=threading.Event())
+        watcher = TransientWatcher(runtime, context, SimpleNamespace(kind='browser', handle=(None, frame)),
+                                   {'kind': 'transient_watch', 'text': 'toast', 'timeout_ms': 1}, browser_calls=True)
+        self.assertFalse(runtime._transient_lock.locked())
+        try:
+            watcher.dispatch(0)
+            with mock.patch('dsh_desktop.conditions.time.monotonic', return_value=watcher.started + 1):
+                self.assertEqual(watcher.wait()['expectation']['timeline'], [])
+        finally:
+            watcher.close()
+        self.assertIn('close()', frame.evaluate.call_args.args[0])
 
     def test_invalid_batch_and_point_inputs_fail_before_execution(self):
         base = {'target_id': 't', 'observation_id': 'o'}

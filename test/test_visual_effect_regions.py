@@ -12,7 +12,7 @@ import numpy as np
 from dsh_desktop.actions import ActionDispatcher
 from dsh_desktop.geometry import FrameGeometry
 from dsh_desktop.observations import Element
-from dsh_desktop.targets import Frame
+from dsh_desktop.targets import Frame, RuntimeFault
 
 
 def jpeg(image):
@@ -193,8 +193,24 @@ class LocalVisualEffectTests(unittest.TestCase):
         self.assertEqual(self.dispatcher._hover_semantic_changes(before, after)['status'], 'unknown')
         self.assertEqual(self.dispatcher._hover_semantic_changes(None, after)['status'], 'unknown')
 
+    def test_failed_readback_preserves_unknown_visual_and_hover_evidence(self):
+        for action in ('click', 'input', 'check', 'hover', 'scroll', 'drag', 'invoke'):
+            for error in (RuntimeError('capture failed'), RuntimeFault('TARGET_CLOSED', 'closed')):
+                with self.subTest(action=action, error=type(error).__name__):
+                    runtime = mock.Mock()
+                    runtime.observations.observe.side_effect = error
+                    result = ActionDispatcher(runtime)._readback('owner', 'target', None,
+                        action=action, step_index=3)
+                    self.assertIsNone(result['visual_effect'])
+                    self.assertEqual(result['visual_effect_basis'], 'unknown')
+                    self.assertEqual(result['visual_effect_step'], 3)
+                    self.assertEqual(result['visual_effect_reason'],
+                        'target_closed' if isinstance(error, RuntimeFault) else 'readback_failed')
+                    if action == 'hover':
+                        self.assertEqual(result['hover_semantic_changes'], {'status': 'unknown'})
+
     def test_hover_scroll_and_drag_readback_provide_visual_evidence(self):
-        for action in ('hover', 'scroll', 'drag'):
+        for action in ('hover', 'scroll', 'drag', 'invoke'):
             with self.subTest(action=action):
                 runtime, before, _, _ = self.readback_fixture()
                 result = ActionDispatcher(runtime)._readback('owner', 'target', None,
@@ -218,7 +234,7 @@ class LocalVisualEffectTests(unittest.TestCase):
 
     def test_physical_click_normal_batch_entry_uses_actual_mapped_point(self):
         runtime, before, _, _ = self.readback_fixture()
-        runtime.observations.observe.side_effect = [before, runtime.observations.observe.return_value]
+        runtime.observations.capture_frame.return_value = {**before['observation']['frames'][0], 'observation_id': 'before'}
         runtime._input_lock = object()
         runtime.map_point.return_value = (720, 740)
         runtime.input.click_screen.return_value = {'success': True}
@@ -236,6 +252,35 @@ class LocalVisualEffectTests(unittest.TestCase):
         self.assertEqual(result['visual_effect_step'], 0)
         self.assertEqual(result['visual_effect_regions'][0]['basis'], 'click_neighborhood')
         runtime.input.click_screen.assert_called_once_with(720, 740, clicks=1)
+        self.assertEqual(result['visual_effect_frames']['before_observation_id'], 'before')
+
+    def test_hover_batch_uses_semantic_observation_instead_of_fast_frame(self):
+        runtime = mock.Mock()
+        before_element = Element('old', 'dom', 'target', 'doc',
+                                 {'role': 'button', 'name': 'Menu', 'expanded': False}, {'token': '1'})
+        after_element = Element('new', 'dom', 'target', 'doc',
+                                {'role': 'button', 'name': 'Menu', 'expanded': True}, {'token': '1'})
+        snapshots = {
+            'source': SimpleNamespace(metadata={'document_id': 'doc'}, text='', elements=[]),
+            'before': SimpleNamespace(metadata={'document_id': 'doc'}, text='', elements=[before_element]),
+            'after': SimpleNamespace(metadata={'document_id': 'doc'}, text='', elements=[after_element]),
+        }
+        runtime.observations.get.side_effect = lambda owner, oid, *args: snapshots[oid]
+        runtime.observations.observe.side_effect = [
+            {'observation': {'observation_id': oid, 'frames': []}} for oid in ('before', 'after')]
+        target = SimpleNamespace(kind='browser', metadata={'document_id': 'doc'})
+        runtime.resolve_target.return_value = target
+        context = mock.Mock(owner='owner')
+        context.hold.side_effect = lambda _lock: nullcontext()
+        dispatcher = ActionDispatcher(runtime)
+        dispatcher._boundary = mock.Mock(return_value=('stable',))
+        dispatcher._step = mock.Mock(return_value='dom_hover')
+        result = dispatcher._batch(context, {'target_id': 'target', 'observation_id': 'source',
+            'steps': [{'action': 'hover', 'target': {'ref': 'old'}}]})
+        self.assertEqual(result['hover_semantic_changes']['expanded_changes'],
+                         [{'ref': 'new', 'name': 'Menu', 'before': False, 'after': True}])
+        runtime.observations.capture_frame.assert_not_called()
+        self.assertEqual(runtime.observations.observe.call_count, 2)
 
     def test_dom_and_uia_semantic_actions_record_control_bounds(self):
         context = mock.Mock(visual_location=None)

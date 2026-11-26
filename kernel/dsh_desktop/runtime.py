@@ -88,6 +88,7 @@ class DesktopRuntime:
         self._transient_lock = threading.Lock()
         from .worker import ApartmentWorker
         self._transient_worker = ApartmentWorker('dsh-transient-uia')
+        self._popup_ocr_worker = ApartmentWorker('dsh-popup-ocr')
         self._operations_lock = threading.Lock()
         self._operations = None
         self._parser_lock = threading.Lock()
@@ -99,6 +100,57 @@ class DesktopRuntime:
         self._window_picker_overlay = WindowPickerOverlay(self._window_picker)
         self._picked_hwnd = None
         self._picked_info = None
+        self._window_effects = {}
+
+    def window_action(self, owner, target, step, operation_id):
+        from .desktop_tools import set_topmost
+        if target.kind != 'window':
+            raise RuntimeFault('TARGET_KIND', 'window actions require a native window target')
+        key = (owner, target.target_id)
+        op = step['op']
+        if op == 'activate':
+            if not self.window.ensure_foreground(target.handle):
+                raise RuntimeFault('FOCUS_LOST', 'Window could not receive foreground focus')
+        elif op in ('topmost', 'highlight'):
+            if any(record['hwnd'] == target.handle and identity != key
+                   for identity, record in self._window_effects.items()):
+                raise RuntimeFault('WINDOW_BUSY', 'Window effects are owned by another target binding')
+            record = self._window_effects.setdefault(key, {'hwnd': target.handle, 'target': target,
+                'topmost': bool(win32gui.GetWindowLong(target.handle, -20) & 8), 'glow': None})
+            if op == 'topmost':
+                set_topmost(target.handle, step.get('on', True))
+            elif step.get('on', True):
+                if record['glow'] is None:
+                    from .window_glow import WindowGlow
+                    record['glow'] = WindowGlow()
+                    record['glow'].start()
+                record['glow'].show(target.handle)
+                if record['glow'].error:
+                    raise RuntimeFault('HIGHLIGHT_FAILED', str(record['glow'].error))
+            elif record['glow'] is not None:
+                record['glow'].stop()
+                record['glow'] = None
+        else:
+            self.operations.stop_target(owner, target.target_id, excluding=operation_id)
+            self._release_window_effect(owner, target.target_id)
+            self.observations.release_target(owner, target.target_id)
+            self.frames.release_target(owner, target.target_id)
+            target.closed = True
+        return {'action': 'window', 'op': op, 'target_id': target.target_id,
+                'released': op in ('unbind', 'cleanup')}
+
+    def _release_window_effect(self, owner, target_id):
+        record = self._window_effects.pop((owner, target_id), None)
+        if record is None:
+            return
+        if record['glow'] is not None:
+            record['glow'].stop()
+        try:
+            target = self.resolve_target(owner, target_id)
+        except RuntimeFault:
+            return
+        from .desktop_tools import set_topmost
+        set_topmost(target.handle, record['topmost'])
 
     @property
     def operations(self):
@@ -123,6 +175,8 @@ class DesktopRuntime:
 
         def run(context):
             call = self.browser.call if target is not None and target.kind == 'browser' else self.observations.uia.call
+            if target is not None and target.kind != 'browser' and arguments.get('source') in ('ocr', 'image'):
+                call = self._popup_ocr_worker.call
 
             def collect():
                 context.check()
@@ -132,25 +186,30 @@ class DesktopRuntime:
                 context.check()
                 return result
 
-            return context.backend(call, collect, timeout=120)
+            visual_only = target is not None and target.kind != 'browser' and arguments.get('source') in ('ocr', 'image')
+            return context.backend(call, collect, timeout=10 if visual_only else 120)
 
         return self.operations.submit(owner, request_key, 'observe', arguments, run,
                                       budget_ms=budget_ms, cancelled=cancelled)
 
     def open(self, owner, request_key, arguments, *, budget_ms=5000, cancelled=None):
-        if not isinstance(arguments, dict) or set(arguments) - {'url', 'app', 'args', 'target_id', 'connect', 'image'}:
+        if not isinstance(arguments, dict) or set(arguments) - {'url', 'app', 'args', 'target_id', 'hwnd', 'connect', 'image'}:
             raise ValueError('Unknown open arguments')
         for name in ('url', 'app', 'target_id', 'connect'):
             if name in arguments and (not isinstance(arguments[name], str) or not arguments[name].strip()):
                 raise ValueError(name + ' must be a nonempty string')
         if 'image' in arguments and not isinstance(arguments['image'], bool):
             raise ValueError('image must be boolean')
+        requested_hwnd = arguments.get('hwnd')
+        if 'hwnd' in arguments and (not isinstance(requested_hwnd, int) or isinstance(requested_hwnd, bool) or requested_hwnd <= 0):
+            raise ValueError('hwnd must be a positive integer')
         args = arguments.get('args', [])
         if not isinstance(args, list) or len(args) > 32 or any(not isinstance(arg, str) or len(arg) > 4096 for arg in args):
             raise ValueError('args must be an array of at most 32 strings')
         url, app = arguments.get('url'), arguments.get('app')
         target_id, connect = arguments.get('target_id'), arguments.get('connect')
-        if (not any((url, app, target_id, connect)) or
+        if (not any((url, app, target_id, connect, requested_hwnd)) or
+                (requested_hwnd and any((url, app, target_id, connect))) or
                 (app and (url or target_id or connect)) or
                 (connect and (url or target_id)) or ('args' in arguments and not app)):
             raise ValueError('Select an app, a connection, or a URL and/or existing target')
@@ -217,7 +276,8 @@ class DesktopRuntime:
                         target = self.open_target(owner, url=url, target_id=target_id, call_id=request_key)
                         context.completed(0, 'navigate')
             else:
-                target = self.resolve_target(owner, target_id)
+                target = (self.open_target(owner, hwnd=requested_hwnd) if requested_hwnd
+                          else self.resolve_target(owner, target_id))
                 with context.hold(self.operations.target_lock(target)):
                     with context.hold(self._input_lock):
                         context.dispatch(0)
@@ -252,8 +312,8 @@ class DesktopRuntime:
                                       cancelled=cancelled)
 
     def wait(self, owner, request_key, arguments, *, budget_ms=5000, cancelled=None):
-        from .conditions import Conditions, validate_condition
-        if not isinstance(arguments, dict) or set(arguments) - {'target_id', 'observation_id', 'condition', 'timeout_ms'}:
+        from .conditions import Conditions, TransientWatcher, validate_condition
+        if not isinstance(arguments, dict) or set(arguments) - {'target_id', 'observation_id', 'condition', 'timeout_ms', 'duration_ms'}:
             raise ValueError('Unknown wait arguments')
         condition = arguments.get('condition')
         validate_condition(condition)
@@ -267,9 +327,25 @@ class DesktopRuntime:
         timeout_ms = arguments.get('timeout_ms', 5000)
         if not isinstance(timeout_ms, int) or isinstance(timeout_ms, bool) or not 100 <= timeout_ms <= 30000:
             raise ValueError('timeout_ms must be an integer from 100 to 30000')
+        if 'duration_ms' in arguments:
+            if condition['kind'] != 'transient_watch' or 'timeout_ms' in arguments:
+                raise ValueError('duration_ms is only for transient_watch and replaces timeout_ms')
+            timeout_ms = arguments['duration_ms']
+            if not isinstance(timeout_ms, int) or isinstance(timeout_ms, bool) or not 100 <= timeout_ms <= 90000:
+                raise ValueError('duration_ms must be an integer from 100 to 90000')
 
         def run(context):
-            result = Conditions(self).wait(context, target_id, observation_id, condition, timeout_ms)
+            if condition['kind'] == 'transient_watch':
+                target = self.resolve_target(owner, target_id)
+                watcher = TransientWatcher(self, context, target, {**condition, 'timeout_ms': timeout_ms},
+                                           browser_calls=target.kind == 'browser')
+                try:
+                    watcher.dispatch(0)
+                    result = watcher.wait()
+                finally:
+                    watcher.close()
+            else:
+                result = Conditions(self).wait(context, target_id, observation_id, condition, timeout_ms)
             if result['expectation']['status'] == 'timeout':
                 result.update(success=False, outcome='interrupted',
                               error={'code': 'EXPECTATION_TIMEOUT', 'message': 'Condition did not become true'})
@@ -325,6 +401,8 @@ class DesktopRuntime:
         self.stop_all()
         if self._operations is not None:
             self._operations.shutdown()
+        for owner, target_id in list(self._window_effects):
+            self._release_window_effect(owner, target_id)
         companion.shutdown()
         stop_cursor_overlay()
         desktop_tools._CURSOR = None
@@ -332,6 +410,7 @@ class DesktopRuntime:
         self.window_identities.shutdown()
         self.observations.shutdown()
         self._transient_worker.shutdown()
+        self._popup_ocr_worker.shutdown()
         # Playwright cleanup must run on its owning bridge worker.
         try:
             self.browser.shutdown()
@@ -342,9 +421,10 @@ class DesktopRuntime:
 
     def _native_metadata(self, info):
         return {**info, **capture.window_geometry(info['hwnd']),
+                'topmost': bool(win32gui.GetWindowLong(info['hwnd'], -20) & 8),
                 'active': win32gui.GetForegroundWindow() == info['hwnd']}
 
-    def target_directory(self, owner):
+    def target_directory(self, owner, *, include_untitled=True):
         from . import desktop_tools
         import win32api
         monitors = [dict(win32api.GetMonitorInfo(handle)) for handle, _, _ in win32api.EnumDisplayMonitors()]
@@ -366,7 +446,8 @@ class DesktopRuntime:
             except RuntimeFault as error:
                 if error.code != 'TARGET_CLOSED':
                     raise
-        return self.targets.directory(owner)
+        return [row for row in self.targets.directory(owner)
+                if include_untitled or row['kind'] != 'window' or row.get('window_text', row.get('title'))]
 
     def open_target(self, owner, *, target_id=None, hwnd=None, url=None, call_id=None, connect=None):
         from . import desktop_tools
@@ -402,13 +483,75 @@ class DesktopRuntime:
             self.targets.refresh(target, {'title': 'Desktop', 'monitors': monitors, 'virtual_origin': capture.virtual_origin()})
         return target
 
-    def capture_target(self, owner, target_id, *, max_dim=1366, crop=None):
+    @staticmethod
+    def _window_relationship(old, candidate):
+        old_key = old.get('window_key')
+        owners = set(old.get('owner_keys', []))
+        candidate_owners = set(candidate.get('owner_keys', []))
+        if old_key in candidate_owners or owners.intersection(candidate_owners) or candidate.get('window_key') in owners:
+            return 'owner_chain'
+        anchors = set(old.get('owner_process_keys', []))
+        process_key = old.get('process_key')
+        if process_key:
+            anchors.add(process_key)
+        if candidate.get('process_key') in anchors:
+            return 'same_process'
+        if anchors.intersection(candidate.get('process_ancestors', [])):
+            return 'child_process'
+        return None
+
+    def new_window_candidates(self, owner, old_target, before_keys):
+        from . import desktop_tools
+        candidates = []
+        for identity in desktop_tools.window_identity_snapshot().values():
+            if identity['window_key'] in before_keys:
+                continue
+            info = desktop_tools._window_info(identity['hwnd'])
+            if info is None or info['window_key'] != identity['window_key']:
+                continue
+            relation = self._window_relationship(old_target.metadata, info)
+            if relation is None:
+                process = desktop_tools._process_details(info['pid'], ancestry=True)
+                if process['process_key'] != info.get('process_key'):
+                    continue
+                relation = self._window_relationship(old_target.metadata, {**info, 'process_ancestors': process['process_ancestors']})
+            if relation:
+                token = self.window_identities.acquire(info['hwnd'], info['window_key'])
+                target = self.targets.adopt(owner, 'window', token, info['hwnd'], self._native_metadata(info))
+                if target.target_id == old_target.target_id:
+                    continue
+                row = target.summary()
+                candidates.append({**{key: row[key] for key in (
+                    'target_id', 'hwnd', 'pid', 'process', 'title', 'window_text', 'title_source', 'class_name', 'owner_hwnd'
+                ) if key in row}, 'relationship': relation})
+        return candidates
+
+    def rebind_window(self, owner, old_target, candidates=None):
+        """Follow one proven new window, or an unambiguous same-title recreation."""
+        if old_target.kind != 'window':
+            return None
+        if candidates:
+            return self.resolve_target(owner, candidates[0]['target_id']) if len(candidates) == 1 else None
+        old_key = str(old_target.metadata.get('window_key', '')).split(':')
+        if len(old_key) != 3 or not all(old_key[1:]) or old_key[2] == '0' or not old_target.metadata.get('title'):
+            return None
+        candidates = []
+        for row in self.target_directory(owner):
+            key = str(row.get('window_key', '')).split(':')
+            if (row.get('kind') == 'window' and row.get('title') == old_target.metadata['title']
+                    and len(key) == 3 and key[1:] == old_key[1:]
+                    and row['target_id'] != old_target.target_id):
+                candidates.append(row)
+        return self.resolve_target(owner, candidates[0]['target_id']) if len(candidates) == 1 else None
+
+    def capture_target(self, owner, target_id, *, max_dim=1366, crop=None, screen_point=None):
         target = self.resolve_target(owner, target_id)
         revision = target.revision
         if target.kind == 'browser':
             image, geometry, target = self.browser.capture(owner, target_id)
         else:
-            captured = self.capture.capture_detailed(target.handle)
+            captured = (self.capture.capture_region(screen_point, hwnd=target.handle) if screen_point is not None
+                        else self.capture.capture_detailed(target.handle))
             image, geometry = captured.image, captured.geometry
             target = self.resolve_target(owner, target_id)
         if target.revision != revision:
@@ -434,6 +577,10 @@ class DesktopRuntime:
     def release_owner(self, owner):
         if self._operations is not None:
             self._operations.stop(owner)
+        with self._input_lock:
+            for effect_owner, target_id in list(self._window_effects):
+                if effect_owner == owner:
+                    self._release_window_effect(owner, target_id)
         self.browser.release(owner)
         cleanup = self.observations.release(owner)
         self.frames.release(owner)

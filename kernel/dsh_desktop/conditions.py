@@ -2,28 +2,35 @@
 import threading
 import time
 import uuid
+import hashlib
+import json
 
 from .observations import timestamp
 
 from .targets import RuntimeFault
 
 
-_ARM_BROWSER = r'''({key, text, exact, interval, timeout}) => {
+_ARM_BROWSER = r'''({key, text, exact, interval, timeout, continuous}) => {
   const matches = value => exact ? value === text : value.includes(text);
   const body = () => document.body?.innerText || '';
   const state = {baseline_present: matches(body()), seen_absent: !matches(body()),
-    armed: false, matched_at: null, samples: 0, dispatched_at: null};
+    armed: false, matched_at: null, samples: 0, dispatched_at: null, timeline: [], dropped: 0};
   const sample = records => {
     const current = body();
     state.samples++;
-    if (!state.armed || state.matched_at || performance.now() > state.deadline) return;
+    if (!state.armed || (!continuous && state.matched_at) || performance.now() > state.deadline) return;
     if (!matches(current)) state.seen_absent = true;
     let found = matches(current);
     if (!exact && records) found ||= records.some(record => Array.from(record.addedNodes).some(node => {
       const element = node.nodeType === Node.ELEMENT_NODE ? node : node.parentElement;
       return element?.isConnected && element.getClientRects().length && matches(element.innerText || '');
     }));
-    if (state.seen_absent && found) state.matched_at = new Date().toISOString();
+    if (state.seen_absent && found) {
+      state.matched_at = new Date().toISOString();
+      if (state.timeline.length < 100) state.timeline.push({matched_at: state.matched_at, source: 'dom', text});
+      else state.dropped++;
+      state.seen_absent = false;
+    }
   };
   const observer = new MutationObserver(sample);
   observer.observe(document, {subtree: true, childList: true, characterData: true});
@@ -43,9 +50,13 @@ _ARM_BROWSER = r'''({key, text, exact, interval, timeout}) => {
 
 class TransientWatcher:
     """Collect text evidence from before dispatch until match, cancellation or timeout."""
-    def __init__(self, runtime, context, target, condition, *, lock_held=False):
+    def __init__(self, runtime, context, target, condition, *, lock_held=False, browser_calls=False):
         self.runtime, self.context, self.target = runtime, context, target
         self.condition = condition
+        self.browser_calls = browser_calls
+        self.continuous = condition.get('kind') == 'transient_watch'
+        self.timeline = []
+        self.dropped = 0
         self.timeout = condition.get('timeout_ms', 5000) / 1000
         self.stopped = threading.Event()
         self.dispatched = threading.Event()
@@ -55,14 +66,16 @@ class TransientWatcher:
         self.samples = 1
         self.started = None
         self.key = '__dsh_watch_' + uuid.uuid4().hex
-        if not lock_held:
+        self.lock_owned = lock_held or not browser_calls
+        if self.lock_owned and not lock_held:
             while not runtime._transient_lock.acquire(timeout=0.05):
                 context.check()
         try:
             if target.kind == 'browser':
                 self.frame = target.handle[1]
-                baseline = self.frame.evaluate(_ARM_BROWSER, {'key': self.key, 'text': condition['text'],
-                    'exact': condition.get('match') == 'exact', 'interval': 100, 'timeout': self.timeout * 1000})
+                baseline = self._evaluate(_ARM_BROWSER, {'key': self.key, 'text': condition['text'],
+                    'exact': condition.get('match') == 'exact', 'interval': 100, 'timeout': self.timeout * 1000,
+                    'continuous': self.continuous})
                 self.baseline = baseline['baseline_present']
             elif target.kind == 'window':
                 self.baseline = self._sample_native()
@@ -75,13 +88,19 @@ class TransientWatcher:
             self.stopped.set()
             if target.kind == 'browser' and hasattr(self, 'frame'):
                 try:
-                    self.frame.evaluate('key => window[key]?.close()', self.key)
+                    self._evaluate('key => window[key]?.close()', self.key)
                 except Exception:
                     pass
             if self.thread is not None:
                 self.thread.join(timeout=3.1)
-            runtime._transient_lock.release()
+            if self.lock_owned:
+                runtime._transient_lock.release()
             raise
+
+    def _evaluate(self, script, argument):
+        if self.browser_calls:
+            return self.runtime.browser.call(lambda: self.frame.evaluate(script, argument))
+        return self.frame.evaluate(script, argument)
 
     def _sample_native(self):
         def sample():
@@ -115,11 +134,17 @@ class TransientWatcher:
                 if not matched:
                     seen_absent = True
                 if seen_absent and matched:
+                    seen_absent = False
+                    if len(self.timeline) < 100:
+                        self.timeline.append({'matched_at': timestamp(), 'source': 'uia', 'text': self.condition['text']})
+                    else:
+                        self.dropped += 1
                     self.result = {'status': 'met', 'baseline_present': self.baseline, 'samples': self.samples,
                                    'dispatched_at': self.dispatched_at, 'matched_at': timestamp(),
                                    'evidence': {'source': 'uia', 'text': self.condition['text']}}
-                    self.context.change(expectation=self.result)
-                    return
+                    self.context.change(expectation={**self.result, 'timeline': list(self.timeline), 'dropped': self.dropped})
+                    if not self.continuous:
+                        return
         except BaseException as error:
             self.error = error
 
@@ -127,7 +152,7 @@ class TransientWatcher:
         self.started = time.monotonic()
         self.dispatched_at = timestamp()
         if self.target.kind == 'browser':
-            self.frame.evaluate('''key => { const state = window[key];
+            self._evaluate('''key => { const state = window[key];
               if (!state) throw new Error('Transient watcher disappeared');
               state.dispatch(); }''', self.key)
         self.dispatched.set()
@@ -139,22 +164,26 @@ class TransientWatcher:
             if self.error:
                 raise self.error
             if self.target.kind == 'browser':
-                state = self.frame.evaluate('''key => { const s = window[key];
+                state = self._evaluate('''key => { const s = window[key];
                   return s && {baseline_present:s.baseline_present, samples:s.samples,
-                    dispatched_at:s.dispatched_at, matched_at:s.matched_at}; }''', self.key)
+                    dispatched_at:s.dispatched_at, matched_at:s.matched_at, timeline:s.timeline, dropped:s.dropped}; }''', self.key)
                 if state is None:
                     raise RuntimeFault('TARGET_CHANGED', 'Transient watcher lost its document')
+                self.timeline = state.get('timeline', [])
+                self.dropped = state.get('dropped', 0)
                 if state['matched_at']:
                     self.result = {'status': 'met', **state,
                                    'evidence': {'source': 'dom', 'text': self.condition['text']}}
                     self.context.change(expectation=self.result)
-            if self.result:
+            if self.result and not self.continuous:
                 return {'expectation': self.result, 'outcome': 'expectation_met'}
             if time.monotonic() >= deadline:
                 break
             self.context.cancelled.wait(min(0.1, max(0, deadline - time.monotonic())))
-        result = {'status': 'timeout', 'baseline_present': self.baseline,
+        result = {'status': 'met' if self.continuous else 'timeout', 'baseline_present': self.baseline,
                   'samples': state['samples'] if self.target.kind == 'browser' else self.samples}
+        if self.continuous:
+            result.update(timeline=list(self.timeline), dropped=self.dropped, duration_ms=round(self.timeout * 1000))
         if self.started is not None:
             result['dispatched_at'] = self.dispatched_at
         self.context.change(expectation=result)
@@ -165,7 +194,7 @@ class TransientWatcher:
         try:
             if self.target.kind == 'browser':
                 try:
-                    self.frame.evaluate('key => window[key]?.close()', self.key)
+                    self._evaluate('key => window[key]?.close()', self.key)
                 except Exception:
                     pass
             if self.thread is not None:
@@ -173,19 +202,20 @@ class TransientWatcher:
             if self.context.cancelled.is_set() and self.result is None:
                 self.context.change(expectation={'status': 'cancelled', 'baseline_present': self.baseline})
         finally:
-            self.runtime._transient_lock.release()
+            if self.lock_owned:
+                self.runtime._transient_lock.release()
 
 
 def validate_condition(condition):
     if not isinstance(condition, dict):
         raise ValueError('A condition object is required')
     kind = condition.get('kind')
-    fields = {'text': {'text', 'match'}, 'element': {'ref', 'state'},
-              'window': {'title', 'match'}, 'state': {'state'}}
+    fields = {'text': {'text', 'match'}, 'transient_watch': {'text', 'match'}, 'element': {'ref', 'state'},
+              'window': {'title', 'match'}, 'state': {'state'}, 'settle': {'quiet_ms'}}
     if kind not in fields or set(condition) - fields[kind] - {'kind'}:
-        raise ValueError('Unsupported condition fields')
-    if kind in ('text', 'window'):
-        key = 'text' if kind == 'text' else 'title'
+        raise ValueError(f'condition.kind must be one of {", ".join(fields)} and fields must match kind={kind}')
+    if kind in ('text', 'transient_watch', 'window'):
+        key = 'title' if kind == 'window' else 'text'
         if not isinstance(condition.get(key), str) or not condition[key] or len(condition[key]) > 4000:
             raise ValueError(key + ' must be a nonempty string up to 4000 characters')
         if condition.get('match', 'contains') not in ('contains', 'exact'):
@@ -197,6 +227,10 @@ def validate_condition(condition):
             raise ValueError('Unsupported element state')
     if kind == 'state' and condition.get('state') not in ('ready', 'closed', 'url_changed'):
         raise ValueError('Unsupported target state')
+    if kind == 'settle':
+        quiet = condition.get('quiet_ms', 500)
+        if not isinstance(quiet, int) or isinstance(quiet, bool) or not 100 <= quiet <= 5000:
+            raise ValueError('settle.quiet_ms must be an integer from 100 to 5000')
 
 
 class Conditions:
@@ -222,6 +256,15 @@ class Conditions:
         if kind == 'element':
             return self._element(owner, target, oid, condition)
         observed = self.runtime.observations.observe(owner, target_id, image=False)
+        if kind == 'settle':
+            snapshot = self.runtime.observations.get(owner, observed['observation']['observation_id'])
+            signature = hashlib.sha256(json.dumps([snapshot.text,
+                [element.semantic for element in snapshot.elements], target.revision], sort_keys=True).encode()).hexdigest()
+            observed['settle_evidence'] = {'signature': signature}
+            ready = True
+            if target.kind == 'browser':
+                ready = self.runtime.browser.call(lambda: target.handle[1].evaluate('document.readyState')) == 'complete'
+            return ready and not observed['observation']['warnings'], observed
         if kind == 'text':
             snapshot = self.runtime.observations.get(owner, observed['observation']['observation_id'])
             body = snapshot.text
@@ -281,10 +324,18 @@ class Conditions:
         deadline = time.monotonic() + timeout_ms / 1000
         context.change(expectation={'status': 'pending'})
         result, samples = {}, 0
+        stable_since, signature = None, None
         while time.monotonic() < deadline:
             context.check()
             matched, result = self.sample(context.owner, target_id, oid, condition)
             samples += 1
+            if condition['kind'] == 'settle':
+                current = result['settle_evidence']['signature']
+                if not matched or current != signature:
+                    signature, stable_since = current, time.monotonic() if matched else None
+                quiet = 0 if stable_since is None else round((time.monotonic() - stable_since) * 1000)
+                result['settle_evidence']['quiet_ms'] = quiet
+                matched = matched and quiet >= condition.get('quiet_ms', 500)
             if matched:
                 expectation = {'status': 'met', 'samples': samples}
                 context.change(expectation=expectation)

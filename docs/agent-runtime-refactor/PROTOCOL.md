@@ -19,6 +19,10 @@
 
 默认契约不引入额外规划模型。远程图片描述默认调用次数为零。宿主模型直接使用语义观察和真正送入模型的图片。
 
+文件步骤 `file` 支持 `create`、`write`、`read`、`list` 和 `delete`，路径限定于运行时 home 下的 `desktop_workspace`。文本使用 UTF-8，单次读写上限为 2000000 字节。结果包含在操作步骤的 `method` 中。
+
+UIA 元素可通过 `invoke`、`set_value` 和 `expand` 步骤调用对应模式，目标必须使用本次观察的 UIA ref。`set_value` 使用 UIA ValuePattern，常规文本输入可使用 `input`。
+
 ## 2. DSH 适配约束
 
 保留根目录 `AGENTS.md` 中的 Host、Client、打包和生命周期契约。
@@ -130,15 +134,15 @@ owner 只能读取自身操作和观察。全局健康摘要可以包含设备�
 | `visual_effect_regions` | 每项含 `basis`、`bbox`、`changed_pixels`、`total_pixels`、`changed_ratio`、`changed`。bbox 为该比较图片中的 `[left, top, right, bottom]`，右下边界不含 |
 | `visual_effect_thresholds` | `pixel_difference=25`、`global_ratio=0.005`、`local_ratio=0.01`、`local_min_pixels=12`。比例使用 0–1 数值 |
 | `visual_effect_frames` | 实际比较前后的 `observation_id`、`frame_id` 与图像字节 SHA256，用于原样取回及复算 |
-| `visual_effect_step` / `visual_effect_reason` | 当前视觉读回对应的零起点动作下标，未知时给出缺帧、几何变化、解码失败或比较不可用原因 |
+| `visual_effect_step` / `visual_effect_reason` | 当前视觉读回对应的零起点动作下标，未知时给出缺帧、几何变化、解码失败、读回失败、目标关闭或重绑定原因。后面三种情况分别为 `readback_failed`、`target_closed`、`target_rebound` |
 | `visual_effect_attribution` / `visual_effect_attribution_reason` / `visual_effect_warning` | 检测到变化且控件区域、点击近邻均未命中时，关联性为 `unknown`，原因是 `surroundings_only` 或 `full_frame_only`，提示核验预期界面状态。没有控件或点击位置时，全图命中同样给出未知提示。其他情况省略这些字段 |
 | `hover_semantic_changes` | hover 动作前后语义观察比较，`status` 为 `observed` 或 `unknown`，包含新观察到的 `new_elements`、同一元素的 `expanded_changes` 和 `truncated`。元素以 DOM 文档内身份或 UIA runtime ID 匹配，每类最多返回 20 项。来源截断、缺少身份或重复身份时 `truncated` 为 true。文档变化或前次观察缺失时为 unknown |
 
 局部区域来自实际动作解析后的坐标。DOM/UIA 使用控件边界向外扩 12 个图片像素，同时提供以动作点为中心的 64×64 与 256×256 图片像素区域。纯坐标动作提供两个周边区域，越界部分裁剪。局部使用已解码图片的原始分辨率，灰度差超过 25 的像素比例严格大于 1% 且数量至少 12 时命中。全图结果继续使用宽高各减半的原口径，因此全图与局部变化像素数的采样尺度不同。
 
-视觉比较适用于 click、input、check、hover、scroll、drag。拖动以释放点作为局部区域中心。hover 的语义变化使用该步骤派发前后的观察，DOM 的 `aria-expanded` 和可用 UIA ExpandCollapse 状态以 `expanded` 布尔值输出，DOM `role=tooltip` 也参与观察。未暴露语义、延迟出现或观察截断的内容可能需要后续 wait/observe；变化证据由调用方结合预期状态判断。
+视觉比较适用于 click、invoke、input、check、hover、scroll、drag。拖动以释放点作为局部区域中心。hover 的语义变化使用该步骤派发前后的观察，DOM 的 `aria-expanded` 和可用 UIA ExpandCollapse 状态以 `expanded` 布尔值输出，DOM `role=tooltip` 也参与观察。未暴露语义、延迟出现或观察截断的内容可能需要后续 wait/observe；变化证据由调用方结合预期状态判断。
 
-动作前后复用现有截图。仅比较目标、图像尺寸、来源矩形、裁剪、坐标系、采集方法、DPI 与窗口几何一致的帧。坐标不同返回 `null/geometry_mismatch`。局部命中可由图标、悬停或焦点反馈产生，全图命中也可能来自背景动画。
+动作前使用快速帧采集，hover 使用包含语义元素的观察，动作后复用读回截图。仅比较目标、图像尺寸、来源矩形、裁剪、坐标系、采集方法、DPI 与窗口几何一致的帧。坐标不同返回 `null/geometry_mismatch`。局部命中可由图标、悬停或焦点反馈产生，全图命中也可能来自背景动画。
 
 帧可通过现有会话鉴权的 `GET /api/dsh/runtime/frames/{frame_id}` 获取。图片沿用观察缓存上限 64 份、32 MiB、最长 300 秒，容量淘汰和会话释放可提前删除。需要留存时应及时按返回 frame ID 取回并核对 SHA256。操作 journal 保留标识和测量结果，图片按缓存生命周期管理。
 
@@ -577,3 +581,37 @@ Host 以 `exec.callId` 生成或关联稳定请求键。内核在首个可能产
 6. DSH session owner 的稳定来源，以及上下文缺省与 Host 重载后的对应关系。
 
 协议规定身份、坐标、取消和副作用记录的正确性。输出预算、同步预算、采样频率及图片分辨率通过实测调整。首版 open/act/wait 同步预算建议 5000 毫秒，普通动作尽量同次返回读回，长操作到期返回可查询 handle。调优时计入新增 status 所需的模型轮次与延迟。observe 同样有界执行，慢采集登记只读 operation 并通过 status 查询，健康查询自身保持轻量。
+
+### 独立提示监听（0.5.13）
+
+`wait.condition.kind=transient_watch` 监听窗口或浏览器的新文本出现，使用 text 与可选 match。顶层 duration_ms 为 100–90000，默认 5000，可用原有 timeout_ms 指定 100–30000，两个时间字段互斥。监听持续整个时段，返回 expectation.timeline，最多 100 条，溢出计数为 dropped。无命中时返回空时间线并正常完成。已有文本须消失后重现才计入。status/stop 查询或取消长监听，浏览器每轮读取让出执行线程。status 的 request_key 使用当前会话的原始调用 ID 查询操作，同时传 operation_id 时 request_key 优先。
+
+### 窗口与 Web 补齐（0.5.14）
+
+`act` 的动作派发和条件验证分别报告。输入已派发后，即使验证超时或采样不可用，操作仍保留已派发结果，`verification.status` 为 `unknown`。如果验证位于批次中间，后续步骤停止，先检查观察结果再决定如何继续。`wait` 的超时行为不变。
+
+act 的 window 步骤使用 op=activate/topmost/highlight/unbind/cleanup，作用于外层 target_id 指定的原生窗口。topmost/highlight 接受 on，默认 true。unbind/cleanup 须为最后一步且禁止 expect，取消该绑定的其他 operation、释放观察/帧与本绑定的高亮、恢复原始置顶设置，返回 binding_released。后续可用 open 或目录重新发现窗口。窗口本体保留。
+
+浏览器 dom_query/extract 步骤使用 selector 与可选 limit（1–100，默认 50），返回可见节点的只读数据，结果在 steps[].method，单步输出预算为 48000 字符。dom_query 包含矩形，extract 包含链接与图片属性。执行输入前用 observe 取得身份校验 ref。
+
+wait 的 settle 条件以 quiet_ms（100–5000，默认 500）指定稳定时段，语义内容与目标 revision 连续不变且没有采集告警时通过，浏览器还要求 document.readyState=complete。总等待时限仍为顶层 timeout_ms。
+
+### 点击区域与视觉观察（0.5.14）
+
+click/invoke 在语义读回前保留 post_click_frame。点击点周围 ±200 物理像素的同一区域生成 click_region_frames.before 与 after。原生窗口在派发前后直接采集桌面合成画面，method=screen_region，包含覆盖该区域的独立弹层 HWND，边缘按虚拟桌面边界截断。浏览器从已保存的前后帧裁剪局部图，携带 source_frame_id。每张局部图携带 observation_id、captured_at、crop 与 clickable=false。Host 图片顺序为读回观察、即时全图、局部 before、局部 after。局部图遵守既有会话隔离、保存期与内存预算。
+
+local_visual_effect 使用灰度差 >8、变化比例 ≥0.005 且至少 16 像素的独立阈值，返回 local_sample_region、local_visual_effect_changed_ratio 和阈值。visual_effect 聚合稍后语义读回时的全图与动作局部区域比较，visual_effect_global_changed 单独给出全图结果。该比较的采样时点、来源和阈值通过 visual_effect_frames 与 visual_effect_thresholds 返回，local_visual_effect 的即时点击样本通过 click_region_frames 单独返回。popup_region.kind=visual_change 表示变化包围框，popup_detected=null 表示尚无足够证据确认弹层。对同一会话、目标和几何，30 秒内距前次点击不超过 4 像素且局部画面恢复时返回 toggle=true，toggle_evidence.scope=local_pixels，供后续观察确认控件状态。
+
+expect.transient 另用最多 6 秒的独立区域 OCR 对比前后文字，新增候选以 p ref、source=popup_ocr、raw_text、confidence 和 ttl_ms=30000 返回。候选归属 popup_observation_id，后续 act 使用该观察 ID 与候选 ref。物理输入校验允许目标窗口 owner chain 内的独立弹层，并继续检查前台、窗口几何与坐标命中。重复出现的原有文字会被过滤。验证超时保留已派发动作与 timeline，verification.status=unknown。图片附件失败时保留动作记录与 image_warning，同时移除依赖图片的区域和候选坐标。
+
+observe.source 默认 auto。ocr 跳过 DOM/UIA，image 直接返回截图，combined 在结构化观察后补充 OCR，保留控件 selected/enabled/value 与画面 raw_text。显式通道要求 target_id 并返回图片，可用 region 约束识别范围。原生窗口的纯视觉观察使用独立 OCR worker，整个采集预算为 10 秒。auto 仅在查询缺失、指定区域或 UIA 失败时触发视觉识别。
+
+窗口关闭后的自动重绑定优先采用本次动作后新出现的唯一关联窗口，关系由 owner 链和进程实例证明，允许子进程承载新窗口。缺少新窗口证据时，可按同标题、同 PID 和同进程实例的唯一候选恢复。成功结果返回 rebound=true、original_target_id 和当前 target_id，observation.rebound_from 标注来源。用旧观察操作重绑定后的目标返回 TARGET_STALE。
+
+### 无标题窗口与新窗口跟随（0.5.15）
+
+observe 省略 target_id 时默认 include_untitled=true。目录中的原生窗口保留 hwnd、pid、process、class_name、owner_hwnd、window_text 与 title_source。window_text 保存原始顶层标题，空字符串仍保留。title 优先使用原始标题，其次使用首个可见子窗口文本，最后组合窗口类名与进程名，title_source 对应 window_text、child_text 或 class_name。子窗口读取最多访问 16 个控件，单次消息等待上限 50 ms，扫描在 100 ms 后停止派发新读取。目录发现复用 Win32 查询。include_untitled=false 根据原始标题过滤，已在会话中登记的无标题窗口同样被过滤。该选项仅用于目录，禁止与 target_id 或 cursor 混用。
+
+open 接受正整数 hwnd，使用它绑定、激活窗口并返回初始观察。hwnd 与 app、url、target_id、connect 互斥。目录与候选清单中的 target_id 均可直接用于 open。
+
+原生 click/invoke 派发前保存可见窗口身份集合，派发后检查新窗口，普通点击采样上限 500 ms，源 HWND 已销毁时上限 3 秒，返回 new_window_candidates。每项包含 target_id、hwnd、pid、process、title、window_text、title_source、class_name、owner_hwnd 与 relationship。relationship 为 owner_chain、same_process 或 child_process。owner 链与进程关联均使用 PID 和创建时间，扫描最多 8 级。普通目录只读取进程自身身份，需要证明新候选的子进程关系时才读取 ancestry。候选限定本次新出现的关联窗口，普通共同祖先进程不构成关联。新窗口出现会中断剩余批量步骤。多个候选保留清单，后续用 open 选定目标并重新观察。探测失败保留已派发动作和 window_discovery_warning。

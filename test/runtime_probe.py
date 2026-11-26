@@ -66,11 +66,16 @@ with TestClient(app, base_url='http://127.0.0.1:18766', headers=headers) as clie
     for path in retired:
         assert client.post('/api/dsh' + path, json={}).status_code == 404
     directory = operation('observe', {})
+    windows = [row for row in directory['targets'] if row['kind'] == 'window']
+    assert all({'hwnd', 'pid', 'process', 'window_text', 'title_source'} <= row.keys() for row in windows), windows
+    filtered = operation('observe', {'include_untitled': False})
+    assert all(row.get('window_text') for row in filtered['targets'] if row['kind'] == 'window'), filtered
     status = client.post('/api/dsh/runtime/status', json={})
     assert status.status_code == 200 and status.json()['success'], status.text
     report = {'protocol': health.json()['protocol'], 'parser_initializations': 0,
               'forbidden_imports_loaded': len(FORBIDDEN.intersection(sys.modules)),
-              'windows': len([row for row in directory['targets'] if row['kind'] == 'window']),
+              'windows': len(windows), 'untitled_windows': sum(row['window_text'] == '' for row in windows),
+              'window_metadata_complete': True, 'untitled_filter_verified': True,
               'retired_routes_absent': len(retired),
               'health_ms': round((time.monotonic() - start) * 1000, 3)}
     if '--live' in sys.argv:

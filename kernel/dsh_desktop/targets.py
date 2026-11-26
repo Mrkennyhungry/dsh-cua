@@ -152,3 +152,8 @@ class FrameRegistry:
     def discard(self, frame_id):
         with self._lock:
             self._frames.pop(frame_id, None)
+
+    def release_target(self, owner, target_id):
+        with self._lock:
+            self._frames = OrderedDict((key, frame) for key, frame in self._frames.items()
+                                       if frame.owner != owner or frame.target_id != target_id)

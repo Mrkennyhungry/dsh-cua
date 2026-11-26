@@ -36,8 +36,13 @@ test('runtime adapter registers six tools and forwards operation identity and ca
   const signal = new AbortController().signal
   const exec = { callId: 'call-1', signal, agent: { session: { id: 'session-1' } } }
   assert.match(tools.get('doraemon_open').parameters.properties.args.description, /absolute path/)
+  assert.equal(tools.get('doraemon_open').parameters.properties.hwnd.type, 'integer')
+  assert.equal(tools.get('doraemon_observe').parameters.properties.include_untitled.type, 'boolean')
   assert.match(tools.get('doraemon_observe').parameters.properties.query.description, /Literal, case-insensitive substring/)
   assert.match(tools.get('doraemon_act').parameters.properties.steps.items.properties.keys.description, /\["CTRL", "S"\]/)
+  assert.equal(tools.get('doraemon_status').parameters.properties.request_key.type, 'string')
+  assert.ok(tools.get('doraemon_wait').parameters.properties.condition.properties.kind.enum.includes('transient_watch'))
+  assert.ok(!tools.get('doraemon_act').parameters.properties.expect.properties.kind.enum.includes('transient_watch'))
   assert.deepEqual(tools.get('doraemon_wait').parameters.properties.condition.properties.state.enum,
     ['ready', 'closed', 'url_changed', 'visible', 'hidden', 'enabled', 'disabled', 'checked', 'unchecked', 'focused'])
   await tools.get('doraemon_open').execute({ url: 'https://example.test' }, exec)
@@ -97,6 +102,10 @@ test('an image storage failure preserves dispatched operation data without unusa
   const bridge = { async request(path) {
     if (path.includes('/frames/')) return new Uint8Array([1])
     return { success: true, operation_id: 'op-1', status: 'completed', completed_steps: [0],
+      post_click_frame: { frame_id: 'f_2', width: 100, height: 50 },
+      popup_candidates: [{ ref: 'p1', bounds: { frame_id: 'f_2', x: 2, y: 3 } }],
+      popup_region: { frame_id: 'f_2', x: 2, y: 3 }, local_sample_region: { frame_id: 'f_2', x: 0, y: 0 },
+      click_region_frames: { before: { frame_id: 'f_3' }, after: { frame_id: 'f_4' } },
       observation: { frames: [{ frame_id: 'f_1', width: 100, height: 50 }],
         elements: [{ ref: 'e1', bounds: { frame_id: 'f_1', x: 1, y: 2 } }] } }
   } }
@@ -104,12 +113,36 @@ test('an image storage failure preserves dispatched operation data without unusa
     tool => tools.set(tool.name, tool))
   const exec = { callId: 'call-1', signal: new AbortController().signal, agent: { session: { id: 'session-1' } } }
   const result = await tools.get('doraemon_act').execute({ target_id: 't', observation_id: 'o', steps: [{ action: 'close' }] }, exec)
-  assert.equal(result.success, false)
-  assert.equal(result.error.code, 'IMAGE_ATTACHMENT_FAILED')
+  assert.equal(result.success, true)
+  assert.equal(result.image_warning.code, 'IMAGE_ATTACHMENT_FAILED')
   assert.equal(result.operation_id, 'op-1')
   assert.deepEqual(result.completed_steps, [0])
   assert.deepEqual(result.observation.frames, [])
   assert.deepEqual(result.observation.elements, [{ ref: 'e1' }])
+  assert.equal(result.post_click_frame, undefined)
+  assert.equal(result.popup_candidates, undefined)
+  assert.equal(result.popup_region, undefined)
+  assert.equal(result.local_sample_region, undefined)
+  assert.equal(result.click_region_frames, undefined)
+  assert.match(result.next_action, /Observe the target again/)
+})
+
+test('click evidence attaches full readback and immediate frame followed by before and after crops', async () => {
+  const tools = new Map(), saved = []
+  const frames = ['readback', 'immediate', 'before', 'after'].map(frame_id => ({ frame_id, width: 400, height: 300 }))
+  registerRuntimeTools({ get: () => ({ saveImage: async input => {
+    saved.push(input.name)
+    return { attachmentId: input.name, width: 400, height: 300 }
+  } }) }, { async request(path, _owner, options) {
+    if (options.image) return new Uint8Array([1])
+    return { success: true, observation: { frames: [frames[0]] }, post_click_frame: frames[1],
+      click_region_frames: { before: frames[2], after: frames[3] } }
+  } }, tool => tools.set(tool.name, tool))
+  const result = await tools.get('doraemon_act').execute({ target_id: 't', observation_id: 'o', steps: [{ action: 'close' }] }, {
+    callId: 'click', signal: new AbortController().signal, agent: { session: { id: 'a' } },
+  })
+  assert.deepEqual(saved, ['readback.jpg', 'immediate.jpg', 'before.jpg', 'after.jpg'])
+  assert.equal(result.attachments.length, 4)
 })
 
 test('a lost operation response is reconciled by request key without redispatch', async () => {

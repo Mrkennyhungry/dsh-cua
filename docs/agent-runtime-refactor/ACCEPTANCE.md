@@ -621,9 +621,74 @@ python scripts/run-live-probe.py test/test_cleanup_dialog_live.py
 
 受影响模型任务的命令沿用 README 的基准入口，增加 --tasks=notepad,upload,persistence，每次使用空输出目录。原始会话和请求日志继续位于本机忽略目录，归档 JSON 排除工具全文、模型全文、凭据和图片原文。更新 HIGH_HANDOFF 中过期的 P5 状态与测试基线，后续进度以 PHASES 顶部表为准。
 
-### 0.5.8 动作局部视觉变化修复
+### 0.5.8 原生输入事件修复
 
-2026-11-26 在原分支完成 P7 缺陷修复。修改前完整检查通过 Node 94 项、Python 321 项、1 项显式真实窗口 SKIP、43 subtests，Python 耗时 11.74 s。版本同步为 0.5.8。本轮增加 18 项有针对性的回归测试，公开返回结构的决定见 ADR 0005。
+2026-11-26 针对 Electron 输入框替换文本后界面状态未更新的问题，原生 `replace` 改为聚焦后全选、删除并键入，取消 UIA SetValue 快路径。
+
+| 检查项 | 状态 | 实测结果 |
+| --- | --- | --- |
+| 完整检查 | PASS | `scripts/check.ps1`，Node 94 PASS，Python 322 PASS、1 SKIP、43 subtests PASS，19.33 s |
+| 原生输入批量动作 | PASS | 隔离 `actions_probe.py`，replace 与 END 按键 2/2 完成，读回 `batch input`，总耗时 44937 ms；原生与浏览器短提示均命中，parser 初始化与 caption 均为 0 |
+| Electron / WorkBuddy | NOT RUN | 尚未验证替换后发送按钮 enabled，也未向对话发送消息 |
+| 双模型请求 | NOT RUN | 本次未重新发起两个模型请求 |
+
+P7 仍受真实异 DPI、负原点多屏硬件条件阻塞。
+
+### 2026-11-26 验收范围修订与 0.5.13
+
+用户明确将真实双屏、混合 DPI 与负原点多屏验收挂起，以当前固定 1920×1080 单屏作为后续执行验收范围。旧硬件实测数值保留，挂起项不再阻塞当前范围，亦未计为实测通过。新增缺口能力仍须逐项回归。0.5.13 完整检查为 Node 94 PASS、Python 330 PASS、1 SKIP、43 subtests PASS（20.15 s）。新增独立监听回归覆盖两次原生提示出现、取消释放、浏览器执行线程让出和无命中空时间线。
+
+### 0.5.14 续接检查
+
+工作树包含续接前已有的窗口、网页查询与稳定等待改动，尚未提交。完整检查为 Node 94 PASS、Python 334 PASS、1 SKIP、43 subtests PASS（20.20 s）。隔离 actions_probe 通过，20 个操作样本，原生与浏览器瞬态提示均命中，取消清理 1/1、重复派发 0、parser 与 caption 均为 0，总耗时 43218 ms。此探针未覆盖新增窗口和网页查询能力，仍需单独实机验证。
+
+本轮完整检查为 Node 94 PASS、Python 340 PASS、1 SKIP、43 subtests PASS（21.80 s）。隔离 actions_probe 20 个操作样本通过，原生与浏览器瞬态提示均命中，取消清理 1/1、重复派发 0，parser 初始化 1 次、caption 0，总耗时 49406 ms。云智安全管家实测病毒 Tab 为 selected=true，OCR 查询「日志」置信度 0.999、耗时约 2–2.4 秒。点击后 UIA 超时，操作保留已派发、验证未知及重新定位建议，未观察到菜单弹出。此次未发生窗口关闭，自动重绑定仅有单元测试证据；页面主体文本、真实瞬态菜单及新窗口和网页查询入口仍需实机验收。
+
+### 0.5.14 桌面合成局部证据与最终回归
+
+用户指出日志菜单可能属于独立窗口。源码确认主窗口 capture_detailed 优先 PrintWindow，独立 HWND 的弹层可能遗漏。原生点击局部证据改为派发前后采集桌面合成画面，主窗口即时全图与局部前后图一起通过 Host 附件返回。该行为适用于原生窗口的独立弹层，采集区域为点击点周围 ±200 物理像素。
+
+| 检查项 | 状态 | 实测结果 |
+| --- | --- | --- |
+| 完整检查 | PASS | scripts/check.ps1，Node 95 PASS、0 FAIL、0 SKIP，2542.8469 ms；Python 347 PASS、1 显式真实窗口 SKIP、43 subtests PASS，21.17 s；Host/Client 语法通过 |
+| 真实原生与浏览器动作 | PASS | actions_probe v6，29 个 operation，总计 59906 ms；窗口 activate/topmost/highlight/cleanup、Web dom_query/extract/settle、中文表单、窗口重建重绑定与 TARGET_STALE、取消及重放全部通过，重放额外派发 0，parser 初始化 1，caption 0 |
+| 独立 HWND 菜单闭环 | PASS | 隔离 owned popup 夹具，screen_region 局部变化比例 0.173538；OCR 候选置信度 0.994，通过 popup_observation_id 与 p ref 点击后父窗口读回 Owned popup selected |
+| 低对比度变化与 toggle | PASS | 浏览器夹具全图变化比例 0.001536、visual_effect=false，局部比例 0.077371、local_visual_effect=true；第二次点击关闭、toggle=true |
+| 云智真实菜单采集 | PASS | status=completed、success=true、physical_click 已派发；全图比例 0.000104、visual_effect=false，局部比例 0.022394、local_visual_effect=true；局部 after 图实际显示两项菜单，p1「病毒查杀日志」置信度 0.998、p2「病毒库升级日志」置信度 0.999；verification=unknown，保留图片、候选与后续建议 |
+| 云智双通道观察 | PASS | 同一 combined 观察含「病毒」selected=true 与页面实际文字「已经有很久没杀毒了」，OCR 置信度 0.999；uia_coverage=partial，缺失按钮标记 semantic_missing；总计 3266.717 ms，UIA 946.902 ms、capture 99.474 ms、OCR 2176.412 ms，caption 0 |
+| 云智纯视觉入口 | PASS | source=ocr、query=日志，735.784 ms，其中 capture 93.476 ms、OCR 608.904 ms；UIA 0 次、OCR 1 次、caption 0，置信度 0.999；kernel/target integrity 均为 12288、uipi_risk=false |
+| 轻量 runtime | PASS | 独立 runtime_probe，protocol 2、31 个窗口、health/目录 843 ms、退役路由缺失 5/5、禁止依赖导入 0、parser 初始化 0、runtime 释放成功 |
+| 发布检查 | PASS | npm pack --dry-run，0.5.14，104 文件，2610797 bytes，解包 3304271 bytes；三个 DSH SDK peers 均保持 optional；git diff --check 通过 |
+| 新 DSH 会话与两模型 | NOT RUN | 0.5.14 尚待安装后的实际六工具/附件与两个模型复验，历史 0.5.4 的模型数值保留在前文 |
+| 云智特定窗口重建 | NOT REPRODUCED | 本次云智操作期间未发生 HWND 重建。通用真实窗口重建、自动重绑定与旧观察失效已由隔离 fixture 实测通过 |
+
+上段「未观察到菜单弹出」已由本轮桌面局部图修正。owned popup 夹具初次断言因 OCR 返回 Ownedmenuitem 而非含空格文字失败，断言改为忽略空白后 v6 通过，raw_text 保留 OCR 原文。像素变化与 OCR 候选均作为证据返回，popup_detected=null、appearance_verified=false 表示弹层语义尚未由控件状态确认。
+
+本机复现证据分别位于 .runtime/check-final.log、.runtime/actions-screen-region-v6.log、.runtime/runtime-final.log、.runtime/security-screen-region-click.log，以及 %TEMP%\\dsh-local-evidence-20261126-v6\\actions-probe.json、%TEMP%\\dsh-local-click-_hafobe_、%TEMP%\\dsh-combined-hw8epnvd\\report.json。P7 继续进行中，固定单屏范围内可交 DSH 体验验收；真实双屏、异 DPI 与负原点多屏按用户决定保持挂起。
+
+### 0.5.15 无标题窗口发现与跨进程跟随
+
+2026-11-26 针对 DSH 实测空标题日志窗口未被发现的反馈，增加窗口标题来源、目录过滤与 HWND 打开入口，并沿 owner 链和子进程关系发现新 HWND。开工分支为 codex/agent-runtime-refactor，HEAD babc4c4，工作树干净。基线 scripts/check.ps1 为 Node 95 PASS、0 SKIP、2972.3387 ms，Python 347 PASS、1 SKIP、43 subtests PASS、21.54 s。包与内核版本同步至 0.5.15。
+
+| 检查项 | 状态 | 实测结果 |
+| --- | --- | --- |
+| 完整检查 | PASS | scripts/check.ps1，Node 95 PASS、0 FAIL、0 SKIP、2833.2684 ms；Python 359 PASS、1 显式真实窗口 SKIP、57 subtests PASS、20.65 s；Host/Client 语法通过 |
+| 无标题窗口与 HWND 打开 | PASS | actions_probe v5 的真实 owned popup 顶层 window_text 为空，title_source=child_text，目录保留 HWND/PID/process/owner；默认发现、include_untitled=false 过滤与 public open(hwnd) 激活及初始观察全部通过 |
+| 跨子进程重绑定 | PASS | 源 fixture PID 27620 销毁 HWND 后，发现子进程 PID 25056 的 HWND 14946700，owner_hwnd=0、window_text=""、title=日志与信任管理、title_source=child_text、relationship=child_process；动作 1154.545 ms，自动重绑定、新观察及旧 observation 的 TARGET_STALE 校验通过 |
+| 关联与去歧义回归 | PASS | 带创建时间的 owner/进程实例匹配、无关共同祖先排除、已存在窗口排除、多候选保留、延迟候选采样、派发结果保留与停止后续批量步骤全部通过 |
+| 真实动作矩阵 | PASS | actions_probe v5，30 个 operation 全部 completed，总耗时 60203 ms；原生/浏览器表单、瞬态提示、窗口控件、Web 查询与稳定等待、同进程 HWND 重建、取消及重放通过，重放额外派发 0，parser 初始化 1，caption 0，模型请求 0 |
+| 独立弹层与局部图 | PASS | owned popup OCR confidence=0.995，local_changed_ratio=0.1284，p ref 点击后读回成功；浏览器浅色弹层全图比例 0.001536、局部比例 0.077371，第二次点击关闭且 toggle=true |
+| 轻量 runtime | PASS | protocol 2，目录 52 个窗口，其中原始标题为空 21 个，元数据完整与无标题过滤均通过；health/目录等检查合计 266 ms，退役路由缺失 5/5，禁止依赖导入 0，parser 初始化 0，runtime 释放成功 |
+| 发布检查 | PASS | npm pack --dry-run，0.5.15，104 文件，2613316 bytes，解包 3315189 bytes；三个 DSH SDK peers 均为 optional；git diff --check 通过 |
+| 当前版本 DSH 与两模型 | NOT RUN | 0.5.15 尚待真实新会话复验六工具、status、图片附件与云智菜单跨进程路径，以及 wb/cn:deepseek-v4.1-flash、wb/cn:hy4std 请求；前文历史模型数值继续保留 |
+
+实机探针 v1–v4 保留失败记录。完整窗口描述用于每次动作边界时开销过高，已改为轻量身份快照，并仅在新候选需要子进程证明时读取 ancestry。探针改为通过 operation/status 跟随完成，并将输入锁等待检查延长至 10 秒。500 ms 采样曾漏掉源窗口关闭后的延迟子窗口，销毁路径现使用 3 秒预算，v5 全部通过。探针 finally 清理自身子进程，已精确清理 v4 遗留的夹具进程。
+
+证据保留于 .runtime/check-window-discovery-baseline.log、.runtime/check-window-discovery-final.log、.runtime/actions-window-discovery-v1.log 至 v5.log、.runtime/runtime-window-discovery.log、.runtime/pack-window-discovery.json 及 %TEMP%\\dsh-window-discovery-20261126-v5\\actions-probe.json。P7 继续进行中，真实双屏、异 DPI 与负原点多屏按用户决定保持挂起。
+
+### 本地未发布 0.5.8 动作局部视觉变化修复
+
+2026-11-26 在原分支完成 P7 缺陷修复。修改前完整检查通过 Node 94 项、Python 321 项、1 项显式真实窗口 SKIP、43 subtests，Python 耗时 11.74 s。版本同步为 0.5.8。本轮增加 18 项有针对性的回归测试，公开返回结构的决定见 ADR 0011。
 
 用户提供的 evidence-0.5.6-visual-effect 原图使用内核同一算法复算，QQ 音乐全图为 0.165184，Steam 为 0.70763。前者精确复现原报告 16.52% 的量级，后者与工具返回完全一致。QQ 音乐动作内部 before 帧仍未留存，因此这两张公开帧继续用于图像算法复核。按钮区域由原图人工指定，回放脚本中明确列出坐标。
 
@@ -639,7 +704,7 @@ python scripts/run-live-probe.py test/test_cleanup_dialog_live.py
 | 比较计算耗时 | PASS | 1366×854 同一对真实帧，预热各 5 次再测各 50 次。全图 median 4.054 ms、p95 4.474 ms，联合局部 median 4.136 ms、p95 4.522 ms。该数字只覆盖图像比较 |
 | 完整检查与打包 | PASS | 提交前 scripts/check.ps1，Node 94 PASS、0 FAIL、0 SKIP，Python 339 PASS、1 显式真实窗口 SKIP、45 subtests PASS，10.91 s。npm pack --dry-run 共 104 文件、2598585 bytes，运行文件清单完整 |
 | QQ 音乐 0.5.8 实际播放与 Hy4 | NOT RUN | 本轮 QQ 音乐使用用户留存图像复算，模型验收使用 DeepSeek 与自建播放图标页面 |
-| 真实异 DPI / 负原点多屏 | BLOCKED | 原硬件缺口继续阻塞 P7 阶段闸门，本轮确定性坐标测试覆盖负原点与缩放 |
+| 真实异 DPI / 负原点多屏 | SUSPENDED | 后续用户决定挂起真实硬件矩阵，本轮确定性坐标测试覆盖负原点与缩放 |
 
 首次 live fixture 已检出小图标，但点击同时改变 focused 字段，导致要求 observation_changed=false 的隔离断言失败。随后在测试按钮阻止 mousedown 默认焦点行为，两轮均只改变 canvas。96×96 初始近邻对这枚图标得到约 0.9459%，实测不足 1%，因此近邻缩为 64×64，保留外围范围。最初 DSH 会话缺少 wb adapter，随后复用现有 benchmark 的 provider overlay 与 credentials 服务，正式验证成功。失败日志和原始图片保留在本机 .runtime。
 
@@ -656,9 +721,9 @@ $env:TEMP = $env:TMP = Join-Path (Get-Location) '.runtime/test-temp'
 python scripts/run-live-probe.py test/actions_probe.py .runtime/p7-local-visual-reproduce-home
 ```
 
-### 0.5.9 视觉变化关联性提示
+### 本地未发布 0.5.9 视觉变化关联性提示
 
-2026-11-26 基线 `scripts/check.ps1` 通过 Node 94 项、Python 339 项、1 项显式真实窗口 SKIP、45 subtests，Python 11.10 s。外围或全图命中且控件边界与点击近邻均未命中时，增加关联性未知、空间原因和核验界面状态的提示。具体合同见 PROTOCOL，决策见 ADR 0006。
+2026-11-26 基线 `scripts/check.ps1` 通过 Node 94 项、Python 339 项、1 项显式真实窗口 SKIP、45 subtests，Python 11.10 s。外围或全图命中且控件边界与点击近邻均未命中时，增加关联性未知、空间原因和核验界面状态的提示。具体合同见 PROTOCOL，决策见 ADR 0012。
 
 | 检查项 | 状态 | 实测结果 |
 | --- | --- | --- |
@@ -666,11 +731,11 @@ python scripts/run-live-probe.py test/actions_probe.py .runtime/p7-local-visual-
 | 真实动作入口 | PASS | 隔离 actions_probe 完成，耗时 20.719 s。外围测试控件点击一次，控件区域与近邻各 0 个变化像素，外围 3001/66049，返回 `surroundings_only`；同一 operation 的 status 视觉字段一致 |
 | 安装与新 DSH 会话 | PASS | 官方 CLI link 安装后，新 DeepSeek 会话调用 status、open、act、status，版本 0.5.9，5 个 Agent 请求均发现六工具。控件与近邻各 0 个变化像素，外围 2890/66049，全图比例 0.002476，act/status 返回相同未知关联提示；页面独立读回 clicks=1、playing=true |
 | 完整检查 | PASS | scripts/check.ps1，Node 95 PASS、0 SKIP，Python 340 PASS、1 显式真实窗口 SKIP、45 subtests PASS，11.64 s |
-| 真实异 DPI / 负原点多屏 | BLOCKED | 本机缺少异 DPI、负原点多屏硬件，P7 阶段闸门继续阻塞 |
+| 真实异 DPI / 负原点多屏 | SUSPENDED | 后续用户决定挂起真实硬件矩阵，记录保留为未实测 |
 
 定向测试首次直接运行缺少 `PYTHONPATH`，完整检查首次执行发现两处测试样本问题，已修正断言位置和近邻区域边界，再通过上述检查。实机页面及隔离服务已关闭。
 
-### 0.5.10 悬停语义及其他动作的视觉读回
+### 本地未发布 0.5.10 悬停语义及其他动作的视觉读回
 
 2026-11-26 修改前完整基线 Node 95 PASS、Python 340 PASS、1 SKIP、45 subtests，Python 11.52 s。悬停使用当前步骤的前后观察匹配 DOM 身份或 UIA runtime ID，输出新观察元素和可读取的展开状态变化。截图不可用时悬停继续尝试语义采集。hover、scroll、drag 复用画面比较，拖动局部区域位于释放点。
 
@@ -679,6 +744,46 @@ python scripts/run-live-probe.py test/actions_probe.py .runtime/p7-local-visual-
 | 原生和浏览器动作 | PASS | 隔离 actions_probe 24 个操作，20.235 s；浏览器 hover 返回 tooltip `Hover details` 和 `aria-expanded` false→true，status 一致。原生 ComboBox 展开前后 UIA 状态 false→true，runtime ID 关联后的变化匹配成功；scroll、drag 返回视觉字段 |
 | 新 DSH 会话 | PASS | 官方 CLI link 安装 0.5.10，新 DeepSeek 会话 status→open→act→status，5 个 Agent 请求均发现六工具；hover 的新 tooltip、展开状态和视觉结果返回，operation status 的语义证据一致 |
 | 完整检查 | PASS | scripts/check.ps1，Node 95 PASS、0 SKIP，Python 344 PASS、1 显式真实窗口 SKIP、48 subtests PASS，11.56 s |
-| 真实异 DPI / 负原点多屏 | BLOCKED | 本机缺少异 DPI、负原点多屏硬件，P7 阶段闸门继续阻塞 |
+| 真实异 DPI / 负原点多屏 | SUSPENDED | 后续用户决定挂起真实硬件矩阵，记录保留为未实测 |
 
 语义采集受可访问性、采集时机和截断约束，独立窗口或纯绘制 tooltip 可能需要额外观察。延迟显示可通过 expect/wait 验证。UIA 的部分展开和叶节点状态不映射为布尔 `expanded`。测试服务及自建窗口已关闭。
+
+
+### 2026-11-27 公司端更新与本地动作证据合并 0.5.16
+
+本轮在 `codex/agent-runtime-refactor` 合并公司端 `0475d7a` 与本地 `421a97d`，版本统一为 0.5.16。保留快速截图、独立瞬态监测、桌面合成点击区域、低对比度变化、剪贴板和文件动作、UIA pattern、窗口发现及跨子进程重绑定。加入控件范围、落点近邻和外围的原分辨率比较，以及 hover 的新元素与展开状态证据。ADR 编号冲突通过将本地三份决策记录顺延到 0011–0013 解决。
+
+| 检查项 | 状态 | 实测结果 |
+| --- | --- | --- |
+| 修改前基线 | PASS | scripts/check.ps1，Node 95 PASS，Python 344 PASS、1 SKIP、48 subtests PASS |
+| 最终完整检查 | PASS | scripts/check.ps1，Host/Client 语法通过，Node 96 PASS、0 FAIL、0 SKIP，Python 384 PASS、1 显式真实窗口 SKIP、77 subtests PASS，13.75 s |
+| 合并后动作探针 | PASS | 隔离 actions_probe 35 个操作成功完成，45375 ms。覆盖原生与浏览器表单、窗口管理、网页查询和抽取、稳定等待、瞬态提示、owned popup OCR 与 p ref 点击、窗口关闭及子进程重绑定、stale guard、取消和幂等重放，额外重复派发 0。parser 初始化 1 次，caption 0，模型调用 0 |
+| 小图标局部变化 | PASS | DOM ref 与纯 frame 坐标点击的全图比例均为 0.000082、global_changed=false，局部为 true、basis=local。动作实际使用的前后图片按 frame ID 取回并核对 SHA256。原生 checkbox 全图比例 0.000664，控件局部比例 0.017131，局部命中 |
+| hover、scroll 与 drag | PASS | hover 返回新 tooltip Hover details 与 expanded false→true，operation status 证据一致。UIA ComboBox false→true 使用 runtime ID 匹配。scroll、drag 均返回视觉字段。目标关闭、重绑定及读回失败路径的未知视觉结果有专项回归 |
+| 公司端即时点击证据 | PASS | 原生独立 HWND 菜单 OCR 置信度 0.994，局部比例 0.0505，p ref 点击成功。浏览器局部比例 0.07633，后续全图比例 0.001574，第二次点击关闭且 toggle=true。即时 local_visual_effect 与后续聚合 visual_effect 的采集时间和阈值分别保留 |
+| 独立轻量 runtime | PASS | protocol 2，24 个窗口含 10 个无标题窗口，目录 metadata 与过滤通过，health/目录 141 ms，退役路由缺失 5/5，禁止依赖导入 0，parser 初始化 0，runtime 释放成功 |
+| 官方安装 | PASS | 官方 CLI plugin add link 安装 headless profile 成功。安装器提示链接包的 peers 解析警告，后续两个新会话均正常加载六个 doraemon 工具并调用 status |
+| DeepSeek 新会话 smoke | PASS | wb/cn:deepseek-v4.1-flash，1/1，7 个模型请求、6 个图片内容块。各 Agent 请求均包含六个 doraemon 工具，status→open→hover→operation status 完成，版本 0.5.16、build 2a24b4510dc2fd19。新 tooltip 与 expanded false→true 返回且持久化证据一致 |
+| Hy4 新会话 smoke | PASS | wb/cn:hy4std，1/1，6 个模型请求、6 个图片内容块。各 Agent 请求均包含六个 doraemon 工具，同一任务完成，hover 的语义和视觉证据与 operation status 一致。独立页面读回两页均为 playing=true、clicks=1 |
+| 发布清单 | PASS | npm pack --dry-run，0.5.16，104 文件，压缩 2616029 bytes，解包 3327408 bytes，动作运行模块已包含，standalone 已排除，三个 SDK peers 保持 optional |
+| 本轮完整模型矩阵及公司应用专项 | NOT RUN | 两模型本轮各完成一次相同 hover 任务 smoke。完整多任务重复实验和云智等真实应用专项复验仍在 P7 后续范围内 |
+| 真实双屏、异 DPI 与负原点多屏 | SUSPENDED | 按用户已确认决定挂起，当前验收范围为固定 1920×1080 单屏 |
+
+首次完整检查发现 sparse checkout 未物化已跟踪 standalone 文件，恢复这些文件后检查通过。第一次实机探针缺少 rapidocr，随后复用本机已有可选视觉依赖。第二次原生菜单 OCR 候选为空，诊断复跑又发现新增 hover 夹具提示会遮挡原有菜单比较区域。将 hover 控件与提示移至独立位置后，第三次完整实机探针通过，原有公司端和本地断言均保留。前述失败日志保留在本机忽略目录。
+
+两模型 smoke 使用同一版已启动内核。随后补齐读回失败和重绑场景的未知原因字段，最终完整检查覆盖该修正。真实服务与自建浏览器页面已关闭。两次 smoke 的 session 分别为 `session-d5caa300-f0db-42b6-94ef-4fa061280dbf` 和 `session-c1eaa6e0-c464-49e3-b20a-42d7c49f4f5a`。
+
+完整检查与实机探针可在仓库根目录复现，每次使用新的隔离 home。下列 PYTHONPATH 复用本机已安装视觉依赖，依赖齐全的环境可按其安装位置调整。
+
+```powershell
+pwsh -File scripts/check.ps1
+$env:PYTHONIOENCODING = 'utf-8'
+$env:PYTHONPATH = Join-Path $env:LOCALAPPDATA 'dsh-desktop/venv/Lib/site-packages'
+$env:TEMP = $env:TMP = Join-Path (Get-Location) '.runtime/test-temp'
+python scripts/run-live-probe.py test/actions_probe.py .runtime/p7-merge-0516-reproduce-home
+python scripts/run-live-probe.py test/runtime_probe.py .runtime/p7-merge-0516-runtime-reproduce-home --live
+node scripts/dsh-benchmark-entry.mjs plugin --profile headless add link:C:/Users/Admin/Documents/deepseek-harness/default-workspace/dsh-cua
+npm pack --dry-run --json
+```
+
+本机证据包括 `.runtime/merge-0516-baseline.log`、`.runtime/merge-0516-check-final.log`、`.runtime/p7-merge-0516-home-3/actions-probe.json`、`.runtime/merge-0516-runtime.log`、`.runtime/merge-0516-install.log`、`.runtime/merge-dsh-requests.json`、`.runtime/merge-hy4-requests.json`、两份 `*-events-2.jsonl` 及 `.runtime/merge-0516-pack-final.json`。P7 保持进行中。

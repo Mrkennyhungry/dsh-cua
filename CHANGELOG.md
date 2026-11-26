@@ -1,24 +1,81 @@
 # Changelog
 
+## [0.5.16] - 2026-11-27
+
+### Added
+- 动作回读增加控件范围、落点附近和外围的视觉变化证据，保留帧 ID、观测 ID、SHA256 与采样范围，降低小图标变化被整图比例稀释的问题。
+- `hover`、`scroll`、`drag` 与 `invoke` 返回统一视觉证据。hover 同时报告新语义元素与展开状态变化，截图不可用时尝试语义回读。
+- 仅外围或全图变化时返回归因未知及提示，区分动作周围变化与背景动画。
+
+### Fixed
+- 合入 0.5.15 的快速截图、瞬态监测、低对比点击证据、窗口发现与目标重绑流程，hover 使用包含元素的独立动作前观测。
+- 读回失败、目标关闭或窗口重绑时，视觉动作显式返回未知结果与原因，hover 保留语义未知状态。
+
+## [0.5.15] - 2026-11-26
+
+### Added
+
+- Discover visible untitled windows by default, with raw window text, readable fallback titles, title provenance, HWND, PID and process name. Add directory include_untitled filtering and explicit open by HWND.
+- Return new_window_candidates after native clicks and invocations, with process-instance and owner-chain relationship evidence.
+
+### Fixed
+
+- Follow unique replacement windows across descendant processes and owner chains while retaining stale-observation rejection and dispatched action results.
+- Preserve raw-title launch disambiguation when helper windows receive synthesized display titles.
+
+## [0.5.14] - 2026-11-26
+
+### Added
+
+- Add native window activation, topmost, highlight and binding cleanup actions.
+- Add bounded browser CSS query and extraction, and semantic quiet-interval waits.
+
+### Changed
+
+- Preserve dispatched actions when verification or image attachment fails, and provide immediate click frames and bounded local visual evidence.
+- Retry timed-out UIA observations and support bounded OCR fallback, transient OCR candidates, safe target rebinding and window integrity warnings.
+- Attach before/after click-region crops alongside full frames, compare low-contrast local changes and identify local visual reversals from repeated clicks.
+- Add explicit OCR, image and combined observation sources for incomplete native accessibility providers.
+
+### Fixed
+
+- Capture desktop-composited click regions so separately owned popup windows appear in local evidence, and allow validated popup candidate clicks through the target's owner chain.
+
+## [0.5.13] - 2026-11-26
+
+### Added
+
+- Add independent transient text watches with bounded timelines and expose status lookup by request key.
+
+## [0.5.12] - 2026-11-26
+
+### Added
+
+- Add UI Automation invoke, value and expand pattern actions.
+
+## [0.5.11] - 2026-11-26
+
+### Added
+
+- Add workspace-scoped file operations to the unified action tool.
+
 ## [0.5.10] - 2026-11-26
 
 ### Added
 
-- Report before-and-after hover semantic evidence for newly observed elements and readable expansion-state changes, including DOM tooltips and UIA ExpandCollapse.
-- Provide visual change measurements for hover, scroll and drag actions.
+- Add clipboard text and native file paste operations to the unified action tool.
 
 ## [0.5.9] - 2026-11-26
 
-### Added
+### Changed
 
-- Warn when visual change is detected only outside the control and immediate click neighborhood, or only in the full frame, so callers can verify the expected UI state.
+- Include port, elevated task, effective path and log diagnostics in kernel upgrade and startup errors.
 
 ## [0.5.8] - 2026-11-26
 
 ### Fixed
 
-- Detect small visual responses within control bounds and two action-centered neighborhoods, retaining separate full-frame and local measurements.
-- Include the exact comparison frame identities, SHA256 hashes, thresholds and action step in visual readback, and report changed frame geometry as unknown.
+- Use keyboard input for native text replacement so applications receive input events.
 
 ## [0.5.7] - 2026-11-26
 

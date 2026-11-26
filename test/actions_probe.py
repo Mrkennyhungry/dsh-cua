@@ -22,7 +22,49 @@ import win32gui
 
 
 def child_window(unique, event_log):
+    replacement_hwnd = None
+    popup_hwnd = None
+    related_child = None
+    def popup_procedure(hwnd, message, wparam, lparam):
+        nonlocal popup_hwnd
+        if message == win32con.WM_COMMAND and (wparam & 65535) == 110:
+            owner = win32gui.GetWindow(hwnd, win32con.GW_OWNER)
+            win32gui.SetWindowText(win32gui.GetDlgItem(owner, 104), 'Owned popup selected')
+            win32gui.DestroyWindow(hwnd)
+            popup_hwnd = None
+            return 0
+        return win32gui.DefWindowProc(hwnd, message, wparam, lparam)
+
     def procedure(hwnd, message, wparam, lparam):
+        nonlocal replacement_hwnd, popup_hwnd, related_child
+        if message == win32con.WM_COMMAND and (wparam & 65535) == 111:
+            related_child = subprocess.Popen([sys.executable, __file__, '--related-child', unique],
+                                             creationflags=subprocess.CREATE_NO_WINDOW)
+            win32gui.DestroyWindow(hwnd)
+            return 0
+        if message == win32con.WM_COMMAND and (wparam & 65535) == 109:
+            if popup_hwnd is not None:
+                win32gui.DestroyWindow(popup_hwnd)
+                popup_hwnd = None
+            else:
+                left, top, _, _ = win32gui.GetWindowRect(win32gui.GetDlgItem(hwnd, 109))
+                popup_hwnd = win32gui.CreateWindowEx(win32con.WS_EX_TOOLWINDOW | win32con.WS_EX_NOACTIVATE,
+                    popup_name, '', win32con.WS_POPUP | win32con.WS_BORDER,
+                    left, top + 32, 195, 65, hwnd, 0, window.hInstance, None)
+                win32gui.CreateWindow('Button', 'Owned menu item', win32con.WS_CHILD | win32con.WS_VISIBLE,
+                    5, 5, 180, 45, popup_hwnd, 110, window.hInstance, None)
+                win32gui.ShowWindow(popup_hwnd, win32con.SW_SHOWNOACTIVATE)
+            return 0
+        if message == win32con.WM_COMMAND and (wparam & 65535) == 107:
+            replacement_hwnd = win32gui.CreateWindow(name, 'P4 actions ' + unique, win32con.WS_OVERLAPPEDWINDOW,
+                120, 120, 620, 350, 0, 0, window.hInstance, None)
+            win32gui.CreateWindow('Static', 'Replacement window text', win32con.WS_CHILD | win32con.WS_VISIBLE,
+                20, 20, 400, 32, replacement_hwnd, 108, window.hInstance, None)
+            win32gui.CreateWindow('Button', 'Open child window', win32con.WS_CHILD | win32con.WS_VISIBLE,
+                20, 70, 200, 32, replacement_hwnd, 111, window.hInstance, None)
+            win32gui.ShowWindow(replacement_hwnd, win32con.SW_SHOWNORMAL)
+            win32gui.DestroyWindow(hwnd)
+            return 0
         if message == win32con.WM_COMMAND and (wparam & 65535) == 103:
             value = win32gui.GetWindowText(win32gui.GetDlgItem(hwnd, 100))
             win32gui.SetWindowText(win32gui.GetDlgItem(hwnd, 104), 'Saved ' + value)
@@ -43,7 +85,8 @@ def child_window(unique, event_log):
             win32gui.DestroyWindow(hwnd)
             return 0
         if message == win32con.WM_DESTROY:
-            win32gui.PostQuitMessage(0)
+            if related_child is None and (replacement_hwnd is None or hwnd == replacement_hwnd):
+                win32gui.PostQuitMessage(0)
             return 0
         return win32gui.DefWindowProc(hwnd, message, wparam, lparam)
     window = win32gui.WNDCLASS()
@@ -51,6 +94,11 @@ def child_window(unique, event_log):
     window.lpszClassName = 'P4Fixture' + unique
     window.lpfnWndProc = procedure
     name = win32gui.RegisterClass(window)
+    popup_class = win32gui.WNDCLASS()
+    popup_class.hInstance = window.hInstance
+    popup_class.lpszClassName = 'P4Popup' + unique
+    popup_class.lpfnWndProc = popup_procedure
+    popup_name = win32gui.RegisterClass(popup_class)
     hwnd = win32gui.CreateWindow(name, 'P4 actions ' + unique, win32con.WS_OVERLAPPEDWINDOW,
                                  120, 120, 620, 350, 0, 0, window.hInstance, None)
     style = win32con.WS_CHILD | win32con.WS_VISIBLE | win32con.WS_TABSTOP
@@ -69,9 +117,34 @@ def child_window(unique, event_log):
     win32gui.CreateWindow('Button', 'Show native toast', style, 300, 155, 180, 32, hwnd, 105, window.hInstance, None)
     win32gui.CreateWindow('Static', 'Native transient idle', win32con.WS_CHILD | win32con.WS_VISIBLE,
                           300, 195, 220, 32, hwnd, 106, window.hInstance, None)
+    win32gui.CreateWindow('Button', 'Recreate target', style, 300, 240, 180, 32, hwnd, 107, window.hInstance, None)
+    win32gui.CreateWindow('Button', 'Show owned menu', style, 300, 65, 180, 32, hwnd, 109, window.hInstance, None)
     win32gui.ShowWindow(hwnd, win32con.SW_SHOWNORMAL)
     win32gui.PumpMessages()
 
+
+def related_child_window(unique):
+    def procedure(hwnd, message, wparam, lparam):
+        if message == win32con.WM_DESTROY:
+            win32gui.PostQuitMessage(0)
+            return 0
+        return win32gui.DefWindowProc(hwnd, message, wparam, lparam)
+    window = win32gui.WNDCLASS()
+    window.hInstance = win32api.GetModuleHandle(None)
+    window.lpszClassName = 'P7Related' + unique
+    window.lpfnWndProc = procedure
+    name = win32gui.RegisterClass(window)
+    hwnd = win32gui.CreateWindow(name, '', win32con.WS_OVERLAPPEDWINDOW,
+                                 150, 150, 620, 350, 0, 0, window.hInstance, None)
+    win32gui.CreateWindow('Static', '日志与信任管理', win32con.WS_CHILD | win32con.WS_VISIBLE,
+                          20, 20, 400, 32, hwnd, 112, window.hInstance, None)
+    win32gui.ShowWindow(hwnd, win32con.SW_SHOWNORMAL)
+    win32gui.PumpMessages()
+
+
+if len(sys.argv) > 1 and sys.argv[1] == '--related-child':
+    related_child_window(sys.argv[2])
+    sys.exit(0)
 
 if len(sys.argv) > 1 and sys.argv[1] == '--child':
     child_window(sys.argv[2], sys.argv[3])
@@ -94,9 +167,9 @@ HTML = '''<!doctype html><meta charset="utf-8"><title>P4 form</title>
 <button id="outer" aria-label="Outer change" style="position:fixed;left:500px;top:250px;width:32px;height:32px;padding:0;border:0;background:#eee;outline:none"
  onmousedown="event.preventDefault()" onclick="document.querySelector('#outerPanel').style.background='#222';window.outerClicks++"></button>
 <div id="outerPanel" style="position:fixed;left:480px;top:160px;width:80px;height:40px;background:#eee"></div>
-<button id="hover-menu" aria-label="Hover menu" aria-expanded="false" style="position:fixed;left:650px;top:250px"
+<button id="hover-menu" aria-label="Hover menu" aria-expanded="false" style="position:fixed;left:1000px;top:550px"
  onmouseover="this.setAttribute('aria-expanded','true');document.querySelector('#hover-tip').style.display='block'">Hover menu</button>
-<div id="hover-tip" role="tooltip" style="display:none;position:fixed;left:650px;top:290px;background:white">Hover details</div>
+<div id="hover-tip" role="tooltip" style="display:none;position:fixed;left:1000px;top:590px;background:white">Hover details</div>
 <button id="click" onclick="count++; document.querySelector('output').textContent='saved '+count"
  oncontextmenu="event.preventDefault(); right++;">保存</button>
 <button id="hover" onmouseover="hovered++">悬停</button><output>pending</output>
@@ -105,6 +178,9 @@ HTML = '''<!doctype html><meta charset="utf-8"><title>P4 form</title>
 <dialog><p>确认内容</p><button onclick="this.parentElement.close()">关闭弹窗</button></dialog>
 <button id="nav" onclick="location.href='/next'">导航</button>
 <button id="jsdialog" onclick="window.confirmResult=confirm('保留浏览器确认')">浏览器确认</button>
+<button id="local-popup" style="position:absolute;left:700px;top:300px"
+ onclick="document.querySelector('#local-menu').hidden=!document.querySelector('#local-menu').hidden">局部菜单</button>
+<div id="local-menu" hidden style="position:absolute;left:700px;top:335px;width:160px;height:70px;background:#eee;color:#444">Popup item one<br>Popup item two</div>
 <iframe title="embedded" srcdoc="&lt;button onclick=&quot;this.textContent='inner done'&quot;&gt;frame action&lt;/button&gt;"></iframe>
 <div id="drag" style="width:240px;height:60px;background:#ccd" onpointerdown="down++" onpointerup="up++">拖动区域</div>
 <div style="height:1800px"></div>
@@ -211,6 +287,19 @@ try:
                                             'matched_by_runtime_id': True}
     finally:
         win32gui.SendMessage(win32gui.GetDlgItem(hwnd, 102), win32con.CB_SHOWDROPDOWN, 0, 0)
+    window_result, _ = act(native, native_observed, [
+        {'action': 'window', 'op': 'activate'},
+        {'action': 'window', 'op': 'topmost', 'on': True},
+        {'action': 'window', 'op': 'highlight', 'on': True},
+    ])
+    assert win32gui.GetWindowLong(hwnd, -20) & 8
+    window_result, _ = act(native, window_result['observation'], [
+        {'action': 'window', 'op': 'highlight', 'on': False},
+        {'action': 'window', 'op': 'topmost', 'on': False},
+    ])
+    assert not win32gui.GetWindowLong(hwnd, -20) & 8
+    report['window_activate_topmost_highlight'] = 1
+    native_observed = window_result['observation']
     result, _ = act(native, native_observed, [
         {'action': 'input', 'target': ref(native_observed, role='textbox'), 'text': '中文内容', 'mode': 'replace'},
         {'action': 'check', 'target': ref(native_observed, 'Urgent'), 'checked': True},
@@ -221,6 +310,11 @@ try:
     assert win32gui.SendMessage(win32gui.GetDlgItem(hwnd, 101), win32con.BM_GETCHECK, 0, 0) == 1
     assert win32gui.SendMessage(win32gui.GetDlgItem(hwnd, 102), win32con.CB_GETCURSEL, 0, 0) == 1
     assert 'Saved 中文内容' in result['observation']['text'], result
+    assert set(result['click_region_frames']) == {'before', 'after'}, result
+    for crop in result['click_region_frames'].values():
+        assert crop['width'] <= 400 and crop['height'] <= 400, crop
+        assert runtime.observations.image('a', crop['frame_id'])
+    report['click_region_before_after'] = 1
     observed = observe(native)
     toast, _ = act(native, observed, [{'action': 'click', 'target': ref(observed, 'Show native toast')}],
                    expect={'kind': 'text', 'text': 'Native transient saved', 'transient': True, 'timeout_ms': 3000})
@@ -228,12 +322,41 @@ try:
     assert toast['expectation']['status'] == native_status['expectation']['status'] == 'met', toast
     assert toast['expectation']['evidence']['source'] == 'uia', toast
     report['native_transient'] = toast['expectation']
+    menu, _ = act(native, observe(native), [{'action': 'click', 'target': ref(observe(native), 'Show owned menu')}],
+                  expect={'kind': 'text', 'text': 'Owned menu item', 'transient': True, 'timeout_ms': 1000})
+    directory = runtime.observations.observe('a')['targets']
+    menu_window = next(row for row in directory if row.get('window_text') == '' and row.get('title') == 'Owned menu item')
+    assert menu_window['title_source'] == 'child_text' and menu_window['owner_hwnd'] == hwnd, menu_window
+    assert any(row['hwnd'] == menu_window['hwnd'] for row in menu['new_window_candidates']), menu
+    titled_directory = runtime.observations.observe('a', include_untitled=False)['targets']
+    assert all(row.get('hwnd') != menu_window['hwnd'] for row in titled_directory), titled_directory
+    opened_menu = runtime.open('a', 'open-untitled-hwnd', {'hwnd': menu_window['hwnd']})
+    while opened_menu['status'] in ('accepted', 'running'):
+        opened_menu = runtime.operations.status('a', opened_menu['operation_id'], follow_ms=1000)
+    assert opened_menu['success'] and opened_menu['target_id'] == menu_window['target_id'], opened_menu
+    report['untitled_directory_and_hwnd_open'] = menu_window
+    candidate = next(item for item in menu['popup_candidates'] if ''.join(item['raw_text'].split()) == 'Ownedmenuitem')
+    assert menu['click_region_frames']['after']['method'] == 'screen_region', menu
+    assert candidate['bounds']['frame_id'] == menu['click_region_frames']['after']['frame_id'], menu
+    selected, _ = act(native, {'observation_id': menu['popup_observation_id']},
+                      [{'action': 'click', 'target': {'ref': candidate['ref']}}])
+    assert 'Owned popup selected' in selected['observation']['text'], selected
+    report['owned_popup_screen_capture_ocr_and_click'] = {'confidence': candidate['confidence'],
+        'local_changed_ratio': menu['local_visual_effect_changed_ratio'], 'selected': True}
     report['native_form_steps'] = 4
     native_snapshot = observe(native)
     native_toggle, _ = act(native, native_snapshot, [
         {'action': 'check', 'target': ref(native_snapshot, 'Urgent'), 'checked': False}])
     assert native_toggle['visual_effect_local_changed'], native_toggle
     report['native_local_visual_effect'] = {key: value for key, value in native_toggle.items() if key.startswith('visual_effect')}
+    batch_observation = observe(native)
+    batch, _ = act(native, batch_observation, [
+        {'action': 'input', 'target': ref(batch_observation, role='textbox'), 'text': 'batch input', 'mode': 'replace'},
+        {'action': 'key', 'keys': ['END']},
+    ])
+    assert batch['completed_steps'] == [0, 1], batch
+    assert next(element['value'] for element in batch['observation']['elements'] if element['role'] == 'textbox') == 'batch input', batch
+    report['native_input_key_batch'] = 1
     native_b = runtime.open_target('b', hwnd=hwnd)
     first_observation = observe(native)
     second_observation = runtime.observations.observe('b', native_b.target_id)['observation']
@@ -245,6 +368,9 @@ try:
                     {'action': 'input', 'target': ref(snapshot, role='textbox'), 'text': owner, 'mode': 'replace'},
                     {'action': 'click', 'target': ref(snapshot, 'Save fixture')}]}))
         concurrent = [request.result() for request in requests]
+        for index, owner in enumerate(('a', 'b')):
+            while concurrent[index]['status'] in ('accepted', 'running', 'cancelling'):
+                concurrent[index] = runtime.operations.status(owner, concurrent[index]['operation_id'], follow_ms=1000)
         assert all(result['status'] == 'completed' for result in concurrent), concurrent
     logs = [json.loads(line)['saved'] for line in (home / 'native-events.jsonl').read_text(encoding='utf-8').splitlines()]
     assert sorted(logs[-2:]) == ['a', 'b'], logs
@@ -315,6 +441,35 @@ try:
             assert hashlib.sha256(data).hexdigest() == evidence[side + '_sha256']
             (home / (label + '-' + side + '.jpg')).write_bytes(data)
     observed = hover['observation']
+    queried, _ = act(target, observed, [
+        {'action': 'dom_query', 'selector': '#click'},
+        {'action': 'extract', 'selector': 'button', 'limit': 2},
+    ])
+    assert queried['steps'][0]['method']['nodes'][0]['text'] == '保存', queried
+    assert len(queried['steps'][1]['method']['nodes']) == 2, queried
+    settled = runtime.wait('a', 'browser-settle', {'target_id': target.target_id,
+        'condition': {'kind': 'settle', 'quiet_ms': 150}, 'timeout_ms': 3000})
+    while settled['status'] in ('accepted', 'running'):
+        settled = runtime.operations.status('a', settled['operation_id'], follow_ms=1000)
+    assert settled['status'] == 'completed' and settled['expectation']['status'] == 'met', settled
+    report['web_query_extract_settle'] = 1
+    popup, _ = act(target, observe(target), [{'action': 'click', 'target': ref(observe(target), '局部菜单')}])
+    assert runtime.browser.call(lambda: target.handle[1].locator('#local-menu').is_visible())
+    assert popup['local_visual_effect'], popup
+    assert set(popup['click_region_frames']) == {'before', 'after'}, popup
+    report['local_popup'] = {'local_visual_effect': popup['local_visual_effect'],
+        'local_changed_ratio': popup['local_visual_effect_changed_ratio'],
+        'full_visual_effect': popup.get('visual_effect'),
+        'full_changed_ratio': popup.get('visual_effect_changed_ratio')}
+    for phase, crop in popup['click_region_frames'].items():
+        (home / f'click-region-{phase}.jpg').write_bytes(runtime.observations.image('a', crop['frame_id']))
+    popup_closed, _ = act(target, observe(target), [{'action': 'click', 'target': ref(observe(target), '局部菜单')}])
+    assert not runtime.browser.call(lambda: target.handle[1].locator('#local-menu').is_visible())
+    assert popup_closed['local_visual_effect'], popup_closed
+    assert popup_closed.get('toggle'), popup_closed
+    report['local_popup']['second_click_closed'] = True
+    report['local_popup']['toggle_detected'] = True
+    observed = observe(target)
     attachment = home / 'upload.txt'
     attachment.write_text('fixture attachment', encoding='utf-8')
     result, arguments = act(target, observed, [
@@ -391,14 +546,14 @@ try:
         {'action': 'click', 'target': ref(observed, '保存')}],
         'expect': {'kind': 'text', 'text': 'never-present-fixture', 'timeout_ms': 200, 'after_step': 0}}
     timeout_result = runtime.act('a', 'expect-timeout', timeout_args)
-    assert timeout_result['status'] == 'failed' and timeout_result['error']['code'] == 'EXPECTATION_TIMEOUT', timeout_result
+    assert timeout_result['status'] == 'completed' and timeout_result['verification']['status'] == 'unknown', timeout_result
     assert timeout_result['completed_steps'] == [0] and timeout_result['stopped_at'] == 1
     assert runtime.browser.call(browser_state)['count'] == before + 1
     report['expect_timeout_completed_steps'] = timeout_result['completed_steps']
     native_snapshot = observe(native)
     waiting = runtime.act('a', 'wait-releases-input', {'target_id': native.target_id,
         'observation_id': native_snapshot['observation_id'], 'steps': [{'action': 'key', 'keys': ['TAB']}],
-        'expect': {'kind': 'text', 'text': 'never-present-fixture', 'timeout_ms': 2000}}, budget_ms=0)
+        'expect': {'kind': 'text', 'text': 'never-present-fixture', 'timeout_ms': 10000}}, budget_ms=0)
     deadline = time.monotonic() + 2
     while runtime.operations.status('a', waiting['operation_id'])['expectation']['status'] != 'pending':
         assert time.monotonic() < deadline
@@ -465,6 +620,34 @@ try:
     result, _ = act(target, observed, [{'action': 'close'}])
     assert result.get('closed'), result
     report['tab_closed'] = 1
+    cleanup, _ = act(native, observe(native), [{'action': 'window', 'op': 'cleanup'}])
+    assert cleanup['binding_released'] and win32gui.IsWindow(hwnd), cleanup
+    assert not any(identity[0] == 'a' for identity in runtime._window_effects)
+    report['window_cleanup_preserves_application'] = 1
+    native = runtime.open_target('a', hwnd=hwnd)
+    old_observation = observe(native)
+    rebound, _ = act(native, old_observation, [{'action': 'click', 'target': ref(old_observation, 'Recreate target')}])
+    assert rebound.get('rebound') and rebound.get('closed'), rebound
+    assert rebound['target_id'] != native.target_id, rebound
+    assert rebound['observation']['rebound_from'] == native.target_id, rebound
+    assert 'Replacement window text' in rebound['observation']['text'], rebound
+    stale_target = runtime.act('a', 'old-target-observation', {'target_id': rebound['target_id'],
+        'observation_id': old_observation['observation_id'], 'steps': [{'action': 'key', 'keys': ['TAB']}]})
+    assert stale_target['status'] == 'failed' and stale_target['error']['code'] == 'TARGET_STALE', stale_target
+    report['native_target_rebind_and_stale_guard'] = 1
+    replacement = runtime.resolve_target('a', rebound['target_id'])
+    child_rebound, _ = act(replacement, rebound['observation'], [
+        {'action': 'click', 'target': ref(rebound['observation'], 'Open child window')}])
+    assert child_rebound.get('closed') and child_rebound.get('rebound'), child_rebound
+    candidate = child_rebound['new_window_candidates'][0]
+    assert candidate['relationship'] == 'child_process', child_rebound
+    assert candidate['pid'] != replacement.metadata['pid'], child_rebound
+    assert candidate['title'] == '日志与信任管理' and candidate['title_source'] == 'child_text', candidate
+    assert '日志与信任管理' in child_rebound['observation']['text'], child_rebound
+    stale = runtime.act('a', 'cross-process-stale', {'target_id': child_rebound['target_id'],
+        'observation_id': rebound['observation']['observation_id'], 'steps': [{'action': 'key', 'keys': ['TAB']}]})
+    assert stale['error']['code'] == 'TARGET_STALE', stale
+    report['child_process_untitled_rebind'] = candidate
     report['parser_initializations'] = runtime.parser_initializations
     report['elapsed_ms'] = round((time.monotonic() - started) * 1000, 3)
 except BaseException:
@@ -473,6 +656,14 @@ except BaseException:
     (home / 'partial-report.json').write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')
     raise
 finally:
+    import psutil
+    try:
+        descendants = psutil.Process(child.pid).children(recursive=True)
+    except psutil.Error:
+        descendants = []
+    related_hwnd = win32gui.FindWindow('P7Related' + unique, None)
+    if related_hwnd:
+        win32gui.PostMessage(related_hwnd, win32con.WM_CLOSE, 0, 0)
     prompt = win32gui.FindWindow(None, 'P4 save prompt ' + unique)
     if prompt:
         win32gui.PostMessage(prompt, win32con.WM_COMMAND, win32con.IDCANCEL, 0)
@@ -484,6 +675,14 @@ finally:
     except subprocess.TimeoutExpired:
         child.terminate()
         child.wait(timeout=5)
+    for descendant in descendants:
+        try:
+            descendant.wait(timeout=2)
+        except psutil.TimeoutExpired:
+            descendant.terminate()
+            descendant.wait(timeout=5)
+        except psutil.NoSuchProcess:
+            pass
     runtime.shutdown()
     server.shutdown()
     server.server_close()
