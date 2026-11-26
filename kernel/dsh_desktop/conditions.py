@@ -2,6 +2,8 @@
 import threading
 import time
 import uuid
+import hashlib
+import json
 
 from .observations import timestamp
 
@@ -209,9 +211,9 @@ def validate_condition(condition):
         raise ValueError('A condition object is required')
     kind = condition.get('kind')
     fields = {'text': {'text', 'match'}, 'transient_watch': {'text', 'match'}, 'element': {'ref', 'state'},
-              'window': {'title', 'match'}, 'state': {'state'}}
+              'window': {'title', 'match'}, 'state': {'state'}, 'settle': {'quiet_ms'}}
     if kind not in fields or set(condition) - fields[kind] - {'kind'}:
-        raise ValueError('Unsupported condition fields')
+        raise ValueError(f'condition.kind must be one of {", ".join(fields)} and fields must match kind={kind}')
     if kind in ('text', 'transient_watch', 'window'):
         key = 'title' if kind == 'window' else 'text'
         if not isinstance(condition.get(key), str) or not condition[key] or len(condition[key]) > 4000:
@@ -225,6 +227,10 @@ def validate_condition(condition):
             raise ValueError('Unsupported element state')
     if kind == 'state' and condition.get('state') not in ('ready', 'closed', 'url_changed'):
         raise ValueError('Unsupported target state')
+    if kind == 'settle':
+        quiet = condition.get('quiet_ms', 500)
+        if not isinstance(quiet, int) or isinstance(quiet, bool) or not 100 <= quiet <= 5000:
+            raise ValueError('settle.quiet_ms must be an integer from 100 to 5000')
 
 
 class Conditions:
@@ -250,6 +256,15 @@ class Conditions:
         if kind == 'element':
             return self._element(owner, target, oid, condition)
         observed = self.runtime.observations.observe(owner, target_id, image=False)
+        if kind == 'settle':
+            snapshot = self.runtime.observations.get(owner, observed['observation']['observation_id'])
+            signature = hashlib.sha256(json.dumps([snapshot.text,
+                [element.semantic for element in snapshot.elements], target.revision], sort_keys=True).encode()).hexdigest()
+            observed['settle_evidence'] = {'signature': signature}
+            ready = True
+            if target.kind == 'browser':
+                ready = self.runtime.browser.call(lambda: target.handle[1].evaluate('document.readyState')) == 'complete'
+            return ready and not observed['observation']['warnings'], observed
         if kind == 'text':
             snapshot = self.runtime.observations.get(owner, observed['observation']['observation_id'])
             body = snapshot.text
@@ -309,10 +324,18 @@ class Conditions:
         deadline = time.monotonic() + timeout_ms / 1000
         context.change(expectation={'status': 'pending'})
         result, samples = {}, 0
+        stable_since, signature = None, None
         while time.monotonic() < deadline:
             context.check()
             matched, result = self.sample(context.owner, target_id, oid, condition)
             samples += 1
+            if condition['kind'] == 'settle':
+                current = result['settle_evidence']['signature']
+                if not matched or current != signature:
+                    signature, stable_since = current, time.monotonic() if matched else None
+                quiet = 0 if stable_since is None else round((time.monotonic() - stable_since) * 1000)
+                result['settle_evidence']['quiet_ms'] = quiet
+                matched = matched and quiet >= condition.get('quiet_ms', 500)
             if matched:
                 expectation = {'status': 'met', 'samples': samples}
                 context.change(expectation=expectation)

@@ -568,3 +568,25 @@ Host 以 `exec.callId` 生成或关联稳定请求键。内核在首个可能产
 ### 独立提示监听（0.5.13）
 
 `wait.condition.kind=transient_watch` 监听窗口或浏览器的新文本出现，使用 text 与可选 match。顶层 duration_ms 为 100–90000，默认 5000，可用原有 timeout_ms 指定 100–30000，两个时间字段互斥。监听持续整个时段，返回 expectation.timeline，最多 100 条，溢出计数为 dropped。无命中时返回空时间线并正常完成。已有文本须消失后重现才计入。status/stop 查询或取消长监听，浏览器每轮读取让出执行线程。status 的 request_key 使用当前会话的原始调用 ID 查询操作，同时传 operation_id 时 request_key 优先。
+
+### 窗口与 Web 补齐（0.5.14）
+
+`act` 的动作派发和条件验证分别报告。输入已派发后，即使验证超时或采样不可用，操作仍保留已派发结果，`verification.status` 为 `unknown`。如果验证位于批次中间，后续步骤停止，先检查观察结果再决定如何继续。`wait` 的超时行为不变。
+
+act 的 window 步骤使用 op=activate/topmost/highlight/unbind/cleanup，作用于外层 target_id 指定的原生窗口。topmost/highlight 接受 on，默认 true。unbind/cleanup 须为最后一步且禁止 expect，取消该绑定的其他 operation、释放观察/帧与本绑定的高亮、恢复原始置顶设置，返回 binding_released。后续可用 open 或目录重新发现窗口。窗口本体保留。
+
+浏览器 dom_query/extract 步骤使用 selector 与可选 limit（1–100，默认 50），返回可见节点的只读数据，结果在 steps[].method，单步输出预算为 48000 字符。dom_query 包含矩形，extract 包含链接与图片属性。执行输入前用 observe 取得身份校验 ref。
+
+wait 的 settle 条件以 quiet_ms（100–5000，默认 500）指定稳定时段，语义内容与目标 revision 连续不变且没有采集告警时通过，浏览器还要求 document.readyState=complete。总等待时限仍为顶层 timeout_ms。
+
+### 点击区域与视觉观察（0.5.14）
+
+click/invoke 在语义读回前保留 post_click_frame。点击点周围 ±200 物理像素的同一区域生成 click_region_frames.before 与 after。原生窗口在派发前后直接采集桌面合成画面，method=screen_region，包含覆盖该区域的独立弹层 HWND，边缘按虚拟桌面边界截断。浏览器从已保存的前后帧裁剪局部图，携带 source_frame_id。每张局部图携带 observation_id、captured_at、crop 与 clickable=false。Host 图片顺序为读回观察、即时全图、局部 before、局部 after。局部图遵守既有会话隔离、保存期与内存预算。
+
+local_visual_effect 使用灰度差 >8、变化比例 ≥0.005 且至少 16 像素的独立阈值，返回 local_sample_region、local_visual_effect_changed_ratio 和阈值。全图 visual_effect 继续报告自身的比较结果。popup_region.kind=visual_change 表示变化包围框，popup_detected=null 表示尚无足够证据确认弹层。对同一会话、目标和几何，30 秒内距前次点击不超过 4 像素且局部画面恢复时返回 toggle=true，toggle_evidence.scope=local_pixels，供后续观察确认控件状态。
+
+expect.transient 另用最多 6 秒的独立区域 OCR 对比前后文字，新增候选以 p ref、source=popup_ocr、raw_text、confidence 和 ttl_ms=30000 返回。候选归属 popup_observation_id，后续 act 使用该观察 ID 与候选 ref。物理输入校验允许目标窗口 owner chain 内的独立弹层，并继续检查前台、窗口几何与坐标命中。重复出现的原有文字会被过滤。验证超时保留已派发动作与 timeline，verification.status=unknown。图片附件失败时保留动作记录与 image_warning，同时移除依赖图片的区域和候选坐标。
+
+observe.source 默认 auto。ocr 跳过 DOM/UIA，image 直接返回截图，combined 在结构化观察后补充 OCR，保留控件 selected/enabled/value 与画面 raw_text。显式通道要求 target_id 并返回图片，可用 region 约束识别范围。原生窗口的纯视觉观察使用独立 OCR worker，整个采集预算为 10 秒。auto 仅在查询缺失、指定区域或 UIA 失败时触发视觉识别。
+
+窗口关闭后的自动重绑定要求标题、PID 和进程实例一致且候选唯一。成功结果返回 rebound=true、original_target_id 和当前 target_id，observation.rebound_from 标注来源。用旧观察操作重绑定后的目标返回 TARGET_STALE。

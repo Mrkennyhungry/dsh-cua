@@ -48,6 +48,12 @@ class WindowGlow:
         self._target = 0
         self._last_activity = 0.0
         self._tone = "light"
+        self._stopped = threading.Event()
+
+    def stop(self) -> None:
+        self._stopped.set()
+        if self._thread is not None:
+            self._thread.join(timeout=3)
 
     # ── public API ───────────────────────────────────────────────────────
     def start(self) -> None:
@@ -81,11 +87,17 @@ class WindowGlow:
         except Exception as exc:  # noqa: BLE001 - cosmetics never break a task
             self._error = f"{exc.__class__.__name__}: {exc}"
             self._ready.set()
+        finally:
+            if self._hwnd:
+                ctypes.windll.user32.DestroyWindow(self._hwnd)
+                self._release_cache()
+                ctypes.windll.user32.UnregisterClassW(self._class_name, self._hinstance)
 
     def _create_window(self) -> None:
         user32 = ctypes.windll.user32
         hinstance = ctypes.windll.kernel32.GetModuleHandleW(None)
-        class_name = "DesktopWindowGlow"
+        class_name = f"DesktopWindowGlow_{id(self)}"
+        self._class_name, self._hinstance = class_name, hinstance
         proc_type = ctypes.WINFUNCTYPE(ctypes.c_ssize_t, wintypes.HWND, wintypes.UINT,
                                        wintypes.WPARAM, wintypes.LPARAM)
         user32.DefWindowProcW.argtypes = [wintypes.HWND, wintypes.UINT,
@@ -206,7 +218,7 @@ class WindowGlow:
         visible = False
         last_rect = None
         last_place = 0.0
-        while True:
+        while not self._stopped.is_set():
             now = time.monotonic()
             with self._lock:
                 target, last, tone = self._target, self._last_activity, self._tone

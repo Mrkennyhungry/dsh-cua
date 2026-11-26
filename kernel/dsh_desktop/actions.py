@@ -8,7 +8,7 @@ from .conditions import Conditions, TransientWatcher, validate_condition
 from .targets import RuntimeFault
 
 
-_ACTIONS = {'click', 'input', 'key', 'scroll', 'drag', 'select', 'check', 'hover', 'attach', 'close', 'clipboard', 'file', 'invoke', 'set_value', 'expand'}
+_ACTIONS = {'click', 'input', 'key', 'scroll', 'drag', 'select', 'check', 'hover', 'attach', 'close', 'clipboard', 'file', 'invoke', 'set_value', 'expand', 'window', 'dom_query', 'extract'}
 _KEY_ALIASES = {'control': 'ctrl', 'esc': 'escape', 'meta': 'win', 'arrowleft': 'left',
                 'arrowright': 'right', 'arrowup': 'up', 'arrowdown': 'down', 'return': 'enter'}
 
@@ -48,13 +48,24 @@ class ActionDispatcher:
                   'drag': {'from', 'to'}, 'select': {'target', 'values'},
                   'check': {'target', 'checked'}, 'hover': {'target'}, 'attach': {'target', 'files'}, 'close': set(),
                   'clipboard': {'op', 'text', 'path'}, 'file': {'op', 'path', 'text'},
-                  'invoke': {'target'}, 'set_value': {'target', 'value'}, 'expand': {'target'}}
+                  'invoke': {'target'}, 'set_value': {'target', 'value'}, 'expand': {'target'},
+                  'window': {'op', 'on'}, 'dom_query': {'selector', 'limit'}, 'extract': {'selector', 'limit'}}
         for step in steps:
             if not isinstance(step, dict) or step.get('action') not in _ACTIONS:
                 raise ValueError('Unsupported action')
             action = step['action']
             if set(step) - fields[action] - {'action'}:
                 raise ValueError('Unknown fields for ' + action)
+            if action == 'window':
+                if step.get('op') not in ('topmost', 'unbind', 'cleanup', 'highlight', 'activate'):
+                    raise ValueError('window.op must be topmost, unbind, cleanup, highlight or activate')
+                if 'on' in step and (step['op'] not in ('topmost', 'highlight') or not isinstance(step['on'], bool)):
+                    raise ValueError('window.on must be boolean and is only for topmost or highlight')
+            if action in ('dom_query', 'extract'):
+                if not isinstance(step.get('selector'), str) or not step['selector'] or len(step['selector']) > 2000:
+                    raise ValueError(action + '.selector must be a CSS selector up to 2000 characters')
+                if not _integer(step.get('limit', 50), 1, 100):
+                    raise ValueError(action + '.limit must be 1..100')
             if 'target' in fields[action]:
                 _point(step.get('target'))
             if action == 'drag':
@@ -104,6 +115,10 @@ class ActionDispatcher:
                     from .game.input import pyautogui
                     if any(_KEY_ALIASES.get(value.lower(), value.lower()) not in pyautogui.KEYBOARD_KEYS for value in values):
                         raise ValueError('keys contains an unsupported key name. Provide each key separately, for example ["CTRL", "O"]')
+        if any(step['action'] == 'window' and step['op'] in ('unbind', 'cleanup') for step in steps[:-1]):
+            raise ValueError('window unbind/cleanup must be the final step')
+        if 'expect' in arguments and steps[-1]['action'] == 'window' and steps[-1]['op'] in ('unbind', 'cleanup'):
+            raise ValueError('window unbind/cleanup cannot have an expectation')
         if 'expect' in arguments:
             expect = arguments['expect']
             if not isinstance(expect, dict) or expect.get('kind') not in ('text', 'element', 'window', 'state'):
@@ -142,6 +157,8 @@ class ActionDispatcher:
                 watcher = None
                 watcher_slot = False
                 before_observation = None
+                before_local = None
+                verification_error = None
                 try:
                     expect = arguments.get('expect')
                     watch_step = (expect and expect.get('transient') and
@@ -159,16 +176,73 @@ class ActionDispatcher:
                                 runtime.window.force_foreground(target.handle)
                         if watch_step:
                             watcher_slot = False
-                            watcher = TransientWatcher(runtime, context, target, expect, lock_held=True)
-                            context.before_dispatch = watcher.dispatch
-                        # Capture before-action observation for visual effect verification on certain actions
-                        if step['action'] in ('click', 'input', 'check'):
                             try:
-                                before_observation = runtime.observations.observe(owner, target_id, image=True)
+                                watcher = TransientWatcher(runtime, context, target, expect, lock_held=True)
+                            except Cancelled:
+                                raise
+                            except Exception as error:
+                                verification_error = error
+                            if watcher is not None:
+                                def arm_dispatch(step_index):
+                                    nonlocal verification_error
+                                    try:
+                                        watcher.dispatch(step_index)
+                                    except Cancelled:
+                                        raise
+                                    except Exception as error:
+                                        verification_error = error
+                                context.before_dispatch = arm_dispatch
+                        # Capture before-action observation for visual effect verification on certain actions
+                        if step['action'] in ('click', 'invoke', 'input', 'check'):
+                            try:
+                                frame = runtime.observations.capture_frame(owner, target_id)
+                                before_observation = {'observation': {'frames': [frame]}}
                             except Exception:
                                 before_observation = None
+                        click_point = None
+                        if step['action'] in ('click', 'invoke'):
+                            try:
+                                location = step['target']
+                                if 'ref' in location:
+                                    element, _ = runtime.observations.element(owner, oid, target_id, location['ref'])
+                                    if element.rect is not None:
+                                        x, y, width, height = element.rect
+                                        click_point = (x + width / 2, y + height / 2)
+                                else:
+                                    click_point = runtime.map_point(owner, target_id, location['frame_id'], location['x'], location['y'])
+                            except Exception:
+                                pass
+                        if target.kind == 'window' and click_point is not None:
+                            try:
+                                before_local = runtime.observations.capture_frame(owner, target_id, screen_point=click_point)
+                            except Exception as error:
+                                result['screen_region_warning'] = str(error)
                         method = self._step(context, target, oid, index, step)
                         context.completed(index, method)
+                        result['action'] = {'status': 'dispatched', 'step': index, 'method': method}
+                        if step['action'] in ('click', 'invoke'):
+                            try:
+                                after_local = None
+                                if before_local is not None:
+                                    try:
+                                        after_local = runtime.observations.capture_frame(owner, target_id, screen_point=click_point)
+                                    except Exception as error:
+                                        result['screen_region_warning'] = str(error)
+                                result['post_click_frame'] = runtime.observations.capture_frame(owner, target_id)
+                                evidence_before = ({'observation': {'frames': [before_local]}}
+                                                   if after_local is not None else before_observation)
+                                evidence_after = after_local or result['post_click_frame']
+                                result.update(self._click_evidence(owner, target, click_point, evidence_before, evidence_after))
+                                if watch_step and before_observation and result.get('local_sample_region'):
+                                    try:
+                                        result['popup_candidates'] = runtime.observations.popup_candidates(
+                                            owner, evidence_before['observation']['frames'][0],
+                                            evidence_after, result['local_sample_region'])
+                                        result['popup_observation_id'] = evidence_after['observation_id']
+                                    except Exception as error:
+                                        result['popup_ocr_warning'] = str(error)
+                            except Exception as error:
+                                result['post_click_frame_warning'] = str(error)
                         time.sleep(0.03)
                         try:
                             current = self._boundary(owner, target_id)
@@ -181,14 +255,50 @@ class ActionDispatcher:
                             result['close_pending'] = True
                         last = index == len(arguments['steps']) - 1
                         if last or current != previous:
-                            result.update(self._readback(owner, target_id, baseline, before_observation=before_observation, action=step.get('action')))
+                            if step['action'] == 'window' and step['op'] in ('unbind', 'cleanup'):
+                                result.update(binding_released=True)
+                            else:
+                                result.update(self._readback(owner, target_id, baseline, before_observation=before_observation, action=step.get('action'), target=target))
                     expect = arguments.get('expect')
                     if expect and index == expect.get('after_step', len(arguments['steps']) - 1):
                         # Keep target order, release physical input while waiting.
-                        result.update(watcher.wait() if watcher else self._expect(context, target_id, oid, expect))
+                        try:
+                            if verification_error is not None:
+                                raise verification_error
+                            result.update(watcher.wait() if watcher else self._expect(context, target_id, oid, expect))
+                        except Cancelled:
+                            raise
+                        except Exception as error:
+                            result['expectation'] = {'status': 'unknown', 'reason': str(error)}
+                            if watcher is not None:
+                                result['expectation'].update(timeline=list(watcher.timeline), dropped=watcher.dropped)
+                            context.change(expectation=result['expectation'])
+                        expectation_status = result['expectation']['status']
+                        if watch_step and result.get('popup_candidates'):
+                            candidates = result['popup_candidates']
+                            needle = expect['text']
+                            matching = [candidate for candidate in candidates
+                                        if (candidate.get('raw_text') == needle if expect.get('match') == 'exact'
+                                            else needle in candidate.get('raw_text', ''))]
+                            if matching:
+                                result['expectation'].setdefault('timeline', []).append({
+                                    'source': 'popup_ocr', 'text': needle,
+                                    'observation_id': result['popup_observation_id'],
+                                    'refs': [candidate['ref'] for candidate in matching],
+                                    'appearance_verified': False})
+                                context.change(expectation=result['expectation'])
+                        result['verification'] = {'status': 'unknown' if expectation_status in ('timeout', 'unknown') else expectation_status}
                         if result['expectation']['status'] != 'met':
-                            result.update(success=False, outcome='interrupted', dispatch='partial' if not last else 'sent',
-                                          stopped_at=index + 1, error={'code': 'EXPECTATION_TIMEOUT', 'message': 'Condition did not become true'})
+                            if result.get('post_click_frame'):
+                                next_action = ('Missing verification does not prove the action failed. Inspect post_click_frame and the local change region before clicking again. '
+                                               'If needed, observe and relocate the control, or try keyboard navigation or physical coordinates.')
+                            else:
+                                next_action = 'Missing verification does not prove the action failed. Observe the target before deciding whether to retry.'
+                            if result.get('toggle'):
+                                next_action += ' The local appearance reverted after repeated clicks. Another click may open or close the same control.'
+                            result.update(outcome='interrupted' if not last else 'dispatched',
+                                          dispatch='partial' if not last else 'sent', stopped_at=index + 1,
+                                          next_action=next_action)
                             break
                     if current != previous and not last:
                         result.update(outcome='interrupted', dispatch='partial', stopped_at=index + 1,
@@ -211,7 +321,89 @@ class ActionDispatcher:
                         runtime._transient_lock.release()
         return result
 
-    def _readback(self, owner, target_id, baseline, before_observation=None, action=None):
+    def _click_evidence(self, owner, target, point, before_observation, post_frame):
+        """Compare a local area immediately after input without asserting business success."""
+        import cv2
+        import numpy as np
+
+        if point is None:
+            return {'popup_detected': None, 'local_visual_effect_reason': 'point_unavailable'}
+        before_frames = (before_observation or {}).get('observation', {}).get('frames', [])
+        if not before_frames:
+            return {'popup_detected': None}
+        # A click can advance the DOM revision. Historical evidence remains
+        # comparable even though its coordinates are stale for another action.
+        before_snapshot = self.runtime.observations.get(owner, before_frames[0]['observation_id'], target.target_id)
+        after_snapshot = self.runtime.observations.get(owner, post_frame['observation_id'], target.target_id)
+        before_frame = next(frame for frame in before_snapshot.frames if frame.frame_id == before_frames[0]['frame_id'])
+        after_frame = next(frame for frame in after_snapshot.frames if frame.frame_id == post_frame['frame_id'])
+        if before_frame.geometry != after_frame.geometry:
+            return {'popup_detected': None, 'local_visual_effect_reason': 'geometry_changed'}
+        before = cv2.imdecode(np.frombuffer(self.runtime.observations.image(owner, before_frame.frame_id), np.uint8), cv2.IMREAD_COLOR)
+        after = cv2.imdecode(np.frombuffer(self.runtime.observations.image(owner, after_frame.frame_id), np.uint8), cv2.IMREAD_COLOR)
+        if before is None or after is None or before.shape != after.shape:
+            return {'popup_detected': None, 'local_visual_effect_reason': 'frame_unavailable'}
+        x, y = after_frame.geometry.from_screen(*point)
+        scale_x = after.shape[1] / after_frame.geometry.source_rect[2]
+        scale_y = after.shape[0] / after_frame.geometry.source_rect[3]
+        left, right = max(0, int(x - 200 * scale_x)), min(after.shape[1], int(x + 200 * scale_x))
+        top, bottom = max(0, int(y - 200 * scale_y)), min(after.shape[0], int(y + 200 * scale_y))
+        if right <= left or bottom <= top:
+            return {'popup_detected': None, 'local_visual_effect_reason': 'point_outside_frame'}
+        diff = cv2.cvtColor(cv2.absdiff(before[top:bottom, left:right], after[top:bottom, left:right]), cv2.COLOR_BGR2GRAY)
+        mask = diff > 8
+        ratio = float(np.count_nonzero(mask) / mask.size)
+        changed_pixels = int(np.count_nonzero(mask))
+        # The local threshold retains low-contrast changes without treating a
+        # handful of JPEG edge pixels as reliable visual feedback.
+        local_effect = ratio >= 0.005 and changed_pixels >= 16
+        result = {'popup_detected': None, 'local_visual_effect': local_effect,
+                  'local_visual_effect_changed_ratio': round(ratio, 6),
+                  'local_visual_effect_threshold': {'pixel_delta': 8, 'changed_ratio': 0.005, 'min_pixels': 16},
+                  'local_sample_region': {'frame_id': post_frame['frame_id'], 'x': left, 'y': top,
+                                          'width': right - left, 'height': bottom - top},
+                  'next_action': ('Inspect click_region_frames.before/after alongside post_click_frame and the control state before repeating the click. '
+                                  'A later missing popup can be transient. Repeating a toggle can close it. '
+                                  'If the expected state is absent, observe and relocate the control, or try keyboard navigation or physical coordinates.')}
+        if np.any(mask):
+            ys, xs = np.nonzero(mask)
+            result['popup_region'] = {'frame_id': post_frame['frame_id'], 'x': left + int(xs.min()),
+                                      'y': top + int(ys.min()), 'width': int(xs.max() - xs.min() + 1),
+                                      'height': int(ys.max() - ys.min() + 1), 'kind': 'visual_change'}
+        try:
+            previous = self.runtime.observations.previous_click(owner, before_frames[0], post_frame, point)
+            if previous is not None:
+                prior_before, prior_after = [cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)
+                                             for data in previous]
+                if (prior_before is not None and prior_after is not None
+                        and prior_before.shape == prior_after.shape == before.shape):
+                    def difference(first, second):
+                        area = cv2.absdiff(first[top:bottom, left:right], second[top:bottom, left:right])
+                        return float(np.count_nonzero(cv2.cvtColor(area, cv2.COLOR_BGR2GRAY) > 8) / mask.size)
+                    continuity = difference(before, prior_after)
+                    restored = difference(after, prior_before)
+                    result['toggle_evidence'] = {'scope': 'local_pixels', 'continuity_changed_ratio': round(continuity, 6),
+                                                 'restored_changed_ratio': round(restored, 6)}
+                    if local_effect and continuity < 0.005 and restored < min(0.02, ratio * 0.2):
+                        result['toggle'] = True
+                        result['next_action'] = ('The local appearance returned to its state before the preceding click. '
+                                                 'Another click may open or close the same control. Inspect the before/after images and control state first.')
+        except Exception as error:
+            result['toggle_warning'] = str(error)
+        try:
+            if after_frame.geometry.method == 'screen_region':
+                result['click_region_frames'] = {'before': before_frames[0], 'after': post_frame}
+            else:
+                result['click_region_frames'] = {
+                    'before': self.runtime.observations.crop_frame(owner, before_frames[0], result['local_sample_region']),
+                    'after': self.runtime.observations.crop_frame(owner, post_frame, result['local_sample_region']),
+                }
+        except Exception as error:
+            result['click_region_warning'] = str(error)
+            result['next_action'] = 'Inspect post_click_frame and the observed control state before deciding whether to repeat the action.'
+        return result
+
+    def _readback(self, owner, target_id, baseline, before_observation=None, action=None, target=None):
         try:
             # Request image to ensure frames and bounds are populated in readback observation
             observed = self.runtime.observations.observe(owner, target_id, image=True)
@@ -224,7 +416,7 @@ class ActionDispatcher:
             visual_effect_reason = None
             visual_effect_changed_ratio = None
             visual_effect_attempted = False
-            if before_observation and action in ('click', 'input', 'check'):
+            if before_observation and action in ('click', 'invoke', 'input', 'check'):
                 visual_effect_attempted = True
                 try:
                     before_frames = before_observation.get('observation', {}).get('frames', [])
@@ -253,6 +445,16 @@ class ActionDispatcher:
             return result
         except RuntimeFault as error:
             if error.code == 'TARGET_CLOSED':
+                if target is not None and target.kind == 'window' and action != 'close':
+                    try:
+                        replacement = self.runtime.rebind_window(owner, target)
+                        if replacement is not None:
+                            observed = self.runtime.observations.observe(owner, replacement.target_id, image=True)
+                            observed['observation']['rebound_from'] = target_id
+                            return {'closed': True, 'rebound': True, 'target_id': replacement.target_id,
+                                    'observation': observed['observation'], 'observation_changed': True}
+                    except Exception:
+                        pass
                 return {'closed': True, 'observation_changed': True}
             return {'readback_warning': str(error), 'observation_changed': None}
         except Exception as error:
@@ -346,6 +548,14 @@ class ActionDispatcher:
 
     def _step(self, context, target, oid, index, step):
         action = step['action']
+        if action == 'window':
+            context.dispatch(index)
+            return self.runtime.window_action(context.owner, target, step, context.operation_id)
+        if action in ('dom_query', 'extract'):
+            if target.kind != 'browser':
+                raise RuntimeFault('TARGET_KIND', action + ' requires a browser target')
+            context.check()
+            return self.runtime.browser.query(context.owner, target.target_id, step)
         if action in ('key', 'close', 'clipboard', 'file'):
             return self._global_step(context, target, index, step)
         element = node = None
@@ -598,7 +808,8 @@ class ActionDispatcher:
         import win32gui
         hwnd = win32gui.WindowFromPoint(tuple(round(value) for value in point))
         root = win32gui.GetAncestor(hwnd, 2)
-        if root != target.handle:
+        from .game.window import _has_owner_link
+        if root != target.handle and not _has_owner_link(root, target.handle):
             raise RuntimeFault('TARGET_OCCLUDED', 'Physical point is covered by another window')
 
     def _global_step(self, context, target, index, step):

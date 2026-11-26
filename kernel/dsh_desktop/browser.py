@@ -282,6 +282,35 @@ class BrowserRuntime:
             return {'success': True, 'target_id': target_id, 'closed': closed}
         return self.call(close)
 
+    def query(self, owner, target_id, step):
+        target = self.resolve(owner, target_id)
+        try:
+            return target.handle[1].evaluate('''({selector, limit, extract}) => {
+              const nodes = document.querySelectorAll(selector);
+              const result = [];
+              let characters = 0;
+              for (const el of nodes) {
+                if (result.length >= limit) break;
+                if (!el.getClientRects().length) continue;
+                const rect = el.getBoundingClientRect();
+                const item = {tag: el.tagName.toLowerCase(), role: el.getAttribute('role'),
+                  text: (el.innerText || el.textContent || '').slice(0, 1000),
+                  value: String(el.value || '').slice(0, 1000),
+                  name: (el.getAttribute('aria-label') || el.getAttribute('name') || '').slice(0, 500)};
+                if (extract) {
+                  item.href = el.getAttribute('href')?.slice(0, 2000) || null;
+                  item.src = el.getAttribute('src')?.slice(0, 2000) || null;
+                } else item.rect = {x: rect.x, y: rect.y, width: rect.width, height: rect.height};
+                characters += JSON.stringify(item).length;
+                if (characters > 48000) break;
+                result.push(item);
+              }
+              return {action: extract ? 'extract' : 'dom_query', nodes: result, total: nodes.length,
+                truncated: nodes.length > result.length};
+            }''', {'selector': step['selector'], 'limit': step.get('limit', 50), 'extract': step['action'] == 'extract'})
+        except Exception as error:
+            raise RuntimeFault('DOM_QUERY_FAILED', f'CSS selector query failed: {error}') from error
+
     def capture(self, owner, target_id):
         def capture():
             import cv2

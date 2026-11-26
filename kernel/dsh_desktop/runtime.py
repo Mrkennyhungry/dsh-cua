@@ -88,6 +88,7 @@ class DesktopRuntime:
         self._transient_lock = threading.Lock()
         from .worker import ApartmentWorker
         self._transient_worker = ApartmentWorker('dsh-transient-uia')
+        self._popup_ocr_worker = ApartmentWorker('dsh-popup-ocr')
         self._operations_lock = threading.Lock()
         self._operations = None
         self._parser_lock = threading.Lock()
@@ -99,6 +100,57 @@ class DesktopRuntime:
         self._window_picker_overlay = WindowPickerOverlay(self._window_picker)
         self._picked_hwnd = None
         self._picked_info = None
+        self._window_effects = {}
+
+    def window_action(self, owner, target, step, operation_id):
+        from .desktop_tools import set_topmost
+        if target.kind != 'window':
+            raise RuntimeFault('TARGET_KIND', 'window actions require a native window target')
+        key = (owner, target.target_id)
+        op = step['op']
+        if op == 'activate':
+            if not self.window.ensure_foreground(target.handle):
+                raise RuntimeFault('FOCUS_LOST', 'Window could not receive foreground focus')
+        elif op in ('topmost', 'highlight'):
+            if any(record['hwnd'] == target.handle and identity != key
+                   for identity, record in self._window_effects.items()):
+                raise RuntimeFault('WINDOW_BUSY', 'Window effects are owned by another target binding')
+            record = self._window_effects.setdefault(key, {'hwnd': target.handle, 'target': target,
+                'topmost': bool(win32gui.GetWindowLong(target.handle, -20) & 8), 'glow': None})
+            if op == 'topmost':
+                set_topmost(target.handle, step.get('on', True))
+            elif step.get('on', True):
+                if record['glow'] is None:
+                    from .window_glow import WindowGlow
+                    record['glow'] = WindowGlow()
+                    record['glow'].start()
+                record['glow'].show(target.handle)
+                if record['glow'].error:
+                    raise RuntimeFault('HIGHLIGHT_FAILED', str(record['glow'].error))
+            elif record['glow'] is not None:
+                record['glow'].stop()
+                record['glow'] = None
+        else:
+            self.operations.stop_target(owner, target.target_id, excluding=operation_id)
+            self._release_window_effect(owner, target.target_id)
+            self.observations.release_target(owner, target.target_id)
+            self.frames.release_target(owner, target.target_id)
+            target.closed = True
+        return {'action': 'window', 'op': op, 'target_id': target.target_id,
+                'released': op in ('unbind', 'cleanup')}
+
+    def _release_window_effect(self, owner, target_id):
+        record = self._window_effects.pop((owner, target_id), None)
+        if record is None:
+            return
+        if record['glow'] is not None:
+            record['glow'].stop()
+        try:
+            target = self.resolve_target(owner, target_id)
+        except RuntimeFault:
+            return
+        from .desktop_tools import set_topmost
+        set_topmost(target.handle, record['topmost'])
 
     @property
     def operations(self):
@@ -123,6 +175,8 @@ class DesktopRuntime:
 
         def run(context):
             call = self.browser.call if target is not None and target.kind == 'browser' else self.observations.uia.call
+            if target is not None and target.kind != 'browser' and arguments.get('source') in ('ocr', 'image'):
+                call = self._popup_ocr_worker.call
 
             def collect():
                 context.check()
@@ -132,7 +186,8 @@ class DesktopRuntime:
                 context.check()
                 return result
 
-            return context.backend(call, collect, timeout=120)
+            visual_only = target is not None and target.kind != 'browser' and arguments.get('source') in ('ocr', 'image')
+            return context.backend(call, collect, timeout=10 if visual_only else 120)
 
         return self.operations.submit(owner, request_key, 'observe', arguments, run,
                                       budget_ms=budget_ms, cancelled=cancelled)
@@ -341,6 +396,8 @@ class DesktopRuntime:
         self.stop_all()
         if self._operations is not None:
             self._operations.shutdown()
+        for owner, target_id in list(self._window_effects):
+            self._release_window_effect(owner, target_id)
         companion.shutdown()
         stop_cursor_overlay()
         desktop_tools._CURSOR = None
@@ -348,6 +405,7 @@ class DesktopRuntime:
         self.window_identities.shutdown()
         self.observations.shutdown()
         self._transient_worker.shutdown()
+        self._popup_ocr_worker.shutdown()
         # Playwright cleanup must run on its owning bridge worker.
         try:
             self.browser.shutdown()
@@ -358,6 +416,7 @@ class DesktopRuntime:
 
     def _native_metadata(self, info):
         return {**info, **capture.window_geometry(info['hwnd']),
+                'topmost': bool(win32gui.GetWindowLong(info['hwnd'], -20) & 8),
                 'active': win32gui.GetForegroundWindow() == info['hwnd']}
 
     def target_directory(self, owner):
@@ -418,13 +477,30 @@ class DesktopRuntime:
             self.targets.refresh(target, {'title': 'Desktop', 'monitors': monitors, 'virtual_origin': capture.virtual_origin()})
         return target
 
-    def capture_target(self, owner, target_id, *, max_dim=1366, crop=None):
+    def rebind_window(self, owner, old_target):
+        """Resolve a replacement only when title and process instance uniquely match."""
+        if old_target.kind != 'window' or not old_target.metadata.get('title'):
+            return None
+        old_key = str(old_target.metadata.get('window_key', '')).split(':')
+        if len(old_key) != 3 or not all(old_key[1:]):
+            return None
+        candidates = []
+        for row in self.target_directory(owner):
+            key = str(row.get('window_key', '')).split(':')
+            if (row.get('kind') == 'window' and row.get('title') == old_target.metadata['title']
+                    and len(key) == 3 and key[1:] == old_key[1:]
+                    and row['target_id'] != old_target.target_id):
+                candidates.append(row)
+        return self.resolve_target(owner, candidates[0]['target_id']) if len(candidates) == 1 else None
+
+    def capture_target(self, owner, target_id, *, max_dim=1366, crop=None, screen_point=None):
         target = self.resolve_target(owner, target_id)
         revision = target.revision
         if target.kind == 'browser':
             image, geometry, target = self.browser.capture(owner, target_id)
         else:
-            captured = self.capture.capture_detailed(target.handle)
+            captured = (self.capture.capture_region(screen_point, hwnd=target.handle) if screen_point is not None
+                        else self.capture.capture_detailed(target.handle))
             image, geometry = captured.image, captured.geometry
             target = self.resolve_target(owner, target_id)
         if target.revision != revision:
@@ -450,6 +526,10 @@ class DesktopRuntime:
     def release_owner(self, owner):
         if self._operations is not None:
             self._operations.stop(owner)
+        with self._input_lock:
+            for effect_owner, target_id in list(self._window_effects):
+                if effect_owner == owner:
+                    self._release_window_effect(owner, target_id)
         self.browser.release(owner)
         cleanup = self.observations.release(owner)
         self.frames.release(owner)

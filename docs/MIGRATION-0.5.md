@@ -10,6 +10,8 @@ DSH 负责规划与模型配置，插件提供六个统一工具。通过 DSH �
 | doraemon_health、旧任务 status/stop | doraemon_status、doraemon_stop，长操作使用 operation_id |
 | bind、foreground、apps/find、launch、web/open | doraemon_open，返回 target_id 与初始观察 |
 | analyze、capture、UIA、elements、web/read、locate | doraemon_observe，返回 observation_id、ref 和可选图片 |
+| topmost、highlight、unbind、cleanup、foreground | doraemon_act 的 window 步骤，op 选择操作，目标使用 target_id |
+| Web dom、extract、settle | act 的 dom_query/extract 使用 CSS selector；wait 的 settle 检查连续稳定时段，batch/action_status/lease 使用 act.steps、status 和 runtime 输入锁 |
 | invoke | doraemon_act 的 invoke、set_value、expand 步骤使用 UIA ref；select 和 check 对应选择和切换 |
 | files | doraemon_act 的 file 步骤支持 create、write、read、list 和 delete，路径限定在 homeDir\\desktop_workspace，结果位于操作步骤的 method |
 | clipboard | doraemon_act 的 clipboard 步骤支持 get、set 和 paste_file，结果位于操作步骤的 method |
@@ -23,6 +25,14 @@ DSH 负责规划与模型配置，插件提供六个统一工具。通过 DSH �
 ## 输入模式
 
 `doraemon_act` 的 `input` 需要明确指定 `mode`。`replace` 聚焦目标后全选、删除并键入新文本，`insert` 在当前插入位置键入文本。原生控件使用键盘输入，让依赖输入事件的界面能够更新状态。
+
+## 视觉观察与点击读回
+
+`doraemon_observe` 的 `source` 可选 auto、ocr、image、combined。auto 默认使用结构化信息，ocr 直接识别画面，image 返回截图，combined 在同一次观察中合并结构化状态与 OCR。`region` 可将视觉识别限制到指定图片区域。OCR 使用 `raw_text` 与 `confidence`，视觉 ref 使用 v 前缀。查看 `uia_coverage` 和 `semantic_missing` 可判断哪些画面内容需要视觉定位。
+
+click/invoke 返回 `post_click_frame` 与 `click_region_frames.before/after`。原生局部图采集点击位置周围 ±200 物理像素的桌面合成画面，覆盖独立窗口形式的菜单。结合 `local_visual_effect`、全图变化及控件状态判断下一步。`expect.transient=true` 另外生成有界区域 OCR 候选，使用 `popup_observation_id` 与对应 p ref 点击，候选有效期为 30 秒。验证未知时先查看这些即时证据，重复点击可能切换菜单开关状态。
+
+目标窗口重建后，安全重绑定会返回 `rebound=true`、`original_target_id` 和新的 `target_id`。后续动作使用新的观察与 ref。`observation.integrity.uipi_risk=true` 时按返回建议通过已有 elevated task 重启 kernel，再继续输入。
 
 ## 数据与恢复
 

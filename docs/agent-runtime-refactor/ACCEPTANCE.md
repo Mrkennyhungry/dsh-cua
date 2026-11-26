@@ -637,3 +637,31 @@ P7 仍受真实异 DPI、负原点多屏硬件条件阻塞。
 ### 2026-11-26 验收范围修订与 0.5.13
 
 用户明确将真实双屏、混合 DPI 与负原点多屏验收挂起，以当前固定 1920×1080 单屏作为后续执行验收范围。旧硬件实测数值保留，挂起项不再阻塞当前范围，亦未计为实测通过。新增缺口能力仍须逐项回归。0.5.13 完整检查为 Node 94 PASS、Python 330 PASS、1 SKIP、43 subtests PASS（20.15 s）。新增独立监听回归覆盖两次原生提示出现、取消释放、浏览器执行线程让出和无命中空时间线。
+
+### 0.5.14 续接检查
+
+工作树包含续接前已有的窗口、网页查询与稳定等待改动，尚未提交。完整检查为 Node 94 PASS、Python 334 PASS、1 SKIP、43 subtests PASS（20.20 s）。隔离 actions_probe 通过，20 个操作样本，原生与浏览器瞬态提示均命中，取消清理 1/1、重复派发 0、parser 与 caption 均为 0，总耗时 43218 ms。此探针未覆盖新增窗口和网页查询能力，仍需单独实机验证。
+
+本轮完整检查为 Node 94 PASS、Python 340 PASS、1 SKIP、43 subtests PASS（21.80 s）。隔离 actions_probe 20 个操作样本通过，原生与浏览器瞬态提示均命中，取消清理 1/1、重复派发 0，parser 初始化 1 次、caption 0，总耗时 49406 ms。云智安全管家实测病毒 Tab 为 selected=true，OCR 查询「日志」置信度 0.999、耗时约 2–2.4 秒。点击后 UIA 超时，操作保留已派发、验证未知及重新定位建议，未观察到菜单弹出。此次未发生窗口关闭，自动重绑定仅有单元测试证据；页面主体文本、真实瞬态菜单及新窗口和网页查询入口仍需实机验收。
+
+### 0.5.14 桌面合成局部证据与最终回归
+
+用户指出日志菜单可能属于独立窗口。源码确认主窗口 capture_detailed 优先 PrintWindow，独立 HWND 的弹层可能遗漏。原生点击局部证据改为派发前后采集桌面合成画面，主窗口即时全图与局部前后图一起通过 Host 附件返回。该行为适用于原生窗口的独立弹层，采集区域为点击点周围 ±200 物理像素。
+
+| 检查项 | 状态 | 实测结果 |
+| --- | --- | --- |
+| 完整检查 | PASS | scripts/check.ps1，Node 95 PASS、0 FAIL、0 SKIP，2542.8469 ms；Python 347 PASS、1 显式真实窗口 SKIP、43 subtests PASS，21.17 s；Host/Client 语法通过 |
+| 真实原生与浏览器动作 | PASS | actions_probe v6，29 个 operation，总计 59906 ms；窗口 activate/topmost/highlight/cleanup、Web dom_query/extract/settle、中文表单、窗口重建重绑定与 TARGET_STALE、取消及重放全部通过，重放额外派发 0，parser 初始化 1，caption 0 |
+| 独立 HWND 菜单闭环 | PASS | 隔离 owned popup 夹具，screen_region 局部变化比例 0.173538；OCR 候选置信度 0.994，通过 popup_observation_id 与 p ref 点击后父窗口读回 Owned popup selected |
+| 低对比度变化与 toggle | PASS | 浏览器夹具全图变化比例 0.001536、visual_effect=false，局部比例 0.077371、local_visual_effect=true；第二次点击关闭、toggle=true |
+| 云智真实菜单采集 | PASS | status=completed、success=true、physical_click 已派发；全图比例 0.000104、visual_effect=false，局部比例 0.022394、local_visual_effect=true；局部 after 图实际显示两项菜单，p1「病毒查杀日志」置信度 0.998、p2「病毒库升级日志」置信度 0.999；verification=unknown，保留图片、候选与后续建议 |
+| 云智双通道观察 | PASS | 同一 combined 观察含「病毒」selected=true 与页面实际文字「已经有很久没杀毒了」，OCR 置信度 0.999；uia_coverage=partial，缺失按钮标记 semantic_missing；总计 3266.717 ms，UIA 946.902 ms、capture 99.474 ms、OCR 2176.412 ms，caption 0 |
+| 云智纯视觉入口 | PASS | source=ocr、query=日志，735.784 ms，其中 capture 93.476 ms、OCR 608.904 ms；UIA 0 次、OCR 1 次、caption 0，置信度 0.999；kernel/target integrity 均为 12288、uipi_risk=false |
+| 轻量 runtime | PASS | 独立 runtime_probe，protocol 2、31 个窗口、health/目录 843 ms、退役路由缺失 5/5、禁止依赖导入 0、parser 初始化 0、runtime 释放成功 |
+| 发布检查 | PASS | npm pack --dry-run，0.5.14，104 文件，2610797 bytes，解包 3304271 bytes；三个 DSH SDK peers 均保持 optional；git diff --check 通过 |
+| 新 DSH 会话与两模型 | NOT RUN | 0.5.14 尚待安装后的实际六工具/附件与两个模型复验，历史 0.5.4 的模型数值保留在前文 |
+| 云智特定窗口重建 | NOT REPRODUCED | 本次云智操作期间未发生 HWND 重建。通用真实窗口重建、自动重绑定与旧观察失效已由隔离 fixture 实测通过 |
+
+上段「未观察到菜单弹出」已由本轮桌面局部图修正。owned popup 夹具初次断言因 OCR 返回 Ownedmenuitem 而非含空格文字失败，断言改为忽略空白后 v6 通过，raw_text 保留 OCR 原文。像素变化与 OCR 候选均作为证据返回，popup_detected=null、appearance_verified=false 表示弹层语义尚未由控件状态确认。
+
+本机复现证据分别位于 .runtime/check-final.log、.runtime/actions-screen-region-v6.log、.runtime/runtime-final.log、.runtime/security-screen-region-click.log，以及 %TEMP%\\dsh-local-evidence-20261126-v6\\actions-probe.json、%TEMP%\\dsh-local-click-_hafobe_、%TEMP%\\dsh-combined-hw8epnvd\\report.json。P7 继续进行中，固定单屏范围内可交 DSH 体验验收；真实双屏、异 DPI 与负原点多屏按用户决定保持挂起。

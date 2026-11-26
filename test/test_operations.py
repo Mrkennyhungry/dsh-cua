@@ -499,6 +499,7 @@ class OperationTests(unittest.TestCase):
         self.runtime.resolve_target = lambda owner, target_id: target
         self.runtime.observations = mock.Mock()
         self.runtime.observations.get.return_value = SimpleNamespace(metadata={})
+        self.runtime.observations.capture_frame.side_effect = RuntimeFault('FRAME_UNAVAILABLE', 'fixture')
         self.runtime.operations = self.manager
         self.runtime._input_lock = threading.Lock()
         dispatcher = ActionDispatcher(self.runtime)
@@ -559,6 +560,81 @@ class OperationTests(unittest.TestCase):
 
 
 class ActionValidationTests(unittest.TestCase):
+    def test_rebound_status_exposes_current_target_and_retains_original_identity(self):
+        manager = mock.Mock()
+        manager._changed = threading.Condition()
+        manager._validate_follow = OperationManager._validate_follow
+        manager.journal.get.return_value = {
+            'status': 'completed', 'target_id': 'old',
+            'result': {'rebound': True, 'target_id': 'new', 'observation': {'target_id': 'new'}}}
+        result = OperationManager.status(manager, 'a', 'operation')
+        self.assertEqual(result['target_id'], 'new')
+        self.assertEqual(result['original_target_id'], 'old')
+        self.assertEqual(result['observation']['target_id'], 'new')
+
+    def test_local_click_evidence_detects_low_contrast_change_and_retains_crops(self):
+        import cv2
+        import numpy as np
+        from dsh_desktop.geometry import FrameGeometry
+
+        runtime = mock.Mock()
+        dispatcher = ActionDispatcher(runtime)
+        runtime.observations.previous_click.return_value = None
+        before = np.full((904, 1366, 3), 240, dtype=np.uint8)
+        after = before.copy()
+        after[400:440, 650:750] = 225
+        images = [cv2.imencode('.jpg', image)[1].tobytes() for image in (before, after)]
+        geometry = FrameGeometry((0, 0, 1366, 904), (1366, 904))
+        runtime.observations.get.side_effect = [SimpleNamespace(frames=[SimpleNamespace(frame_id=frame_id, geometry=geometry)])
+                                                for frame_id in ('before', 'after')]
+        runtime.observations.image.side_effect = images
+        runtime.observations.crop_frame.side_effect = [{'frame_id': 'local-before'}, {'frame_id': 'local-after'}]
+        result = dispatcher._click_evidence('a', mock.Mock(), (700, 400),
+            {'observation': {'frames': [{'frame_id': 'before', 'observation_id': 'o-before'}]}},
+            {'frame_id': 'after', 'observation_id': 'o-after'})
+        global_effect, _, _ = dispatcher._compare_visual_effect(*images)
+        self.assertFalse(global_effect)
+        self.assertTrue(result['local_visual_effect'])
+        self.assertGreater(result['local_visual_effect_changed_ratio'], 0.005)
+        self.assertIsNone(result['popup_detected'])
+        self.assertEqual(result['click_region_frames']['before']['frame_id'], 'local-before')
+        self.assertEqual(result['local_sample_region'],
+                         {'frame_id': 'after', 'x': 500, 'y': 200, 'width': 400, 'height': 400})
+        self.assertIn('toggle', result['next_action'])
+        runtime.observations.get.side_effect = [SimpleNamespace(frames=[SimpleNamespace(frame_id=frame_id, geometry=geometry)])
+                                                for frame_id in ('before', 'after')]
+        runtime.observations.image.side_effect = images[::-1]
+        runtime.observations.previous_click.return_value = tuple(images)
+        runtime.observations.crop_frame.side_effect = [{'frame_id': 'local-before'}, {'frame_id': 'local-after'}]
+        reversed_result = dispatcher._click_evidence('a', mock.Mock(), (700, 400),
+            {'observation': {'frames': [{'frame_id': 'before', 'observation_id': 'o-before'}]}},
+            {'frame_id': 'after', 'observation_id': 'o-after'})
+        self.assertTrue(reversed_result['toggle'])
+        self.assertEqual(reversed_result['toggle_evidence']['scope'], 'local_pixels')
+
+    def test_local_click_evidence_clips_edges_and_ignores_distant_changes(self):
+        import cv2
+        import numpy as np
+        from dsh_desktop.geometry import FrameGeometry
+
+        runtime = mock.Mock()
+        dispatcher = ActionDispatcher(runtime)
+        runtime.observations.previous_click.return_value = None
+        before = np.full((400, 800, 3), 240, dtype=np.uint8)
+        after = before.copy()
+        after[:, 500:] = 0
+        geometry = FrameGeometry((-100, 20, 1600, 800), (800, 400))
+        runtime.observations.get.side_effect = [SimpleNamespace(frames=[SimpleNamespace(frame_id=frame_id, geometry=geometry)])
+                                                for frame_id in ('before', 'after')]
+        runtime.observations.image.side_effect = [cv2.imencode('.jpg', image)[1].tobytes() for image in (before, after)]
+        result = dispatcher._click_evidence('a', mock.Mock(), (-100, 20),
+            {'observation': {'frames': [{'frame_id': 'before', 'observation_id': 'o-before'}]}},
+            {'frame_id': 'after', 'observation_id': 'o-after'})
+        self.assertFalse(result['local_visual_effect'])
+        self.assertEqual(result['local_visual_effect_changed_ratio'], 0)
+        self.assertEqual(result['local_sample_region'],
+                         {'frame_id': 'after', 'x': 0, 'y': 0, 'width': 100, 'height': 100})
+
     def test_visual_effect_uses_supported_decode_flag_and_json_boolean(self):
         import cv2
         import numpy as np
@@ -660,6 +736,33 @@ class ActionValidationTests(unittest.TestCase):
         self.assertEqual(result['expectation']['status'], 'met')
         self.assertEqual(order, ['armed', 'step', 'dispatch', 'closed'])
         self.assertIsNone(context.before_dispatch)
+
+    def test_failed_transient_arm_does_not_prevent_dispatch(self):
+        runtime = mock.Mock()
+        runtime._transient_lock = threading.Lock()
+        runtime.resolve_target.return_value = SimpleNamespace(kind='browser')
+        runtime.observations.get.return_value = SimpleNamespace(metadata={})
+        context = mock.Mock()
+        context.owner = 'a'
+        context.hold.side_effect = lambda _lock: nullcontext()
+        dispatcher = ActionDispatcher(runtime)
+        dispatcher._boundary = mock.Mock(return_value=('unchanged',))
+        dispatcher._readback = mock.Mock(return_value={})
+        dispatcher._step = mock.Mock(return_value='dom_click')
+        arguments = {'target_id': 't', 'observation_id': 'o',
+                     'steps': [{'action': 'click', 'target': {'ref': 'e'}}],
+                     'expect': {'kind': 'text', 'text': 'saved', 'transient': True}}
+        def failed_arm(*args, **kwargs):
+            runtime._transient_lock.release()
+            raise RuntimeFault('UIA_BATCH_TIMEOUT', 'scan timed out')
+        with mock.patch('dsh_desktop.actions.TransientWatcher', side_effect=failed_arm):
+            result = dispatcher._batch(context, arguments)
+        dispatcher._step.assert_called_once()
+        self.assertTrue(result['success'])
+        self.assertEqual(result['action']['status'], 'dispatched')
+        self.assertEqual(result['verification']['status'], 'unknown')
+        self.assertIn('scan timed out', result['expectation']['reason'])
+        self.assertFalse(runtime._transient_lock.locked())
 
     def test_transient_native_watcher_records_reappearance_after_dispatch(self):
         runtime = SimpleNamespace(_transient_lock=threading.Lock())

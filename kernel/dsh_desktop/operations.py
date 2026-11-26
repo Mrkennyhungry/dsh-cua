@@ -209,7 +209,11 @@ class OperationManager:
                 self._changed.wait(min(0.05, max(0, deadline - time.monotonic())))
                 data = self.journal.get(owner, operation_id, request_key=request_key)
         result = data.pop('result', {})
-        return {**result, **data}
+        response = {**result, **data}
+        if result.get('rebound') and result.get('target_id'):
+            response['original_target_id'] = data['target_id']
+            response['target_id'] = result['target_id']
+        return response
 
     def stop(self, owner, operation_id=None):
         with self._changed:
@@ -221,6 +225,14 @@ class OperationManager:
                     self._cancel_context(context, data)
                     stopped.append(self.journal.get(owner, context.operation_id))
             return {'success': True, 'operations': stopped}
+
+    def stop_target(self, owner, target_id, *, excluding=None):
+        with self._changed:
+            for data in self.journal.active(owner):
+                if data['target_id'] == target_id and data['operation_id'] != excluding:
+                    context = self._contexts.get(data['operation_id'])
+                    if context is not None:
+                        self._cancel_context(context, data)
 
     def _cancel_context(self, context, data):
         context.cancel()

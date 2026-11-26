@@ -3,6 +3,7 @@ import threading
 import time
 import unittest
 import uuid
+import numpy as np
 from types import SimpleNamespace
 from unittest import mock
 
@@ -45,11 +46,122 @@ class ObservationTests(unittest.TestCase):
         self.assertEqual(targets[1]['tab_id'], 'tab-a')
         self.assertEqual(targets[2]['tab_id'], 'tab-b')
 
+    def test_closed_target_observation_cannot_be_used_on_replacement(self):
+        observation = self.snapshot()
+        self.runtime.resolve_target.side_effect = RuntimeFault('TARGET_CLOSED', 'closed')
+        with self.assertRaises(RuntimeFault) as error:
+            self.service.get('a', observation.observation_id, 'replacement')
+        self.assertEqual(error.exception.code, 'TARGET_STALE')
+
+    def test_uia_timeout_falls_back_to_bounded_window_ocr(self):
+        self.runtime.resolve_target.return_value = self.target
+        frame = self.runtime.frames.add(self.target, FrameGeometry((10, 20, 100, 100), (100, 100)))
+        self.runtime.capture_target.return_value = (np.zeros((100, 100, 3), dtype=np.uint8), frame)
+        self.runtime._popup_ocr_worker.call.return_value = [
+            {'text': '日志', 'confidence': 0.8, 'bbox': [100, 200, 400, 400]}]
+        with mock.patch.object(self.service.uia, 'call', side_effect=RuntimeFault('BACKEND_TIMEOUT', 'timeout')):
+            observed = self.service.observe('a', self.target.target_id, image=False)['observation']
+        self.assertEqual(observed['uia_coverage'], 'timeout')
+        self.assertEqual(observed['text'], '日志')
+        self.assertEqual(observed['elements'][0]['source'], 'ocr')
+        self.assertEqual(observed['elements'][0]['raw_text'], '日志')
+        self.assertNotIn('name', observed['elements'][0])
+        self.assertTrue(observed['elements'][0]['ref'].startswith('v'))
+        self.assertEqual(len(observed['frames']), 1)
+        self.assertEqual(self.runtime._popup_ocr_worker.call.call_args.kwargs['timeout'], 3)
+
+    def test_transient_ref_expires_before_dispatch(self):
+        observation = self.snapshot()
+        observation.elements[0].locator['expires_at'] = time.monotonic() - 1
+        with self.assertRaises(RuntimeFault) as error:
+            self.service.element('a', observation.observation_id, self.target.target_id, 'e0')
+        self.assertEqual(error.exception.code, 'REF_STALE')
+
+    def test_explicit_visual_sources_bypass_uia_and_combined_keeps_structured_state(self):
+        self.service.image_budget = 100000
+        self.runtime.resolve_target.return_value = self.target
+        self.runtime.capture_target.side_effect = lambda *args, **kwargs: (
+            np.zeros((100, 100, 3), dtype=np.uint8),
+            self.runtime.frames.add(self.target, FrameGeometry((10, 20, 100, 100), (100, 100))))
+        self.runtime._popup_ocr_worker.call.return_value = [
+            {'text': 'Visible page body', 'confidence': 0.95, 'bbox': [0, 0, 500, 100]}]
+        node = Element('', 'uia', self.target.target_id, None,
+                       {'name': 'Virus', 'role': 'tab', 'selected': True}, {}, (10, 20, 20, 10))
+        with mock.patch.object(self.service.uia, 'call', return_value=([node], 'Virus', {})) as uia:
+            for source in ('ocr', 'image'):
+                observed = self.service.observe('a', self.target.target_id, source=source)['observation']
+                self.assertEqual(observed['uia_coverage'], 'not_requested')
+                self.assertEqual(len(observed['frames']), 1)
+                self.assertEqual(bool(observed['elements']), source == 'ocr')
+            uia.assert_not_called()
+            observed = self.service.observe('a', self.target.target_id, source='combined')['observation']
+            self.assertTrue(observed['elements'][0]['selected'])
+            self.assertIn('Visible page body', observed['text'])
+            self.assertEqual(observed['elements'][1]['source'], 'ocr')
+            self.assertTrue(observed['elements'][1]['semantic_missing'])
+            self.assertEqual(observed['uia_coverage'], 'partial')
+            self.assertEqual(observed['trace']['yolo'], 0)
+            self.assertEqual(uia.call_count, 1)
+        with self.assertRaisesRegex(ValueError, 'target_id'):
+            self.service.validate_arguments({'source': 'ocr'})
+        with self.assertRaisesRegex(ValueError, 'source'):
+            self.service.observe('a', self.target.target_id, source='invalid')
+        with self.assertRaisesRegex(ValueError, 'Cursor'):
+            self.service.observe('a', self.target.target_id, cursor='o.0.0', source='image')
+
+    def test_popup_ocr_filters_existing_text_and_expires_new_candidates(self):
+        self.service.image_budget = 100000
+        geometry = FrameGeometry((10, 20, 100, 100), (100, 100))
+        self.runtime.capture_target.side_effect = [
+            (np.zeros((100, 100, 3), dtype=np.uint8), self.runtime.frames.add(self.target, geometry)),
+            (np.zeros((100, 100, 3), dtype=np.uint8), self.runtime.frames.add(self.target, geometry))]
+        before = self.service.capture_frame('a', self.target.target_id)
+        after = self.service.capture_frame('a', self.target.target_id)
+        existing = {'text': '日志', 'bbox': [100, 100, 300, 200], 'confidence': 0.98}
+        menu = {'text': '病毒查杀日志', 'bbox': [100, 300, 600, 400], 'confidence': 0.96}
+        self.runtime.perceive.side_effect = [[existing], [existing, menu]]
+        self.runtime._popup_ocr_worker.call.side_effect = lambda fn, **kwargs: fn()
+        region = {'x': 0, 'y': 0, 'width': 100, 'height': 100}
+        candidates = self.service.popup_candidates('a', before, after, region)
+        self.assertEqual([item['raw_text'] for item in candidates], ['病毒查杀日志'])
+        self.assertEqual(candidates[0]['ref'], 'p1')
+        self.assertFalse(candidates[0]['appearance_verified'])
+        self.assertEqual(candidates[0]['ttl_ms'], 30000)
+        self.assertEqual(self.runtime._popup_ocr_worker.call.call_args.kwargs['timeout'], 6)
+        self.assertEqual(self.service.element('a', after['observation_id'], self.target.target_id, 'p1')[0].source, 'popup_ocr')
+
     def setUp(self):
         self.runtime = mock.Mock()
         self.runtime.frames = FrameRegistry('fixture')
         self.target = TargetRegistry('fixture').adopt('a', 'window', 1, 42, {'title': 'fixture'})
         self.service = ObservationService(self.runtime, limit=2, ttl=10, image_budget=100)
+
+    def test_evidence_crop_reuses_source_pixels_and_preserves_scaled_geometry(self):
+        import cv2
+
+        self.service.image_budget = 100000
+        geometry = FrameGeometry((-300, 20, 200, 200), (100, 100))
+        self.runtime.resolve_target.return_value = self.target
+        self.runtime.capture_target.return_value = (np.full((100, 100, 3), 230, dtype=np.uint8),
+                                                   self.runtime.frames.add(self.target, geometry))
+        source = self.service.capture_frame('a', self.target.target_id)
+        region = {'x': 10, 'y': 20, 'width': 40, 'height': 30}
+        cropped = self.service.crop_frame('a', source, region)
+        self.assertEqual(self.runtime.capture_target.call_count, 1)
+        self.assertEqual((cropped['width'], cropped['height']), (40, 30))
+        self.assertEqual(cropped['source_frame_id'], source['frame_id'])
+        self.assertFalse(cropped['clickable'])
+        frame = self.runtime.frames.get('a', cropped['frame_id'], self.target)
+        self.assertEqual(frame.geometry.to_screen(0, 0), (-280, 60))
+        pixels = cv2.imdecode(np.frombuffer(self.service.image('a', cropped['frame_id']), np.uint8), cv2.IMREAD_COLOR)
+        self.assertEqual(pixels.shape, (30, 40, 3))
+        with self.assertRaises(RuntimeFault):
+            self.service.image('b', cropped['frame_id'])
+        with self.assertRaises(RuntimeFault):
+            self.service.crop_frame('a', source, {**region, 'width': 200})
+        self.service.release_target('a', self.target.target_id)
+        with self.assertRaises(RuntimeFault):
+            self.service.image('a', cropped['frame_id'])
 
     def snapshot(self, owner='a', image_size=5):
         frame = self.runtime.frames.add(self.target, FrameGeometry((10, 20, 100, 100), (50, 50)))

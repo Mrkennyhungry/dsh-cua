@@ -176,6 +176,25 @@ class CaptureService:
         return CapturedFrame(image, FrameGeometry(source, (image.shape[1], image.shape[0]),
                                                    method=method, **geometry), occluded)
 
+    def capture_region(self, point, *, hwnd, radius=200):
+        """Capture desktop composition around input, including separate popup HWNDs."""
+        geometry = window_geometry(hwnd)
+        x, y = (round(value) for value in point)
+        with _cursor_guard(), mss.mss() as sct:
+            desktop = sct.monitors[0]
+            left = max(desktop['left'], x - radius)
+            top = max(desktop['top'], y - radius)
+            right = min(desktop['left'] + desktop['width'], x + radius)
+            bottom = min(desktop['top'] + desktop['height'], y + radius)
+            if right <= left or bottom <= top:
+                raise RuntimeError('CLICK_OUTSIDE_DESKTOP')
+            region = {'left': left, 'top': top, 'width': right - left, 'height': bottom - top}
+            raw = sct.grab(region)
+        image = cv2.cvtColor(np.array(raw), cv2.COLOR_BGRA2BGR)
+        source = (left, top, right - left, bottom - top)
+        return CapturedFrame(image, FrameGeometry(source, source[2:], crop=(0, 0, *source[2:]),
+                                                   method='screen_region', **geometry), occluded=True)
+
     def capture_desktop(self, *, guard_cursor: bool = True) -> np.ndarray | None:
         """Capture the entire desktop (all monitors combined).
 

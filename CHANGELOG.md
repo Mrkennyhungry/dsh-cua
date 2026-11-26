@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.5.14] - 2026-11-26
+
+### Added
+
+- Add native window activation, topmost, highlight and binding cleanup actions.
+- Add bounded browser CSS query and extraction, and semantic quiet-interval waits.
+
+### Changed
+
+- Preserve dispatched actions when verification or image attachment fails, and provide immediate click frames and bounded local visual evidence.
+- Retry timed-out UIA observations and support bounded OCR fallback, transient OCR candidates, safe target rebinding and window integrity warnings.
+- Attach before/after click-region crops alongside full frames, compare low-contrast local changes and identify local visual reversals from repeated clicks.
+- Add explicit OCR, image and combined observation sources for incomplete native accessibility providers.
+
+### Fixed
+
+- Capture desktop-composited click regions so separately owned popup windows appear in local evidence, and allow validated popup candidate clicks through the target's owner chain.
+
 ## [0.5.13] - 2026-11-26
 
 ### Added

@@ -14,6 +14,21 @@ from dsh_desktop.browser import BrowserRuntime
 
 
 class GeometryTests(unittest.TestCase):
+    def test_screen_region_includes_desktop_composition_and_clips_virtual_edges(self):
+        metadata = {'window_rect': (-100, 20, 100, 80), 'client_rect': (-92, 50, 84, 42),
+                    'dpi': (144, 144), 'virtual_origin': (-2560, 0)}
+        screen = mock.MagicMock()
+        screen.monitors = [{'left': -2560, 'top': 0, 'width': 4480, 'height': 1080}]
+        screen.grab.return_value = np.full((220, 210, 4), 225, dtype=np.uint8)
+        with mock.patch('dsh_desktop.game.capture.window_geometry', return_value=metadata), \
+                mock.patch('dsh_desktop.game.capture.mss.mss') as factory:
+            factory.return_value.__enter__.return_value = screen
+            result = CaptureService().capture_region((-2550, 20), hwnd=42)
+        screen.grab.assert_called_once_with({'left': -2560, 'top': 0, 'width': 210, 'height': 220})
+        self.assertEqual(result.geometry.method, 'screen_region')
+        self.assertEqual(result.geometry.to_screen(0, 0), (-2560, 0))
+        self.assertEqual(result.image.shape, (220, 210, 3))
+
     def test_physical_dpi_crop_scale_and_negative_origin_roundtrip(self):
         for dpi in (96, 144):
             for origin in ((0, 0), (-2560, -400)):
