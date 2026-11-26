@@ -52,6 +52,45 @@ class NativeInputTests(unittest.TestCase):
         ])
 
 
+class ClipboardActionTests(unittest.TestCase):
+    def test_clipboard_set_get_and_file_paste(self):
+        clipboard = mock.Mock()
+        clipboard.CF_UNICODETEXT = 13
+        clipboard.CF_HDROP = 15
+        clipboard.IsClipboardFormatAvailable.return_value = True
+        clipboard.GetClipboardData.return_value = 'hello'
+        clipboard.RegisterClipboardFormat.return_value = 42
+        input_service = mock.Mock()
+        input_service.dispatch_context.return_value = nullcontext()
+        dispatcher = ActionDispatcher(SimpleNamespace(input=input_service))
+        dispatcher._native_guard = mock.Mock()
+        context = mock.Mock()
+        target = SimpleNamespace(kind='window')
+        with mock.patch.dict(sys.modules, {'win32clipboard': clipboard}):
+            result = dispatcher._global_step(context, target, 0, {'action': 'clipboard', 'op': 'set', 'text': 'hello'})
+            self.assertEqual(result['op'], 'set')
+            result = dispatcher._global_step(context, target, 1, {'action': 'clipboard', 'op': 'get'})
+            self.assertEqual(result['text'], 'hello')
+            with tempfile.NamedTemporaryFile() as file:
+                result = dispatcher._global_step(context, target, 2, {'action': 'clipboard', 'op': 'paste_file', 'path': file.name})
+                self.assertEqual(result['op'], 'paste_file')
+                payload = next(call.args[1] for call in clipboard.SetClipboardData.call_args_list if call.args[0] == 15)
+                self.assertEqual(payload[20:].decode('utf-16le'), str(Path(file.name).resolve()) + '\0\0')
+            input_service.hotkey.assert_called_once_with('ctrl', 'v')
+        self.assertEqual(clipboard.CloseClipboard.call_count, 3)
+
+    def test_clipboard_argument_validation(self):
+        base = {'target_id': 'target', 'observation_id': 'observation'}
+        for step in ({'action': 'clipboard', 'op': 'get'},
+                     {'action': 'clipboard', 'op': 'set', 'text': 'hello'}):
+            ActionDispatcher.validate({**base, 'steps': [step]})
+        for step in ({'action': 'clipboard', 'op': 'unknown'},
+                     {'action': 'clipboard', 'op': 'set'},
+                     {'action': 'clipboard', 'op': 'get', 'text': 'unexpected'}):
+            with self.assertRaises(ValueError):
+                ActionDispatcher.validate({**base, 'steps': [step]})
+
+
 class JournalTests(unittest.TestCase):
     def test_restart_retains_completed_and_uncertain_steps_and_owner_identity(self):
         with tempfile.TemporaryDirectory() as directory:

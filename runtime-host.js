@@ -111,13 +111,15 @@ export function registerRuntimeTools(ctx, bridge, register) {
       parameters: {
         target_id: { type: 'string', required: true }, observation_id: { type: 'string', required: true },
         steps: { type: 'array', required: true, description: 'One to eight ordered actions. Input requires mode and text.', items: { type: 'object', additionalProperties: false, properties: {
-          action: { type: 'string', required: true, enum: ['click', 'input', 'key', 'scroll', 'drag', 'select', 'check', 'hover', 'attach', 'close'] },
+          action: { type: 'string', required: true, enum: ['click', 'input', 'key', 'scroll', 'drag', 'select', 'check', 'hover', 'attach', 'close', 'clipboard'] },
           target: { ...point, description: 'Required for click, input, select, check, hover and attach. Use {ref} from this observation, or {frame_id,x,y}. Key and close omit target.' },
           from: point, to: point,
-          text: { type: 'string', description: 'Required for input, at most 12000 characters.' },
+          text: { type: 'string', description: 'Text for input or clipboard set. Input accepts at most 12000 characters.' },
           mode: { type: 'string', enum: ['replace', 'insert'], description: 'Required for input. replace clears the existing value before typing; insert types at the current selection.' },
           button: { type: 'string', enum: ['left', 'right'] }, count: { type: 'integer' },
           keys: { ...strings, description: 'For key actions, provide each key separately. Ctrl+O is ["CTRL", "O"], Ctrl+S is ["CTRL", "S"]. All keys in the array form one shortcut.' },
+          op: { type: 'string', enum: ['get', 'set', 'paste_file'], description: 'Clipboard operation. paste_file places the file on the clipboard and sends Ctrl+V to the selected window.' },
+          path: { type: 'string', description: 'Absolute existing file path for clipboard paste_file.' },
           direction: { type: 'string', enum: ['up', 'down', 'left', 'right'] },
           amount: { type: 'integer' }, values: strings, checked: { type: 'boolean' }, files: strings,
         } } }, expect: { ...condition, properties: {

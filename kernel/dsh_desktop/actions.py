@@ -8,7 +8,7 @@ from .conditions import Conditions, TransientWatcher, validate_condition
 from .targets import RuntimeFault
 
 
-_ACTIONS = {'click', 'input', 'key', 'scroll', 'drag', 'select', 'check', 'hover', 'attach', 'close'}
+_ACTIONS = {'click', 'input', 'key', 'scroll', 'drag', 'select', 'check', 'hover', 'attach', 'close', 'clipboard'}
 _KEY_ALIASES = {'control': 'ctrl', 'esc': 'escape', 'meta': 'win', 'arrowleft': 'left',
                 'arrowright': 'right', 'arrowup': 'up', 'arrowdown': 'down', 'return': 'enter'}
 
@@ -46,7 +46,8 @@ class ActionDispatcher:
         fields = {'click': {'target', 'button', 'count'}, 'input': {'target', 'text', 'mode'},
                   'key': {'keys'}, 'scroll': {'target', 'direction', 'amount'},
                   'drag': {'from', 'to'}, 'select': {'target', 'values'},
-                  'check': {'target', 'checked'}, 'hover': {'target'}, 'attach': {'target', 'files'}, 'close': set()}
+                  'check': {'target', 'checked'}, 'hover': {'target'}, 'attach': {'target', 'files'}, 'close': set(),
+                  'clipboard': {'op', 'text', 'path'}}
         for step in steps:
             if not isinstance(step, dict) or step.get('action') not in _ACTIONS:
                 raise ValueError('Unsupported action')
@@ -66,6 +67,16 @@ class ActionDispatcher:
                 raise ValueError('check requires a boolean checked value')
             if action == 'scroll' and (step.get('direction') not in ('up', 'down', 'left', 'right') or not _integer(step.get('amount', 3), 1, 100)):
                 raise ValueError('scroll requires direction and amount 1..100')
+            if action == 'clipboard':
+                op = step.get('op')
+                if op not in ('get', 'set', 'paste_file'):
+                    raise ValueError('clipboard.op must be get, set or paste_file')
+                if op == 'set' and (not isinstance(step.get('text'), str) or len(step['text']) > 100000):
+                    raise ValueError('clipboard.set requires text up to 100000 characters')
+                if op == 'paste_file' and (not isinstance(step.get('path'), str) or not Path(step['path']).is_absolute() or not Path(step['path']).is_file()):
+                    raise ValueError('clipboard.paste_file requires an existing absolute file path')
+                if set(step) != {'action', 'op'} | ({'text'} if op == 'set' else {'path'} if op == 'paste_file' else set()):
+                    raise ValueError('clipboard fields must match the selected op')
             list_key = {'key': 'keys', 'select': 'values', 'attach': 'files'}.get(action)
             if list_key:
                 values = step.get(list_key)
@@ -319,7 +330,7 @@ class ActionDispatcher:
 
     def _step(self, context, target, oid, index, step):
         action = step['action']
-        if action in ('key', 'close'):
+        if action in ('key', 'close', 'clipboard'):
             return self._global_step(context, target, index, step)
         element = node = None
         try:
@@ -559,6 +570,38 @@ class ActionDispatcher:
             raise RuntimeFault('TARGET_OCCLUDED', 'Physical point is covered by another window')
 
     def _global_step(self, context, target, index, step):
+        if step['action'] == 'clipboard':
+            import struct
+            import win32clipboard
+
+            op = step['op']
+            if op == 'paste_file':
+                if target.kind != 'window':
+                    raise RuntimeFault('UNSUPPORTED_ACTION', 'File paste requires a selected native window')
+                self._native_guard(context, target)
+            context.dispatch(index)
+            win32clipboard.OpenClipboard()
+            try:
+                if op == 'get':
+                    text = (win32clipboard.GetClipboardData(win32clipboard.CF_UNICODETEXT)
+                            if win32clipboard.IsClipboardFormatAvailable(win32clipboard.CF_UNICODETEXT) else None)
+                    return {'action': 'clipboard', 'op': op, 'text': text}
+                win32clipboard.EmptyClipboard()
+                if op == 'set':
+                    win32clipboard.SetClipboardData(win32clipboard.CF_UNICODETEXT, step['text'])
+                else:
+                    payload = struct.pack('<IiiII', 20, 0, 0, 0, 1)
+                    payload += (str(Path(step['path']).resolve()) + '\0\0').encode('utf-16le')
+                    win32clipboard.SetClipboardData(win32clipboard.CF_HDROP, payload)
+                    drop_effect = win32clipboard.RegisterClipboardFormat('Preferred DropEffect')
+                    win32clipboard.SetClipboardData(drop_effect, struct.pack('<I', 1))
+            finally:
+                win32clipboard.CloseClipboard()
+            if op == 'paste_file':
+                with self.runtime.input.dispatch_context(lambda: self._native_guard(context, target)):
+                    self._native_guard(context, target)
+                    self._sent(self.runtime.input.hotkey('ctrl', 'v'))
+            return {'action': 'clipboard', 'op': op}
         if step['action'] == 'close':
             if target.kind == 'desktop':
                 raise RuntimeFault('UNSUPPORTED_ACTION', 'Select a window or tab to close')

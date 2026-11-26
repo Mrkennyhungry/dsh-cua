@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.5.10] - 2026-11-26
+
+### Added
+
+- Add clipboard text and native file paste operations to the unified action tool.
+
 ## [0.5.9] - 2026-11-26
 
 ### Changed
